@@ -25,12 +25,16 @@ export function isValidPayload(kind, payload) {
 }
 
 // Returns { ok: true, message } or { ok: false, reason }. The caller has already checked that
-// event.source is the piece iframe; this checks type, shape and size.
-export function parseBridgeMessage(data, kind) {
+// event.source is the piece iframe; this checks the per-mount nonce (so a page the iframe navigated
+// to cannot speak for the piece), then type, shape and size.
+export function parseBridgeMessage(data, kind, nonce) {
   const no = (reason) => ({ ok: false, reason });
   if (!isPlainObject(data) || typeof data.type !== "string") return no("shape");
+  if (typeof nonce !== "string" || !nonce || data.nonce !== nonce) return no("nonce");
   if (byteLength(data) >= MAX_MESSAGE_BYTES) return no("too-large");
   switch (data.type) {
+    case "factory:dirty":
+      return { ok: true, message: { type: data.type } };
     case "factory:ready":
       if (typeof data.persistence !== "boolean" || typeof data.canSubmit !== "boolean") return no("shape");
       return { ok: true, message: { type: data.type, persistence: data.persistence, canSubmit: data.canSubmit } };
@@ -63,6 +67,7 @@ export function createDraftSaver({ save, onStatus, retryDelays = [3000, 10000, 3
   let retryTimer = null;
   let failures = 0;
   let disposed = false;
+  let pending = false;     // the piece changed something and its draft is on the way
   const waiters = [];
 
   const settle = () => {
@@ -98,7 +103,14 @@ export function createDraftSaver({ save, onStatus, retryDelays = [3000, 10000, 3
   }
 
   return {
+    // Called as soon as the piece reports a change, before its debounced draft arrives.
+    markPending() {
+      if (pending) return;
+      pending = true;
+      onStatus("saving");
+    },
     push(storage) {
+      pending = false;
       latest = storage;
       if (retryTimer) return; // the scheduled retry will send it
       run();
@@ -107,7 +119,7 @@ export function createDraftSaver({ save, onStatus, retryDelays = [3000, 10000, 3
       if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
       run();
     },
-    hasUnsaved() { return Boolean(latest || inflight); },
+    hasUnsaved() { return Boolean(pending || latest || inflight); },
     // Resolves when nothing is pending (a scheduled retry counts as pending).
     idle() {
       if (!inflight && !latest && !retryTimer) return Promise.resolve();
@@ -120,4 +132,17 @@ export function createDraftSaver({ save, onStatus, retryDelays = [3000, 10000, 3
       while (waiters.length) waiters.shift()();
     },
   };
+}
+
+// Retries every saver now and waits up to timeoutMs. True when nothing is left unsaved.
+export async function trySaveAll(savers, timeoutMs) {
+  const list = [...savers];
+  for (const saver of list) saver.retryNow();
+  let timer;
+  await Promise.race([
+    Promise.all(list.map((saver) => saver.idle())),
+    new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
+  ]);
+  clearTimeout(timer);
+  return !list.some((saver) => saver.hasUnsaved());
 }

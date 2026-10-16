@@ -206,6 +206,31 @@ async function questionsChecks(browser, base, html) {
   const afterFlush = await events(page, "draft");
   check("questions: flush sends the pending draft immediately", flushed === true && afterFlush.length >= 1);
 
+  // A change is announced at once (no content), before the 800 ms debounced draft.
+  const before = { dirty: (await events(page, "dirty")).length, drafts: (await events(page, "draft")).length };
+  await pieceFrame(page).evaluate(() => responder("Q-004", "si"));
+  await sleep(150);
+  const soon = { dirty: (await events(page, "dirty")).length, drafts: (await events(page, "draft")).length };
+  check("questions: factory:dirty arrives before the debounced draft", soon.dirty === before.dirty + 1 && soon.drafts === before.drafts, JSON.stringify({ before, soon }));
+
+  // If the iframe navigates away, the new page cannot speak for the piece.
+  await context.route("**/__forged__", (route) => route.fulfill({ contentType: "text/html", body:
+    `<script>
+      parent.postMessage({ type: "factory:submit", requestId: "req-1", nonce: "guess",
+        payload: { formato: "respuestas-fabrica/1", proyecto: "x", respuestas: [] } }, "*");
+      parent.postMessage({ type: "factory:draft", storage: { forged: "yes" } }, "*");
+    </script>` }));
+  await pieceFrame(page).evaluate((url) => { location.href = url; }, `${base}/__forged__`);
+  const navigated = await waitFor(async () => (await events(page, "navigated")).length > 0, 5000);
+  await sleep(300);
+  const forgedSubmit = (await events(page, "submit")).length;
+  const forgedDraft = (await events(page, "draft")).some((d) => d.forged);
+  const rejected = (await events(page, "rejected")).length;
+  const iframeGone = await page.evaluate(() => !document.querySelector("iframe.piece-frame"));
+  check("questions: navigating away destroys the iframe and notifies", navigated && iframeGone);
+  check("questions: forged factory:submit/draft without the nonce are rejected", forgedSubmit === 0 && !forgedDraft,
+    `submits ${forgedSubmit}, forged draft ${forgedDraft}, rejected ${rejected}`);
+
   check("questions: no page errors in harness", errors.length === 0, errors.join(" | "));
   await context.close();
 }
@@ -271,7 +296,8 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
     const url = new URL(request.url());
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     backend.requests.push(`${request.method()} ${url.pathname}${url.search}`);
-    if (url.pathname.startsWith("/auth/v1/")) return url.pathname.endsWith("/logout") ? route.fulfill({ status: 204 }) : json(fakeSession().user);
+    if (url.pathname.endsWith("/logout")) return backend.logoutFails ? route.abort("internetdisconnected") : route.fulfill({ status: 204 });
+    if (url.pathname.startsWith("/auth/v1/")) return json(fakeSession().user);
     const table = url.pathname.replace("/rest/v1/", "");
     const select = url.searchParams.get("select") || "";
     switch (table) {
@@ -289,7 +315,14 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
       }
       case "piece_drafts": return json(backend.draft ? [{ storage: backend.draft, updated_at: new Date().toISOString() }] : []);
       case "piece_responses": return json(backend.submits.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
-      case "rpc/save_draft": backend.drafts.push(request.postDataJSON()); backend.draft = request.postDataJSON().p_storage; return route.fulfill({ status: 204 });
+      case "rpc/save_draft": {
+        if (backend.saveFails) return route.abort("internetdisconnected");
+        const body = request.postDataJSON();
+        backend.drafts.push(body);
+        if (backend.saveDelayMs) await sleep(backend.saveDelayMs);
+        backend.draft = body.p_storage; // the server copy changes only when the save completes
+        return route.fulfill({ status: 204 });
+      }
       case "rpc/submit_response":
         if (backend.submitFails) return json({ code: "P0001", message: "boom", details: null, hint: null }, 400);
         backend.submits.push(request.postDataJSON()); backend.submittedAt = new Date().toISOString();
@@ -303,6 +336,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
 function newBackend(html, flowHtml) {
   const backend = {
     requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitFails: false,
+    saveFails: false, saveDelayMs: 0, logoutFails: false,
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
@@ -417,6 +451,43 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   const reopened = await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function" && respondidas()).catch(() => 0)); }, 8000);
   check("app: reopening restores the answers from piece_drafts", reopened === 2, String(reopened));
+
+  // Reopen while the save is still in flight: the tab's newest copy must win over the old server copy.
+  backend.saveDelayMs = 2500;
+  const savesBefore = backend.drafts.length;
+  await pieceFrame(page).evaluate(() => { responder("Q-004", "cambio"); escribir("Q-004", "texto", "carrera"); });
+  await waitFor(async () => backend.drafts.length > savesBefore, 5000);
+  await page.click(".back-link");
+  await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+  await page.click(`a[href="#/piece/${IDS.questions}"]`);
+  const raced = await waitFor(async () => {
+    const f = pieceFrame(page);
+    return f && (await f.evaluate(() => typeof ST === "object" && ST.respuestas["Q-004"] ? ST.respuestas["Q-004"].texto : null).catch(() => null));
+  }, 10000);
+  check("app: reopening during an in-flight save keeps the newest answers", raced === "carrera", String(raced));
+  backend.saveDelayMs = 0;
+
+  // Sign out offline with unsaved changes: ask in the page; confirming lands on a clean sign-in.
+  backend.saveFails = true;
+  backend.logoutFails = true;
+  await pieceFrame(page).evaluate(() => responder("Q-001", "no_se"));
+  await page.click(".back-link");
+  await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 });
+  await page.click(".masthead .button--secondary");
+  const ask = await waitFor(async () => page.evaluate(() => {
+    const n = document.querySelector("[data-rol=avisos] .notice");
+    return n && n.textContent.includes("se perderán") ? { h1: document.querySelector("h1").textContent, text: n.textContent } : null;
+  }), 10000);
+  check("app: sign-out with unsaved changes asks before losing them", ask && ask.h1 === "Lo que te compartimos", ask ? ask.text : "no notice");
+  const stillSignedIn = await page.evaluate((k) => Boolean(localStorage.getItem(k)), STORAGE_KEY);
+  check("app: nothing is discarded until the person confirms", stillSignedIn && !(await page.$("#email")));
+  await page.click("text=Salir y perder los cambios");
+  const signedOut = await waitFor(async () => page.evaluate((k) => {
+    const notice = document.querySelector("[data-rol=avisos] .notice");
+    return document.querySelector("#email") ? { session: localStorage.getItem(k), notice: notice && notice.textContent } : null;
+  }, STORAGE_KEY), 10000);
+  check("app: offline sign-out still lands on a clean sign-in screen", signedOut && !signedOut.session && signedOut.notice && signedOut.notice.includes("You signed out on this device"), // sign-in follows the browser (en-US here)
+    signedOut ? JSON.stringify(signedOut) : "no sign-in screen");
 
   check("app: no page errors after the forced failure", pageErrors.length === 0, pageErrors.join(" | "));
   await context.close();

@@ -14,6 +14,10 @@
 //    `{ type: "factory:draft", storage }` to the parent, debounced. `sessionStorage` gets the same
 //    shim without persistence (session semantics).
 //
+//    The first change after each draft also posts `{ type: "factory:dirty" }` at once, so the
+//    parent knows there is unsaved work during the debounce. Every message carries a per-mount
+//    nonce, and the bridge ignores parent messages without it.
+//
 // 2. Submit: when the parent asks (`factory:collect`), the bridge arms a one-shot capture, calls
 //    the piece's own export function (the one behind its "Download" button), intercepts the JSON
 //    Blob that the function hands to a temporary `<a download>` (by wrapping
@@ -35,11 +39,14 @@ function bridgeRuntime(cfg) {
   "use strict";
   var parentOrigin = cfg.parentOrigin;
   var kind = cfg.kind;
+  var nonce = cfg.nonce;
   var debounceMs = cfg.debounceMs;
   var quota = cfg.quotaChars;
   var hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
 
+  // Every message carries this mount's nonce; a page the iframe navigates to never sees it.
   function post(message) {
+    message.nonce = nonce;
     try { window.parent.postMessage(message, parentOrigin); } catch (e) { /* parent gone */ }
   }
 
@@ -115,6 +122,9 @@ function bridgeRuntime(cfg) {
   var timer = null;
   var dirty = false;
   var local = makeStorage(cfg.storage, function () {
+    // Tell the parent right away (without the content) so it knows there is unsaved work
+    // during the debounce, e.g. for its beforeunload warning.
+    if (!dirty) post({ type: "factory:dirty" });
     dirty = true;
     if (timer) clearTimeout(timer);
     timer = setTimeout(sendDraft, debounceMs);
@@ -240,7 +250,7 @@ function bridgeRuntime(cfg) {
   window.addEventListener("message", function (event) {
     if (event.source !== window.parent || event.origin !== parentOrigin) return;
     var data = event.data;
-    if (!data || typeof data !== "object") return;
+    if (!data || typeof data !== "object" || data.nonce !== nonce) return;
     if (data.type === "factory:flush") { sendDraft(); post({ type: "factory:flushed" }); }
     else if (data.type === "factory:collect" && typeof data.requestId === "string") collect(data.requestId);
   });
@@ -276,10 +286,12 @@ function cleanStorage(storage) {
   return out;
 }
 
-export function buildBridgeScript({ parentOrigin, kind, storage }) {
+export function buildBridgeScript({ parentOrigin, kind, storage, nonce }) {
+  if (typeof nonce !== "string" || !nonce) throw new Error("buildBridgeScript needs a nonce");
   const cfg = {
     parentOrigin: String(parentOrigin),
     kind: String(kind),
+    nonce,
     storage: cleanStorage(storage),
     debounceMs: DRAFT_DEBOUNCE_MS,
     quotaChars: STORAGE_QUOTA_CHARS,

@@ -5,7 +5,7 @@ import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
 import { loadSharedWithMe, loadPiece, saveDraft, submitResponse, isAuthExpired } from "./api.js";
-import { createDraftSaver } from "./host.js";
+import { createDraftSaver, trySaveAll } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
 
 const root = document.getElementById("app");
@@ -16,6 +16,8 @@ const PENDING_SIGN_IN_TTL_MS = 60 * 60 * 1000; // a code is useless after an hou
 const RESEND_SECONDS = 60; // Supabase allows one email per 60 s
 const SUBMIT_TIMEOUT_MS = 45000; // the piece may be waiting on its own confirm() or prompt()
 const LEAVE_FLUSH_MS = 1000;
+const SIGN_OUT_SAVE_MS = 4000;
+const REOPEN_SAVE_WAIT_MS = 3000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIECE_ROUTE = /^#\/piece\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
@@ -302,23 +304,42 @@ function disposeSavers() {
   state.localDrafts.clear();
 }
 
+// Signing out never drops unsaved drafts silently: it first tries to save them, and if that is not
+// possible (offline) it asks in the page before discarding them.
 async function signOut(notices) {
   if (state.signingOut) return;
   state.signingOut = true;
-  await Promise.race([Promise.all([...state.savers.values()].map((s) => s.idle())), sleep(3000)]);
+  const saved = await trySaveAll(state.savers.values(), SIGN_OUT_SAVE_MS);
+  state.signingOut = false;
+  if (!saved) {
+    showNotice(notices, {
+      tone: "warning", text: t("unsavedSignOut"), dismissible: false,
+      actions: [
+        { label: t("signOutAnyway"), onClick: finishSignOut },
+        { label: t("stay"), onClick: () => clearNotice(notices) },
+      ],
+    });
+    return;
+  }
+  finishSignOut();
+}
+
+// With scope "local", auth-js removes the session (and emits SIGNED_OUT) even when the network
+// call fails, so the person always lands on a clean sign-in screen.
+async function finishSignOut() {
+  if (state.signingOut) return;
+  state.signingOut = true;
   let error = null;
   try { ({ error } = await supabase.auth.signOut({ scope: "local" })); } catch (err) { error = err; }
   state.signingOut = false;
-  // Offline, supabase-js keeps the session; say so instead of pretending we signed out.
-  if (error && isNetworkError(error)) {
-    if (notices) showNotice(notices, { tone: "error", text: t("networkError") });
-    return;
-  }
   state.session = null;
   disposeSavers();
   clearPendingSignIn();
   history.replaceState(null, "", `${location.pathname}${location.search}`);
-  route();
+  state.viewId += 1;
+  if (state.cleanup) { const cleanup = state.cleanup; state.cleanup = null; cleanup(); }
+  const offline = error && isNetworkError(error);
+  showSignIn({ notice: offline ? () => ({ tone: "info", text: t("signedOutOffline") }) : undefined });
 }
 
 function sessionEnded() {
@@ -447,6 +468,9 @@ async function showPiece(pieceId, viewId) {
   };
   setTitle(t("opening"));
   let layout = pieceLayout(t("opening"));
+  // A save of this piece may still be in flight; let it land before reading the server copy.
+  if (state.savers.has(pieceId)) await Promise.race([state.savers.get(pieceId).idle(), sleep(REOPEN_SAVE_WAIT_MS)]);
+  if (viewId !== state.viewId) return;
 
   let context;
   try {
@@ -496,8 +520,8 @@ async function showPiece(pieceId, viewId) {
     render();
   });
 
-  // Unsaved local data from this tab is newer than the server copy.
-  const seed = saver.hasUnsaved() && state.localDrafts.has(pieceId) ? state.localDrafts.get(pieceId) : context.draftStorage;
+  // The newest storage this tab saw is never older than the server copy it sent, so it wins.
+  const seed = state.localDrafts.has(pieceId) ? state.localDrafts.get(pieceId) : context.draftStorage;
 
   async function onSubmit({ requestId, payload }) {
     if (requestId !== currentRequest || handled.has(requestId)) return;
@@ -536,7 +560,7 @@ async function showPiece(pieceId, viewId) {
   }
 
   submit.addEventListener("click", () => {
-    if (submitting) return;
+    if (submitting || !frame) return;
     submitting = true;
     render();
     clearNotice(notices);
@@ -554,7 +578,13 @@ async function showPiece(pieceId, viewId) {
   frame = mountPiece({
     container: main, html: piece.html, kind: piece.kind, storage: seed, title: pieceTitle,
     onReady: (ready) => { if (!ready.persistence) showNotice(notices, { tone: "warning", text: t("noPersistence") }); },
+    onDirty: () => saver.markPending(),
     onDraft: (storage) => { state.localDrafts.set(pieceId, storage); saver.push(storage); },
+    onNavigatedAway: () => {
+      frame = null;
+      submit.hidden = true;
+      showNotice(notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });
+    },
     onSubmit,
     onSubmitError,
   });

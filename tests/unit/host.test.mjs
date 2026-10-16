@@ -1,43 +1,44 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseBridgeMessage, isValidPayload, createDraftSaver, MAX_MESSAGE_BYTES } from "../../js/host.js";
+import { parseBridgeMessage, isValidPayload, createDraftSaver, trySaveAll, MAX_MESSAGE_BYTES } from "../../js/host.js";
 
+const N = "nonce-1";
 const questionsPayload = { formato: "respuestas-fabrica/1", proyecto: "portal-test", respuestas: [] };
 const flowPayload = { proyecto: "portal-test", artefacto: "ux-flows.md", flujos: [] };
 
 test("parseBridgeMessage rejects unknown or malformed messages", () => {
   for (const data of [null, "x", 1, [], {}, { type: 1 }, { type: "factory:nope" }]) {
-    assert.equal(parseBridgeMessage(data, "questions").ok, false, JSON.stringify(data));
+    assert.equal(parseBridgeMessage(data, "questions", N).ok, false, JSON.stringify(data));
   }
 });
 
 test("parseBridgeMessage accepts a draft of string values only", () => {
-  assert.equal(parseBridgeMessage({ type: "factory:draft", storage: { a: "1" } }, "questions").ok, true);
-  assert.equal(parseBridgeMessage({ type: "factory:draft", storage: { a: 1 } }, "questions").ok, false);
-  assert.equal(parseBridgeMessage({ type: "factory:draft", storage: ["a"] }, "questions").ok, false);
-  assert.equal(parseBridgeMessage({ type: "factory:draft" }, "questions").ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:draft", storage: { a: "1" } }, "questions", N).ok, true);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:draft", storage: { a: 1 } }, "questions", N).ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:draft", storage: ["a"] }, "questions", N).ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:draft" }, "questions", N).ok, false);
 });
 
 test("parseBridgeMessage rejects messages of 1 MB or more", () => {
   const big = "x".repeat(MAX_MESSAGE_BYTES);
-  assert.equal(parseBridgeMessage({ type: "factory:draft", storage: { a: big } }, "questions").ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:draft", storage: { a: big } }, "questions", N).ok, false);
   const payload = { ...questionsPayload, extra: big };
-  assert.equal(parseBridgeMessage({ type: "factory:submit", requestId: "r1", payload }, "questions").ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit", requestId: "r1", payload }, "questions", N).ok, false);
 });
 
 test("parseBridgeMessage checks the submit payload shape for the piece kind", () => {
-  assert.equal(parseBridgeMessage({ type: "factory:submit", requestId: "r1", payload: questionsPayload }, "questions").ok, true);
-  assert.equal(parseBridgeMessage({ type: "factory:submit", requestId: "r1", payload: flowPayload }, "questions").ok, false);
-  assert.equal(parseBridgeMessage({ type: "factory:submit", requestId: "r1", payload: flowPayload }, "flow_review").ok, true);
-  assert.equal(parseBridgeMessage({ type: "factory:submit", payload: questionsPayload }, "questions").ok, false, "needs requestId");
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit", requestId: "r1", payload: questionsPayload }, "questions", N).ok, true);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit", requestId: "r1", payload: flowPayload }, "questions", N).ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit", requestId: "r1", payload: flowPayload }, "flow_review", N).ok, true);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit", payload: questionsPayload }, "questions", N).ok, false, "needs requestId");
 });
 
 test("parseBridgeMessage validates ready, flushed and submit-error", () => {
-  assert.equal(parseBridgeMessage({ type: "factory:ready", persistence: true, canSubmit: false }, "questions").ok, true);
-  assert.equal(parseBridgeMessage({ type: "factory:ready", persistence: "yes" }, "questions").ok, false);
-  assert.equal(parseBridgeMessage({ type: "factory:flushed" }, "questions").ok, true);
-  assert.equal(parseBridgeMessage({ type: "factory:submit-error", requestId: "r", reason: "empty" }, "questions").ok, true);
-  assert.equal(parseBridgeMessage({ type: "factory:submit-error", requestId: "r", reason: "whatever" }, "questions").ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:ready", persistence: true, canSubmit: false }, "questions", N).ok, true);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:ready", persistence: "yes" }, "questions", N).ok, false);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:flushed" }, "questions", N).ok, true);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit-error", requestId: "r", reason: "empty" }, "questions", N).ok, true);
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit-error", requestId: "r", reason: "whatever" }, "questions", N).ok, false);
 });
 
 test("isValidPayload rejects unknown kinds", () => {
@@ -101,5 +102,39 @@ test("draft saver keeps unsaved data on failure and retries", async () => {
   assert.equal(saver.hasUnsaved(), false);
   assert.equal(statuses.at(-1), "saved");
   assert.ok(calls.length >= 2);
+  saver.dispose();
+});
+
+test("parseBridgeMessage requires the nonce of the mounted piece", () => {
+  const draft = { type: "factory:draft", storage: { a: "1" } };
+  assert.equal(parseBridgeMessage({ ...draft, nonce: N }, "questions", N).ok, true);
+  assert.equal(parseBridgeMessage(draft, "questions", N).ok, false, "missing nonce");
+  assert.equal(parseBridgeMessage({ ...draft, nonce: "other" }, "questions", N).ok, false, "wrong nonce");
+  assert.equal(parseBridgeMessage({ ...draft, nonce: undefined }, "questions", undefined).ok, false, "no expected nonce");
+});
+
+test("parseBridgeMessage accepts factory:dirty", () => {
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:dirty" }, "questions", N).ok, true);
+});
+
+test("markPending counts as unsaved until the draft arrives and is saved", async () => {
+  const statuses = [];
+  const saver = createDraftSaver({ save: async () => {}, onStatus: (s) => statuses.push(s), retryDelays: [10] });
+  saver.markPending();
+  assert.equal(saver.hasUnsaved(), true);
+  assert.equal(statuses.at(-1), "saving");
+  saver.push({ a: "1" });
+  await saver.idle();
+  assert.equal(saver.hasUnsaved(), false);
+});
+
+test("trySaveAll reports whether every saver could save", async () => {
+  let online = false;
+  const saver = createDraftSaver({ save: async () => { if (!online) throw new Error("offline"); }, onStatus: () => {}, retryDelays: [1000] });
+  saver.push({ a: "1" });
+  assert.equal(await trySaveAll([saver], 50), false, "offline: cannot save");
+  online = true;
+  assert.equal(await trySaveAll([saver], 500), true, "back online: saved");
+  assert.equal(await trySaveAll([], 50), true, "nothing to save");
   saver.dispose();
 });

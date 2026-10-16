@@ -37,12 +37,12 @@ const harness = {
     harness.events = [];
     const record = (type) => (detail) => {
       harness.events.push({ type, detail });
-      last.textContent = `${type}: ${JSON.stringify(detail).slice(0, 200)}`;
+      last.textContent = `${type}: ${String(JSON.stringify(detail ?? null)).slice(0, 200)}`;
     };
     frame = mountPiece({
       container: stage, html, kind, storage, title: "Piece under test",
-      onReady: record("ready"), onDraft: record("draft"), onSubmit: record("submit"),
-      onSubmitError: record("submit-error"), onRejected: record("rejected"),
+      onReady: record("ready"), onDirty: record("dirty"), onDraft: record("draft"), onSubmit: record("submit"),
+      onSubmitError: record("submit-error"), onRejected: record("rejected"), onNavigatedAway: record("navigated"),
     });
     return frame;
   },

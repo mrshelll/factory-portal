@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { serializeForScript, buildBridgeScript, injectBridge } from "../../js/bridge.js";
 
-const config = { parentOrigin: "https://example.test", kind: "questions", storage: {} };
+const config = { parentOrigin: "https://example.test", kind: "questions", storage: {}, nonce: "abc123" };
 
 test("serializeForScript escapes sequences that could close or comment out the script", () => {
   const out = serializeForScript({ a: "</script><!-- & \u2028\u2029 >" });
@@ -60,4 +60,9 @@ test("injectBridge drops non-string seed values and non-object seeds", () => {
   assert.ok(!out.includes('"nested"'));
   const arr = injectBridge("<head></head>", { ...config, storage: ["x"] });
   assert.ok(arr.includes('"storage":{}'));
+});
+
+test("buildBridgeScript embeds the nonce and refuses to build without one", () => {
+  assert.ok(buildBridgeScript(config).includes('"nonce":"abc123"'));
+  assert.throws(() => buildBridgeScript({ ...config, nonce: "" }));
 });
