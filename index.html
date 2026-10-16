@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Portal</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/portal.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div id="app">
+  <noscript><main class="frame"><p>Esta página necesita JavaScript. · This page needs JavaScript.</p></main></noscript>
+</div>
+<script>
+  // If the app could not load (offline, CDN down), say so instead of leaving a blank page.
+  setTimeout(function () {
+    if (document.documentElement.dataset.ready === "true") return;
+    var es = !/^en\b/i.test(navigator.language || "");
+    var main = document.createElement("main");
+    main.className = "frame";
+    main.style.paddingBlock = "32px";
+    var p = document.createElement("p");
+    p.textContent = es ? "No pudimos cargar la página. Revisa tu conexión y vuelve a intentarlo."
+                       : "We couldn't load the page. Check your connection and try again.";
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "button button--primary";
+    b.style.marginTop = "16px";
+    b.textContent = es ? "Volver a cargar" : "Reload";
+    b.onclick = function () { location.reload(); };
+    main.append(p, b);
+    document.getElementById("app").replaceChildren(main);
+  }, 10000);
+</script>
+</body>
+</html>
