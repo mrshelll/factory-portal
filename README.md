@@ -51,8 +51,10 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   from `piece_drafts.storage`, using `Object.defineProperty(window, "localStorage", { value, configurable: true })`
   (on `Window` the property is configurable, so the bare identifier `localStorage` then resolves to
   the shim). It checks that the replacement took and reports it to the portal (`factory:ready`,
-  `persistence`); if it did not, the portal warns that progress will not be kept. Each change posts
-  `{ type: "factory:draft", storage }` to the portal after 800 ms of quiet; the portal calls
+  `persistence`); if it did not, the portal warns that progress will not be kept. The first change
+  posts `{ type: "factory:dirty" }` at once (no content), so the portal knows there is unsaved work
+  and warns before the page closes; the full `{ type: "factory:draft", storage }` follows after
+  800 ms of quiet; the portal calls
   `save_draft` (one request at a time, newest data wins, retries when offline). The draft is also
   flushed when the person leaves the piece or the page is hidden. `sessionStorage` gets the same
   shim without persistence.
@@ -64,13 +66,20 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   listener), cancels that download and posts `{ type: "factory:submit", payload }`. The portal calls
   `submit_response`. Outside a capture, downloads work as usual, so the piece's own download button
   remains a fallback.
-- **Messages.** The portal only accepts messages whose `event.source` is the piece iframe, with a
-  known type, the expected shape and under 1 MB. The bridge only posts to the portal's origin and only
-  accepts messages from its parent.
+- **Messages.** Each mounted piece gets a random nonce (`crypto.getRandomValues`) inside its
+  injected config. The portal only accepts messages whose `event.source` is the piece iframe and that
+  carry that nonce, with a known type, the expected shape and under 1 MB. The bridge only posts to the
+  portal's origin and only accepts messages from its parent with the nonce. If the iframe loads a
+  second document (the piece navigated away or reloaded), the portal removes it and offers to reopen.
 
 Fragility: the capture depends on the piece templates keeping those global function names and
 exporting through a `Blob` + `<a download>`. If a template changes that, the bridge reports
 `unsupported` and the person is told to use the download button inside the piece.
+
+Reopening a piece waits briefly for a save still in flight and always starts from the newest copy
+seen in the tab. Signing out first tries to save pending drafts; if that is not possible (offline),
+the page asks before discarding them. Sign-out always ends on a clean sign-in screen: with scope
+`local`, supabase-js removes the local session even when the network call fails.
 
 ## Tests
 
