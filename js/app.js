@@ -1,6 +1,7 @@
 // Portal entry point: session, hash router and the three screens (sign in, home, piece).
 
 import { supabase } from "./supabase-client.js";
+import { EMAIL_OTP_LENGTH } from "../config.js";
 import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
@@ -127,7 +128,7 @@ async function requestCode(email) {
 function stepsSection() {
   return h("section", { class: "section", "aria-labelledby": "steps-title" },
     h("h2", { id: "steps-title" }, t("stepsTitle")),
-    h("ol", { class: "steps" }, h("li", {}, t("step1")), h("li", {}, t("step2")), h("li", {}, t("step3"))));
+    h("ol", { class: "steps" }, h("li", {}, t("step1")), h("li", {}, t("step2", { length: EMAIL_OTP_LENGTH })), h("li", {}, t("step3"))));
 }
 
 // The sign-in screens keep the same composition: the form, then how it works.
@@ -201,7 +202,7 @@ function showEmailStep(prefill = "", { notice } = {}) {
 function showCodeStep(pending, { notice } = {}) {
   state.view = "sign-in";
   setTitle(t("codeTitle"));
-  const { notices, body, live } = frameLayout({ title: t("codeTitle"), meta: [t("codeSentTo", { email: pending.email })] });
+  const { notices, body, live } = frameLayout({ title: t("codeTitle"), meta: [t("codeSentTo", { email: pending.email, length: EMAIL_OTP_LENGTH })] });
   if (notice) showNotice(notices, notice());
   const input = h("input", {
     id: "code", name: "code", type: "text", inputmode: "numeric", autocomplete: "one-time-code",
@@ -232,7 +233,7 @@ function showCodeStep(pending, { notice } = {}) {
     if (event) event.preventDefault();
     if (busy) return;
     const token = input.value.replace(/\D/g, "");
-    if (token.length !== 6) return setFieldError(input, error, t("codeIncomplete"));
+    if (token.length !== EMAIL_OTP_LENGTH) return setFieldError(input, error, t("codeIncomplete", { length: EMAIL_OTP_LENGTH }));
     busy = true;
     button.textContent = t("verifying");
     clearNotice(notices);
@@ -253,10 +254,10 @@ function showCodeStep(pending, { notice } = {}) {
   }
 
   input.addEventListener("input", () => {
-    const digits = input.value.replace(/\D/g, "").slice(0, 6);
+    const digits = input.value.replace(/\D/g, "").slice(0, EMAIL_OTP_LENGTH);
     if (digits !== input.value) input.value = digits;
     if (!error.hidden) setFieldError(input, error, "");
-    if (digits.length === 6) verify();
+    if (digits.length === EMAIL_OTP_LENGTH) verify();
   });
 
   resendButton.addEventListener("click", async () => {
@@ -290,7 +291,7 @@ function showCodeStep(pending, { notice } = {}) {
   });
 
   signInBody(body, h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: verify },
-    h("div", { class: "field" }, h("label", { for: "code" }, t("codeLabel")), input, error),
+    h("div", { class: "field" }, h("label", { for: "code" }, t("codeLabel", { length: EMAIL_OTP_LENGTH })), input, error),
     button,
     h("div", { class: "secondary-actions" }, resendStatus, resendButton, otherEmail)));
   input.focus();
