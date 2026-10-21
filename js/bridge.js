@@ -18,31 +18,38 @@
 //    parent knows there is unsaved work during the debounce. Every message carries a per-mount
 //    nonce, and the bridge ignores parent messages without it.
 //
-// 2. Submit: when the parent asks (`factory:collect`), the bridge arms a one-shot capture, calls
-//    the piece's own export function (the one behind its "Download" button), intercepts the JSON
-//    Blob that the function hands to a temporary `<a download>` (by wrapping
-//    `URL.createObjectURL` and `HTMLAnchorElement.prototype.click`, plus a capture-phase click
-//    listener), suppresses that download, and posts `{ type: "factory:submit", payload }`.
-//    Outside a capture, downloads behave as usual, so the piece's own "Download" stays as a
-//    fallback.
+// 2. Submit: defines `globalThis.factorySubmit(payload)`, the piece's single way to send. It checks
+//    the payload against the shape of the piece kind, flushes the pending draft, posts
+//    `{ type: "factory:submit", requestId, payload }` and resolves with the parent's
+//    `{ type: "factory:submit-result", requestId, ok, error? }`: `{ ok: true }` only after the
+//    server saved, `{ ok: false, error }` otherwise ("invalid", "too-large", "timeout", "network",
+//    "session-expired", "rejected"). A second call while one is in flight returns the same
+//    promise. Downloads are not touched, so the piece's own "Download a copy" works as usual.
+//
+// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName }`.
+//    `persistence` is "server" when the localStorage shim took, "none" otherwise.
 //
 // `bridgeRuntime` is serialized with Function.prototype.toString, so it must stay self-contained
 // (no references to module scope) and must never contain the character sequences "</script" or
 // "<!--" (the unit tests check the built script).
 
+import { PAYLOAD_SHAPES, SUBMIT_ERRORS } from "./host.js";
+
 export const DRAFT_DEBOUNCE_MS = 800;
 // The shim refuses to grow past this many characters (keys + values), well under the 1 MB
 // message limit enforced by the parent.
 export const STORAGE_QUOTA_CHARS = 900000;
+// A submitted payload must stay under this many UTF-8 bytes, also under the parent's 1 MB limit.
+export const SUBMIT_MAX_BYTES = 900000;
+// factorySubmit gives up after this long without an answer from the parent.
+export const SUBMIT_TIMEOUT_MS = 45000;
 
 function bridgeRuntime(cfg) {
   "use strict";
   var parentOrigin = cfg.parentOrigin;
-  var kind = cfg.kind;
   var nonce = cfg.nonce;
   var debounceMs = cfg.debounceMs;
   var quota = cfg.quotaChars;
-  var hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
 
   // Every message carries this mount's nonce; a page the iframe navigates to never sees it.
   function post(message) {
@@ -146,105 +153,61 @@ function bridgeRuntime(cfg) {
   var persistence = install("localStorage", local.api);
   install("sessionStorage", session.api);
 
-  // ---- export capture ----------------------------------------------------------------------
-  var blobs = new Map();
-  var capture = { armed: false, blob: null };
-  var originalCreate = URL.createObjectURL;
-  var originalRevoke = URL.revokeObjectURL;
-  URL.createObjectURL = function (obj) {
-    var url = originalCreate.apply(URL, arguments);
-    if (typeof Blob !== "undefined" && obj instanceof Blob) blobs.set(url, obj);
-    return url;
-  };
-  URL.revokeObjectURL = function (url) { blobs.delete(url); return originalRevoke.apply(URL, arguments); };
-
-  function exportedBlob(anchor) {
-    if (!anchor || !anchor.hasAttribute || !anchor.hasAttribute("download")) return null;
-    var blob = blobs.get(anchor.href);
-    if (!blob) return null;
-    var isJson = /json/i.test(blob.type || "") || /\.json$/i.test(anchor.getAttribute("download") || "");
-    return isJson ? blob : null;
-  }
-  var originalClick = HTMLAnchorElement.prototype.click;
-  HTMLAnchorElement.prototype.click = function () {
-    if (capture.armed) {
-      var blob = exportedBlob(this);
-      if (blob) { capture.blob = blob; return undefined; }
-    }
-    return originalClick.apply(this, arguments);
-  };
-  window.addEventListener("click", function (event) {
-    if (!capture.armed) return;
-    var target = event.target;
-    var anchor = target && target.closest ? target.closest("a[download]") : null;
-    var blob = exportedBlob(anchor);
-    if (blob) { event.preventDefault(); capture.blob = blob; }
-  }, true);
-
-  // Each adapter calls the same functions the piece's own buttons call.
-  var adapters = {
-    // factory-orchestrator/assets/preguntas.template.html: "Enviar respuestas" -> enviar(),
-    // then "Descargar el archivo" -> descargar(), which builds resultado() into a JSON Blob.
-    questions: {
-      available: function () {
-        return typeof window.enviar === "function" && typeof window.descargar === "function" &&
-          typeof window.resultado === "function";
-      },
-      run: function () {
-        var r = window.resultado();
-        if (!r || !Array.isArray(r.respuestas) || !r.respuestas.length) return "empty";
-        if (!r.enviada_en) {
-          window.enviar(); // may ask "send only the answered ones?" with confirm()
-          r = window.resultado();
-          if (!r || !r.enviada_en) return "cancelled";
-        }
-        window.descargar();
-        return "ok";
-      },
-      valid: function (p) { return !!p && p.formato === "respuestas-fabrica/1" && Array.isArray(p.respuestas); },
-    },
-    // ux-flows/assets/recorrido-flujos.template.html: "Descargar mi revisión" -> downloadReview(),
-    // which may prompt() for the reviewer name or alert() that nothing was reviewed yet.
-    flow_review: {
-      available: function () { return typeof window.downloadReview === "function"; },
-      run: function () { window.downloadReview(); return "ok"; },
-      valid: function (p) { return !!p && p.artefacto === "ux-flows.md" && Array.isArray(p.flujos); },
-    },
-  };
-
-  function readBlob(blob) {
-    if (blob.text) return blob.text();
-    return new Promise(function (resolve, reject) {
-      var reader = new FileReader();
-      reader.onload = function () { resolve(String(reader.result)); };
-      reader.onerror = function () { reject(reader.error); };
-      reader.readAsText(blob);
-    });
+  function define(name, value) {
+    try { Object.defineProperty(window, name, { value: value, configurable: false, enumerable: true, writable: false }); }
+    catch (e) { /* already defined by someone else: leave it */ }
   }
 
-  var collecting = false;
-  function collect(requestId) {
-    var fail = function (reason) { post({ type: "factory:submit-error", requestId: requestId, reason: reason }); };
-    var adapter = hasOwn(adapters, kind) ? adapters[kind] : null;
-    if (!adapter || !adapter.available()) return fail("unsupported");
-    if (collecting) return fail("busy");
-    collecting = true;
-    capture.armed = true; capture.blob = null;
-    var outcome = "error";
-    try { outcome = adapter.run(); } catch (e) { outcome = "error"; }
-    finally { capture.armed = false; }
-    var blob = capture.blob;
-    capture.blob = null;
-    if (!blob) { collecting = false; return fail(outcome === "ok" ? "empty" : outcome); }
-    if (blob.size >= quota) { collecting = false; return fail("too-large"); }
-    readBlob(blob).then(function (text) {
-      var payload;
-      try { payload = JSON.parse(text); } catch (e) { return fail("invalid"); }
-      if (!adapter.valid(payload)) return fail("invalid");
-      sendDraft(); // the export may have touched storage (e.g. the "sent at" time)
-      post({ type: "factory:submit", requestId: requestId, payload: payload });
-    }, function () { fail("error"); }).then(function () { collecting = false; });
+  // ---- submit ------------------------------------------------------------------------------
+  var shape = cfg.payloadShape;
+  var errors = cfg.submitErrors;
+  var inflight = null; // { requestId, promise, resolve, timer }
+  var counter = 0;
+
+  function byteLength(text) {
+    if (typeof TextEncoder === "function") return new TextEncoder().encode(text).length;
+    return text.length * 3;
   }
+
+  function finish(result) {
+    var current = inflight;
+    if (!current) return;
+    inflight = null;
+    clearTimeout(current.timer);
+    current.resolve(result);
+  }
+
+  function factorySubmit(payload) {
+    if (inflight) return inflight.promise;
+    var json;
+    try { json = JSON.stringify(payload); } catch (e) { json = undefined; }
+    var clean = null;
+    if (typeof json === "string") { try { clean = JSON.parse(json); } catch (e) { clean = null; } }
+    var valid = !!shape && !!clean && typeof clean === "object" && !Array.isArray(clean) &&
+      clean[shape.field] === shape.value && Array.isArray(clean[shape.list]);
+    if (!valid) return Promise.resolve({ ok: false, error: "invalid" });
+    if (byteLength(json) >= cfg.submitMaxBytes) return Promise.resolve({ ok: false, error: "too-large" });
+    counter += 1;
+    var current = { requestId: "submit-" + counter + "-" + Date.now().toString(36), timer: null, resolve: null };
+    current.promise = new Promise(function (resolve) { current.resolve = resolve; });
+    inflight = current;
+    current.timer = setTimeout(function () { if (inflight === current) finish({ ok: false, error: "timeout" }); }, cfg.submitTimeoutMs);
+    sendDraft(); // the piece usually writes its "sent at" just before sending
+    post({ type: "factory:submit", requestId: current.requestId, payload: clean });
+    return current.promise;
+  }
+
+  function onSubmitResult(data) {
+    if (!inflight || data.requestId !== inflight.requestId) return; // late (after a timeout) or not ours
+    if (data.ok === true) return finish({ ok: true });
+    finish({ ok: false, error: errors.indexOf(data.error) !== -1 ? data.error : "rejected" });
+  }
+
+  define("factorySubmit", factorySubmit);
+  define("factoryHost", Object.freeze({
+    persistence: persistence ? "server" : "none",
+    reviewerName: cfg.reviewerName,
+  }));
 
   // ---- messages from the parent ------------------------------------------------------------
   window.addEventListener("message", function (event) {
@@ -252,15 +215,12 @@ function bridgeRuntime(cfg) {
     var data = event.data;
     if (!data || typeof data !== "object" || data.nonce !== nonce) return;
     if (data.type === "factory:flush") { sendDraft(); post({ type: "factory:flushed" }); }
-    else if (data.type === "factory:collect" && typeof data.requestId === "string") collect(data.requestId);
+    else if (data.type === "factory:submit-result" && typeof data.requestId === "string") onSubmitResult(data);
   });
   window.addEventListener("pagehide", sendDraft);
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") sendDraft(); });
 
-  function ready() {
-    var adapter = hasOwn(adapters, kind) ? adapters[kind] : null;
-    post({ type: "factory:ready", persistence: persistence, canSubmit: !!(adapter && adapter.available()) });
-  }
+  function ready() { post({ type: "factory:ready", persistence: persistence }); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ready);
   else ready();
 }
@@ -286,15 +246,25 @@ function cleanStorage(storage) {
   return out;
 }
 
-export function buildBridgeScript({ parentOrigin, kind, storage, nonce }) {
+function cleanReviewerName(host) {
+  const name = host && typeof host.reviewerName === "string" ? host.reviewerName.trim() : "";
+  return name || null;
+}
+
+// host: { reviewerName } for globalThis.factoryHost. submitTimeoutMs only changes in tests.
+export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, submitTimeoutMs = SUBMIT_TIMEOUT_MS }) {
   if (typeof nonce !== "string" || !nonce) throw new Error("buildBridgeScript needs a nonce");
   const cfg = {
     parentOrigin: String(parentOrigin),
-    kind: String(kind),
     nonce,
     storage: cleanStorage(storage),
     debounceMs: DRAFT_DEBOUNCE_MS,
     quotaChars: STORAGE_QUOTA_CHARS,
+    payloadShape: Object.hasOwn(PAYLOAD_SHAPES, kind) ? PAYLOAD_SHAPES[kind] : null,
+    submitErrors: SUBMIT_ERRORS,
+    submitMaxBytes: SUBMIT_MAX_BYTES,
+    submitTimeoutMs: Number.isFinite(submitTimeoutMs) && submitTimeoutMs > 0 ? submitTimeoutMs : SUBMIT_TIMEOUT_MS,
+    reviewerName: cleanReviewerName(host),
   };
   return `<script>(${bridgeRuntime.toString()})(${serializeForScript(cfg)});</script>`;
 }

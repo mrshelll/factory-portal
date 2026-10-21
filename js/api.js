@@ -13,13 +13,14 @@ const lower = (value) => String(value || "").trim().toLowerCase();
 
 // The user's own memberships. RLS may let an owner see other members, so filter to this user.
 async function myMemberships(client, user) {
-  const rows = unwrap(await client.from("project_members").select("id, project_id, email, user_id, role"));
+  const rows = unwrap(await client.from("project_members").select("id, project_id, email, user_id, role, display_name"));
   return (rows || []).filter((m) => m.user_id === user.id || (user.email && lower(m.email) === lower(user.email)));
 }
 
 const byId = (rows) => new Map((rows || []).map((row) => [row.id, row]));
 
-// -> [{ project, items: [{ piece, assignment }] }] ordered by project name.
+// -> [{ project, items: [{ piece, assignment }] }] ordered by project name. Assignments of a
+// replaced piece version are left out (the newer version has its own assignment).
 export async function loadSharedWithMe(client, user) {
   const members = await myMemberships(client, user);
   if (!members.length) return [];
@@ -29,14 +30,15 @@ export async function loadSharedWithMe(client, user) {
     client.from("piece_assignments").select("piece_id, member_id, status, assigned_at, updated_at").in("member_id", memberIds).then(unwrap),
     client.from("projects").select("id, slug, name, language").in("id", projectIds).then(unwrap),
   ]);
-  const pieceIds = [...new Set((assignments || []).map((a) => a.piece_id))];
+  const current = (assignments || []).filter((a) => a.status !== "replaced");
+  const pieceIds = [...new Set(current.map((a) => a.piece_id))];
   const pieces = pieceIds.length
     ? unwrap(await client.from("pieces").select(PIECE_LIST_COLUMNS).in("id", pieceIds))
     : [];
   const piecesById = byId(pieces);
   const groups = new Map();
   for (const project of projects || []) groups.set(project.id, { project, items: [] });
-  for (const assignment of assignments || []) {
+  for (const assignment of current) {
     const piece = piecesById.get(assignment.piece_id);
     const group = piece && groups.get(piece.project_id);
     if (group) group.items.push({ piece, assignment });
@@ -46,7 +48,8 @@ export async function loadSharedWithMe(client, user) {
     .sort((a, b) => String(a.project.name).localeCompare(String(b.project.name)));
 }
 
-// -> null when the piece is not assigned to this user (or does not exist).
+// -> null when the piece is not assigned to this user (or does not exist). A replaced version still
+// opens: a tab left open on it can still send.
 export async function loadPiece(client, user, pieceId) {
   const members = await myMemberships(client, user);
   if (!members.length) return null;
@@ -63,12 +66,15 @@ export async function loadPiece(client, user, pieceId) {
   ]);
   if (!piece) return null;
   const project = unwrap(await client.from("projects").select("id, slug, name, language").eq("id", piece.project_id).maybeSingle());
+  const member = members.find((m) => m.id === assignment.member_id);
+  const displayName = member && typeof member.display_name === "string" ? member.display_name.trim() : "";
   return {
     piece,
     project,
     assignment,
     draftStorage: draft && draft.storage && typeof draft.storage === "object" && !Array.isArray(draft.storage) ? draft.storage : {},
     lastSubmittedAt: responses && responses[0] ? responses[0].submitted_at : null,
+    memberDisplayName: displayName || null,
   };
 }
 

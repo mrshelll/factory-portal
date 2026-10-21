@@ -15,10 +15,10 @@ const browserLanguage = pickLanguage(navigator.languages && navigator.languages.
 const PENDING_SIGN_IN_KEY = "factory-portal.pending-sign-in";
 const PENDING_SIGN_IN_TTL_MS = 60 * 60 * 1000; // a code is useless after an hour
 const RESEND_SECONDS = 60; // Supabase allows one email per 60 s
-const SUBMIT_TIMEOUT_MS = 45000; // the piece may be waiting on its own confirm() or prompt()
 const LEAVE_FLUSH_MS = 1000;
 const SIGN_OUT_SAVE_MS = 4000;
 const REOPEN_SAVE_WAIT_MS = 3000;
+const SUBMIT_SAVE_WAIT_MS = 3000; // a send waits this long for the last draft to land first
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIECE_ROUTE = /^#\/piece\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
@@ -355,13 +355,14 @@ function sessionEnded() {
 // ---- home -----------------------------------------------------------------------------------
 
 const STATUS_KEYS = { pending: "statusPending", in_progress: "statusInProgress", submitted: "statusSubmitted" };
+const KIND_KEYS = { questions: "kindQuestions", flow_review: "kindFlowReview", demo_review: "kindDemoReview" };
 
 function pieceRow({ piece, assignment }) {
   const status = STATUS_KEYS[assignment.status] ? assignment.status : "pending";
   const dateKey = status === "submitted" ? "sentOn" : status === "in_progress" ? "changedOn" : "sharedOn";
   const iso = status === "pending" ? assignment.assigned_at : assignment.updated_at || assignment.assigned_at;
   const date = formatDate(state.lang, iso);
-  const kind = piece.kind === "flow_review" ? t("kindFlowReview") : t("kindQuestions");
+  const kind = t(KIND_KEYS[piece.kind] || "kindQuestions");
   return h("li", { class: "row" },
     h("a", { class: "row-link", href: `#/piece/${piece.id}` },
       h("span", { class: "row-main" },
@@ -434,15 +435,10 @@ function saverFor(pieceId) {
   return state.savers.get(pieceId);
 }
 
-function newRequestId() {
-  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function pieceLayout(titleText) {
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const title = h("h1", { class: "piece-title" }, titleText);
   const status = h("p", { class: "piece-status" });
-  const submit = h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", hidden: true }, t("submit"));
   const main = h("main", { id: "main", class: "piece-main", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
   main.append(live);
@@ -450,20 +446,17 @@ function pieceLayout(titleText) {
     h("div", { class: "frame", "data-rol": "marco" },
       h("header", { class: "piece-bar", "data-rol": "cabecera" },
         h("a", { class: "back-link", href: "#/", "aria-label": t("backLabel") }, h("span", { "aria-hidden": "true" }, "←"), t("back")),
-        h("div", { class: "piece-heading" }, title, status),
-        submit),
+        h("div", { class: "piece-heading" }, title, status)),
       notices),
     main));
-  return { notices, title, status, submit, main, live };
+  return { notices, title, status, main, live };
 }
 
 async function showPiece(pieceId, viewId) {
   state.view = "piece";
   const user = state.session.user;
   let frame = null;
-  let submitTimer = null;
   state.cleanup = async () => {
-    clearTimeout(submitTimer);
     state.statusListeners.delete(pieceId);
     if (frame) { await frame.flush(LEAVE_FLUSH_MS); frame.destroy(); }
   };
@@ -497,13 +490,11 @@ async function showPiece(pieceId, viewId) {
   const pieceTitle = piece.title || t("untitled");
   setTitle(pieceTitle);
   layout = pieceLayout(pieceTitle);
-  const { notices, status, submit, main, live } = layout;
+  const { notices, status, main, live } = layout;
 
   const saver = saverFor(pieceId);
   let saveStatus = saver.hasUnsaved() ? "error" : "idle";
   let lastSubmittedAt = context.lastSubmittedAt;
-  let submitting = false;
-  let currentRequest = null;
   const handled = new Set();
 
   function render() {
@@ -512,8 +503,6 @@ async function showPiece(pieceId, viewId) {
     if (lastSubmittedAt) parts.push(t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) }));
     status.textContent = parts.join(" · ");
     status.hidden = !parts.length;
-    submit.textContent = submitting ? t("submitting") : lastSubmittedAt ? t("submitAgain") : t("submit");
-    submit.setAttribute("aria-busy", submitting ? "true" : "false");
   }
   state.statusListeners.set(pieceId, (next) => {
     if (next === "error" && saveStatus !== "error") live.textContent = t("saveError");
@@ -524,72 +513,45 @@ async function showPiece(pieceId, viewId) {
   // The newest storage this tab saw is never older than the server copy it sent, so it wins.
   const seed = state.localDrafts.has(pieceId) ? state.localDrafts.get(pieceId) : context.draftStorage;
 
+  // The piece sent through globalThis.factorySubmit; it only says "sent" when this answers ok, and
+  // this answers ok only after submit_response saved on the server.
   async function onSubmit({ requestId, payload }) {
-    if (requestId !== currentRequest || handled.has(requestId)) return;
+    if (handled.has(requestId)) return;
     handled.add(requestId);
-    clearTimeout(submitTimer);
-    submitting = true;
-    render();
-    // Let the draft written just before the export land first.
-    await Promise.race([saver.idle(), sleep(3000)]);
+    const answeringFrame = frame;
+    // Let the draft the bridge flushed just before the send land first.
+    await Promise.race([saver.idle(), sleep(SUBMIT_SAVE_WAIT_MS)]);
+    let result;
     try {
       await submitResponse(supabase, pieceId, payload);
+      result = { ok: true };
       lastSubmittedAt = new Date().toISOString();
       clearNotice(notices);
       live.textContent = t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) });
     } catch (error) {
       if (isAuthExpired(error)) {
+        result = { ok: false, error: "session-expired" };
         showNotice(notices, { tone: "error", text: t("sessionExpired"), actions: [{ label: t("signInAgain"), onClick: sessionEnded }] });
       } else {
-        showNotice(notices, { tone: "error", text: isNetworkError(error) ? t("submitNetwork") : t("submitFailed") });
+        result = { ok: false, error: isNetworkError(error) ? "network" : "rejected" };
       }
-    } finally {
-      submitting = false;
-      render();
     }
-  }
-
-  const SUBMIT_ERROR_TEXT = { unsupported: "submitUnsupported", empty: "submitEmpty", invalid: "submitInvalid", "too-large": "submitInvalid", error: "submitInvalid" };
-  function onSubmitError({ requestId, reason }) {
-    if (requestId !== currentRequest || handled.has(requestId)) return;
-    handled.add(requestId);
-    clearTimeout(submitTimer);
-    submitting = false;
     render();
-    const key = SUBMIT_ERROR_TEXT[reason]; // "cancelled" and "busy" need no message
-    if (key) showNotice(notices, { tone: reason === "empty" ? "info" : "error", text: t(key) });
+    if (answeringFrame) answeringFrame.respond(requestId, result);
   }
-
-  submit.addEventListener("click", () => {
-    if (submitting || !frame) return;
-    submitting = true;
-    render();
-    clearNotice(notices);
-    currentRequest = newRequestId();
-    const requestId = currentRequest;
-    submitTimer = setTimeout(() => {
-      if (currentRequest !== requestId || handled.has(requestId)) return;
-      submitting = false;
-      render();
-      showNotice(notices, { tone: "error", text: t("submitNoAnswer") });
-    }, SUBMIT_TIMEOUT_MS);
-    frame.collect(requestId);
-  });
 
   frame = mountPiece({
     container: main, html: piece.html, kind: piece.kind, storage: seed, title: pieceTitle,
+    host: { reviewerName: context.memberDisplayName },
     onReady: (ready) => { if (!ready.persistence) showNotice(notices, { tone: "warning", text: t("noPersistence") }); },
     onDirty: () => saver.markPending(),
     onDraft: (storage) => { state.localDrafts.set(pieceId, storage); saver.push(storage); },
     onNavigatedAway: () => {
       frame = null;
-      submit.hidden = true;
       showNotice(notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });
     },
     onSubmit,
-    onSubmitError,
   });
-  submit.hidden = false;
   render();
 }
 

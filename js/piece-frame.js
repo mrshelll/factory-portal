@@ -5,7 +5,9 @@ import { injectBridge } from "./bridge.js";
 import { parseBridgeMessage } from "./host.js";
 
 // No allow-same-origin: the piece runs in an opaque origin and cannot reach the portal's storage.
-export const SANDBOX = "allow-scripts allow-downloads allow-modals allow-forms";
+// allow-popups (+ escape-sandbox) lets a piece open a link with target="_blank" (the demo sheet
+// opens the prototype in a new tab) as a normal, unsandboxed page.
+export const SANDBOX = "allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox";
 
 export function randomNonce() {
   const bytes = new Uint8Array(16);
@@ -13,9 +15,11 @@ export function randomNonce() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// onNavigatedAway: the iframe loaded a second document (the piece navigated or reloaded); the
-// frame is already destroyed when it is called.
-export function mountPiece({ container, html, kind, storage, title, onReady, onDirty, onDraft, onSubmit, onSubmitError, onRejected, onNavigatedAway }) {
+// host: { reviewerName } for globalThis.factoryHost inside the piece. onSubmit({ requestId, payload })
+// must end with respond(requestId, { ok: true } | { ok: false, error }). onNavigatedAway: the iframe
+// loaded a second document (the piece navigated or reloaded); the frame is already destroyed when it
+// is called. submitTimeoutMs only changes in tests.
+export function mountPiece({ container, html, kind, storage, title, host, submitTimeoutMs, onReady, onDirty, onDraft, onSubmit, onRejected, onNavigatedAway }) {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", SANDBOX);
   iframe.setAttribute("title", title);
@@ -35,7 +39,6 @@ export function mountPiece({ container, html, kind, storage, title, onReady, onD
     else if (message.type === "factory:dirty" && onDirty) onDirty();
     else if (message.type === "factory:draft" && onDraft) onDraft(message.storage);
     else if (message.type === "factory:submit" && onSubmit) onSubmit(message);
-    else if (message.type === "factory:submit-error" && onSubmitError) onSubmitError(message);
     else if (message.type === "factory:flushed") { const w = flushWaiters; flushWaiters = []; w.forEach((r) => r(true)); }
   }
 
@@ -52,12 +55,18 @@ export function mountPiece({ container, html, kind, storage, title, onReady, onD
       if (onNavigatedAway) onNavigatedAway();
     }
   });
-  iframe.srcdoc = injectBridge(html, { parentOrigin: window.location.origin, kind, storage, nonce });
+  iframe.srcdoc = injectBridge(html, { parentOrigin: window.location.origin, kind, storage, nonce, host, submitTimeoutMs });
   container.append(iframe);
 
   const api = {
     iframe,
-    collect(requestId) { post({ type: "factory:collect", requestId }); },
+    // Answers a factory:submit. Anything but { ok: true } is a failure; the bridge maps an unknown
+    // error to "rejected".
+    respond(requestId, result) {
+      const ok = Boolean(result && result.ok === true);
+      post(ok ? { type: "factory:submit-result", requestId, ok }
+        : { type: "factory:submit-result", requestId, ok, error: String(result && result.error || "rejected") });
+    },
     // Asks the piece to send its pending draft now; resolves true when it answered, false on timeout.
     flush(timeoutMs = 1500) {
       if (destroyed) return Promise.resolve(false);

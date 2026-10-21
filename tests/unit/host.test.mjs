@@ -33,16 +33,26 @@ test("parseBridgeMessage checks the submit payload shape for the piece kind", ()
   assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit", payload: questionsPayload }, "questions", N).ok, false, "needs requestId");
 });
 
-test("parseBridgeMessage validates ready, flushed and submit-error", () => {
-  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:ready", persistence: true, canSubmit: false }, "questions", N).ok, true);
+test("parseBridgeMessage validates ready and flushed", () => {
+  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:ready", persistence: true }, "questions", N).ok, true);
   assert.equal(parseBridgeMessage({ nonce: N, type: "factory:ready", persistence: "yes" }, "questions", N).ok, false);
   assert.equal(parseBridgeMessage({ nonce: N, type: "factory:flushed" }, "questions", N).ok, true);
-  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit-error", requestId: "r", reason: "empty" }, "questions", N).ok, true);
-  assert.equal(parseBridgeMessage({ nonce: N, type: "factory:submit-error", requestId: "r", reason: "whatever" }, "questions", N).ok, false);
+});
+
+test("parseBridgeMessage rejects the retired factory:submit-error with type", () => {
+  const parsed = parseBridgeMessage({ nonce: N, type: "factory:submit-error", requestId: "r", reason: "empty" }, "questions", N);
+  assert.deepEqual(parsed, { ok: false, reason: "type" });
 });
 
 test("isValidPayload rejects unknown kinds", () => {
   assert.equal(isValidPayload("other", questionsPayload), false);
+});
+
+test("isValidPayload accepts a demo review (revision-demo/1) only with that schema", () => {
+  assert.equal(isValidPayload("demo_review", { esquema: "revision-demo/1", flujos: [] }), true);
+  assert.equal(isValidPayload("demo_review", { esquema: "revision-demo/2", flujos: [] }), false);
+  assert.equal(isValidPayload("demo_review", { esquema: "revision-demo/1" }), false);
+  assert.equal(isValidPayload("demo_review", questionsPayload), false);
 });
 
 function deferred() {

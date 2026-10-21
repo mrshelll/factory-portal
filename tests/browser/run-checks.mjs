@@ -1,6 +1,6 @@
 // Browser checks for the portal and the bridge. Dev-only; nothing here is served to users.
 //
-//   node tests/browser/run-checks.mjs --questions <piece.html> [--flow <piece.html>] [--out <dir>]
+//   node tests/browser/run-checks.mjs --questions <piece.html> [--flow <piece.html>] [--demo <piece.html>] [--out <dir>]
 //
 // Starts `python3 -m http.server` on the repo, drives system Chrome headless with playwright-core
 // and prints one PASS/FAIL line per check. playwright-core is loaded from PLAYWRIGHT_CORE_DIR, or
@@ -115,21 +115,31 @@ async function harnessContext(browser, base) {
 }
 const pieceFrame = (page) => page.frames().find((f) => f !== page.mainFrame());
 const events = (page, type) => page.evaluate((t) => window.harness.events.filter((e) => e.type === t).map((e) => e.detail), type);
+const QUESTIONS_KEY = "preguntas-portal-test-ronda-1-ana-perez";
+const QUESTIONS_SENT = "Listo, tus respuestas llegaron";
+const FLOW_SENT = "Listo, tu revisión llegó";
+const frameText = (frame) => frame.evaluate(() => document.body.innerText);
+// The questions piece: go to "Revisa y envía" and tap its send button (the piece's own).
+async function sendQuestions(frame) {
+  await frame.evaluate(() => { if (view !== "review") showReview(); });
+  await frame.click("button[data-rol=accion-principal]");
+}
 
 async function questionsChecks(browser, base, html) {
   const { context, page, errors } = await harnessContext(browser, base);
   let downloads = 0;
   page.on("download", () => { downloads += 1; });
-  let dialogAnswer = "dismiss";
   const dialogs = [];
-  page.on("dialog", (d) => { dialogs.push(d.message()); dialogAnswer === "accept" ? d.accept() : d.dismiss(); });
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
 
-  await page.evaluate((h) => window.harness.mount(h, "questions", {}), html);
+  await page.evaluate((h) => window.harness.mount(h, "questions", {}, { host: { reviewerName: "Ana Pérez" } }), html);
   const ready = await waitFor(async () => (await events(page, "ready"))[0]);
   check("questions: bridge ready", ready);
   check("questions: localStorage replaced by the shim (defineProperty)", ready && ready.persistence === true);
-  check("questions: piece exposes its export (canSubmit)", ready && ready.canSubmit === true);
   const frame = pieceFrame(page);
+  const host = await frame.evaluate(() => ({ host: globalThis.factoryHost, frozen: Object.isFrozen(globalThis.factoryHost), submit: typeof globalThis.factorySubmit }));
+  check("questions: the piece sees factorySubmit and a frozen factoryHost", host.submit === "function" && host.frozen &&
+    host.host.persistence === "server" && host.host.reviewerName === "Ana Pérez", JSON.stringify(host));
   const shim = await frame.evaluate(() => ({
     same: typeof localStorage.getItem === "function",
     keys: Object.keys(localStorage),
@@ -137,51 +147,57 @@ async function questionsChecks(browser, base, html) {
   }));
   check("questions: shim is a working Storage", shim.same && shim.session === "1", JSON.stringify(shim.keys));
 
-  await page.evaluate(() => window.harness.mount.length); // keep page alive
   await frame.evaluate(() => {
-    responder("Q-001", "si");
-    responder("Q-003", "cambio");
-    escribir("Q-003", "texto", "Prefiero </script> los lunes");
+    responder("q-001", "si");
+    responder("q-003", "cambio");
+    escribir("q-003", "texto", "Prefiero </script> los lunes");
   });
   const drafts = await waitFor(async () => {
     const d = await events(page, "draft");
-    const key = "preguntas-portal-test-ronda-1-ana-perez";
     const lastDraft = d.at(-1);
-    return lastDraft && lastDraft[key] && JSON.parse(lastDraft[key]).respuestas["Q-003"]?.texto ? d : null;
+    return lastDraft && lastDraft[QUESTIONS_KEY] && JSON.parse(lastDraft[QUESTIONS_KEY]).respuestas["q-003"]?.texto ? d : null;
   }, 4000);
-  check("questions: changes reach the parent as factory:draft (debounced)", drafts && drafts.length <= 2, drafts ? `${drafts.length} draft message(s)` : "none");
+  check("questions: changes reach the parent as factory:draft (debounced)", drafts && drafts.length <= 3, drafts ? `${drafts.length} draft message(s)` : "none");
   const storage = drafts ? drafts.at(-1) : {};
 
   // Reopen with the saved draft: the piece must restore its state from the shim.
   await page.evaluate(([h, s]) => window.harness.mount(h, "questions", s), [html, storage]);
   await waitFor(async () => (await events(page, "ready"))[0]);
-  const restored = await pieceFrame(page).evaluate(() => ({ n: respondidas(), text: ST.respuestas["Q-003"].texto }));
+  const restored = await pieceFrame(page).evaluate(() => ({ n: respondidas(), text: ST.respuestas["q-003"].texto }));
   check("questions: reopening with the draft restores answers", restored.n === 2 && restored.text === "Prefiero </script> los lunes", JSON.stringify(restored));
+  check("questions: without a reviewer name the piece gets null", (await pieceFrame(page).evaluate(() => factoryHost.reviewerName)) === null);
 
   // Parent ignores messages that do not come from the iframe.
   await page.evaluate(() => window.postMessage({ type: "factory:submit", requestId: "fake", payload: { formato: "respuestas-fabrica/1", respuestas: [] } }, "*"));
   await sleep(200);
   check("questions: parent ignores messages from other sources", (await events(page, "submit")).length === 0);
 
-  // Send: first cancel the "only the answered ones?" confirm, then accept it.
-  dialogAnswer = "dismiss";
-  await page.evaluate(() => window.harness.submit());
-  const cancelled = await waitFor(async () => (await events(page, "submit-error"))[0]);
-  check("questions: cancelling the confirm sends nothing", cancelled && cancelled.reason === "cancelled", JSON.stringify(cancelled));
-  dialogAnswer = "accept";
-  await page.evaluate(() => window.harness.submit());
+  // Send through the piece's own button: it waits for the portal's answer before saying "sent".
+  await sendQuestions(pieceFrame(page));
   const submitted = await waitFor(async () => (await events(page, "submit"))[0]);
   const p = submitted && submitted.payload;
-  check("questions: factory:submit carries respuestas-fabrica/1", p && p.formato === "respuestas-fabrica/1" && p.proyecto === "portal-test" && p.ronda === 1 && p.para_slug === "ana-perez");
+  check("questions: the piece's send posts factory:submit with respuestas-fabrica/1", p && p.formato === "respuestas-fabrica/1" && p.proyecto === "portal-test" && p.ronda === 1 && p.para_slug === "ana-perez");
   check("questions: payload has the 2 answers and enviada_en", p && p.respuestas.length === 2 && p.enviada_en &&
-    p.respuestas.find((r) => r.id === "Q-003").texto === "Prefiero </script> los lunes", p ? JSON.stringify(p.respuestas) : "");
-  check("questions: capture suppressed the file download", downloads === 0, `${downloads} download(s)`);
-  check("questions: the piece's own confirm was shown", dialogs.length === 2, JSON.stringify(dialogs));
+    p.respuestas.find((r) => r.id === "q-003").texto === "Prefiero </script> los lunes", p ? JSON.stringify(p.respuestas) : "");
+  const sentDraft = (await events(page, "draft")).at(-1);
+  check("questions: the draft with the send time was flushed before the send", sentDraft && JSON.parse(sentDraft[QUESTIONS_KEY]).enviada_en === p.enviada_en);
+  await sleep(300);
+  const waiting = await frameText(pieceFrame(page));
+  check("questions: while the portal has not answered, the piece does not say it was sent", !waiting.includes(QUESTIONS_SENT) && waiting.includes("Enviando"));
+  // A result without the nonce (posted by the parent page, but forged) is ignored.
+  await page.evaluate((id) => window.harness.frameElement().contentWindow.postMessage({ type: "factory:submit-result", requestId: id, ok: true, nonce: "guess" }, "*"), submitted.requestId);
+  await sleep(200);
+  check("questions: a submit-result without the mount nonce is ignored", !(await frameText(pieceFrame(page))).includes(QUESTIONS_SENT));
+  await page.evaluate((id) => window.harness.respond(id, { ok: true }), submitted.requestId);
+  const sentText = await waitFor(async () => { const t = await frameText(pieceFrame(page)); return t.includes(QUESTIONS_SENT) ? t : null; }, 3000);
+  check("questions: after the portal answers ok, the piece shows its sent screen", sentText);
+  check("questions: sending did not trigger a download", downloads === 0, `${downloads} download(s)`);
+  check("questions: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
 
-  // Backup: the piece's own "Descargar el archivo" still downloads the same JSON.
+  // Plan B: the piece's own "Descargar una copia" really downloads (nothing is wrapped any more).
   const [download] = await Promise.all([
     page.waitForEvent("download", { timeout: 5000 }).catch(() => null),
-    pieceFrame(page).click("text=Descargar el archivo"),
+    pieceFrame(page).click("text=Descargar una copia"),
   ]);
   let same = false;
   if (download) {
@@ -189,26 +205,46 @@ async function questionsChecks(browser, base, html) {
     await download.saveAs(file);
     same = JSON.stringify(JSON.parse(readFileSync(file, "utf8"))) === JSON.stringify(p);
   }
-  check("questions: in-piece download still works (fallback)", download && download.suggestedFilename() === "respuestas-portal-test-ronda-1-ana-perez.json", download ? download.suggestedFilename() : "no download");
+  check("questions: in-piece «Descargar una copia» downloads the file", download && download.suggestedFilename() === "respuestas-portal-test-ronda-1-ana-perez.json", download ? download.suggestedFilename() : "no download");
   check("questions: downloaded JSON equals the submitted payload", same);
   await page.screenshot({ path: join(outDir, "harness-questions-360.png") });
 
-  // Nothing answered yet: nothing to send.
-  await page.evaluate((h) => window.harness.mount(h, "questions", {}), html);
+  // A second factorySubmit while one is in flight is the same promise; a payload of another kind is invalid.
+  const calls = await pieceFrame(page).evaluate(async () => {
+    const a = factorySubmit(resultado()); const b = factorySubmit(resultado());
+    return { same: a === b };
+  });
+  await sleep(200);
+  const pending = (await events(page, "submit")).at(-1);
+  check("questions: a second factorySubmit in flight returns the same promise and posts once", calls.same && (await events(page, "submit")).length === 2);
+  await page.evaluate((id) => window.harness.respond(id, { ok: true }), pending.requestId);
+  const invalid = await pieceFrame(page).evaluate(() => factorySubmit({ artefacto: "ux-flows.md", flujos: [] }));
+  check("questions: a payload of another kind resolves invalid and is not posted", invalid.ok === false && invalid.error === "invalid" && (await events(page, "submit")).length === 2, JSON.stringify(invalid));
+
+  // (4) A send that never gets an answer: the bridge gives up with "timeout" (timeout shortened for the test).
+  await page.evaluate(([h, s]) => window.harness.mount(h, "questions", s, { submitTimeoutMs: 1500 }), [html, storage]);
   await waitFor(async () => (await events(page, "ready"))[0]);
-  await page.evaluate(() => window.harness.submit());
-  const empty = await waitFor(async () => (await events(page, "submit-error"))[0]);
-  check("questions: no answers -> submit-error empty", empty && empty.reason === "empty", JSON.stringify(empty));
+  await sendQuestions(pieceFrame(page));
+  const lost = await waitFor(async () => (await events(page, "submit"))[0]);
+  const timedOut = await waitFor(async () => pieceFrame(page).evaluate(() => (ST.submitError ? { error: ST.submitError, text: document.body.innerText } : null)), 4000);
+  check("questions: no answer from the portal -> factorySubmit resolves timeout", lost && timedOut && timedOut.error === "timeout", timedOut ? timedOut.error : "still waiting");
+  check("questions: after the timeout the piece shows its error, never its sent screen", timedOut && timedOut.text.includes("No se pudieron enviar") && !timedOut.text.includes(QUESTIONS_SENT));
+  await page.evaluate((id) => window.harness.respond(id, { ok: true }), lost.requestId);
+  await sleep(300);
+  check("questions: a late answer after the timeout is ignored", !(await frameText(pieceFrame(page))).includes(QUESTIONS_SENT));
 
   // Flush on demand returns the pending draft before the debounce.
-  await pieceFrame(page).evaluate(() => responder("Q-002", "si"));
+  await page.evaluate((h) => window.harness.mount(h, "questions", {}), html);
+  await waitFor(async () => (await events(page, "ready"))[0]);
+  await pieceFrame(page).evaluate(() => responder("q-002", "si"));
   const flushed = await page.evaluate(() => window.harness.flush(1000));
   const afterFlush = await events(page, "draft");
   check("questions: flush sends the pending draft immediately", flushed === true && afterFlush.length >= 1);
 
   // A change is announced at once (no content), before the 800 ms debounced draft.
+  await sleep(1000);
   const before = { dirty: (await events(page, "dirty")).length, drafts: (await events(page, "draft")).length };
-  await pieceFrame(page).evaluate(() => responder("Q-004", "si"));
+  await pieceFrame(page).evaluate(() => responder("q-004", "si"));
   await sleep(150);
   const soon = { dirty: (await events(page, "dirty")).length, drafts: (await events(page, "draft")).length };
   check("questions: factory:dirty arrives before the debounced draft", soon.dirty === before.dirty + 1 && soon.drafts === before.drafts, JSON.stringify({ before, soon }));
@@ -239,27 +275,73 @@ async function flowChecks(browser, base, html) {
   const { context, page, errors } = await harnessContext(browser, base);
   let downloads = 0;
   page.on("download", () => { downloads += 1; });
-  page.on("dialog", (d) => (d.type() === "prompt" ? d.accept("Ana Pérez") : d.accept()));
-  await page.evaluate((h) => window.harness.mount(h, "flow_review", {}), html);
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
+  await page.evaluate((h) => window.harness.mount(h, "flow_review", {}, { host: { reviewerName: "Ana Pérez" } }), html);
   const ready = await waitFor(async () => (await events(page, "ready"))[0]);
-  check("flow: bridge ready with persistence and canSubmit", ready && ready.persistence && ready.canSubmit, JSON.stringify(ready));
-  await page.evaluate(() => window.harness.submit());
-  const empty = await waitFor(async () => (await events(page, "submit-error"))[0]);
-  check("flow: nothing reviewed -> submit-error empty", empty && empty.reason === "empty", JSON.stringify(empty));
-  await pieceFrame(page).evaluate(() => { openFlow(IDS[0]); setVerdict("ok"); });
-  await page.evaluate(() => window.harness.submit());
+  check("flow: bridge ready with persistence", ready && ready.persistence, JSON.stringify(ready));
+  check("flow: the piece sees factoryHost.reviewerName", (await pieceFrame(page).evaluate(() => factoryHost.reviewerName)) === "Ana Pérez");
+  // Name the reviewer and finish one flow, as the piece does when the person walks it.
+  await pieceFrame(page).evaluate(() => {
+    usarRevisor("Ana Pérez");
+    const st = fs(IDS[0]); st.veredicto = "ok"; st.estado = "ok"; save(); home();
+  });
+  const first = pieceFrame(page).evaluate(() => submitReview());
   const submitted = await waitFor(async () => (await events(page, "submit"))[0]);
   const p = submitted && submitted.payload;
-  check("flow: factory:submit carries the review JSON", p && p.artefacto === "ux-flows.md" && p.proyecto === "portal-test" && p.revisor === "Ana Pérez" &&
+  check("flow: the piece's send posts the review JSON", p && p.artefacto === "ux-flows.md" && p.revisor === "Ana Pérez" &&
     p.flujos.some((f) => f.veredicto === "ok"), p ? JSON.stringify(p.resumen) : "");
-  check("flow: capture suppressed the file download", downloads === 0);
+  // (2) The portal reports a network failure: the piece shows its error and never its sent screen.
+  await page.evaluate((id) => window.harness.respond(id, { ok: false, error: "network" }), submitted.requestId);
+  await first;
+  const failed = await pieceFrame(page).evaluate(() => ({ error: ST.submitError, sent: ST.submittedAt || null, text: document.body.innerText }));
+  check("flow: a failed send shows the piece's error, not its sent screen", failed.error === "network" && !failed.sent &&
+    failed.text.includes("No se pudo enviar tu revisión") && !failed.text.includes(FLOW_SENT), JSON.stringify({ error: failed.error, sent: failed.sent }));
+  const retry = pieceFrame(page).evaluate(() => submitReview());
+  const again = await waitFor(async () => (await events(page, "submit"))[1]);
+  await page.evaluate((id) => window.harness.respond(id, { ok: true }), again.requestId);
+  await retry;
+  const ok = await pieceFrame(page).evaluate(() => ({ sent: ST.submittedAt || null, text: document.body.innerText }));
+  check("flow: the retry works and the piece shows its sent screen", again && ok.sent && ok.text.includes(FLOW_SENT));
+  check("flow: sending did not trigger a download", downloads === 0);
   const drafts = await waitFor(async () => {
     const d = await events(page, "draft");
-    return d.length && Object.keys(d.at(-1)).some((k) => k.startsWith("recorrido-portal-test-ux-flows-v2::ana-perez")) ? d : null;
+    return d.length && Object.keys(d.at(-1)).some((k) => k.startsWith(`recorrido-${p.proyecto}-ux-flows-v${p.version_revisada}::ana-perez`)) ? d : null;
   }, 3000);
   check("flow: review progress reaches the parent as factory:draft", drafts);
+  check("flow: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
   await page.screenshot({ path: join(outDir, "harness-flow-360.png") });
   check("flow: no page errors in harness", errors.length === 0, errors.join(" | "));
+  await context.close();
+}
+
+// (5) The demo sheet opens the prototype with target="_blank": the sandbox lets it open a new tab,
+// and that tab is a normal page (it escaped the sandbox).
+async function demoChecks(browser, base, html) {
+  const { context, page, errors } = await harnessContext(browser, base);
+  await context.route("https://example.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>prototype</title><p>prototype</p>" }));
+  await page.evaluate((h) => window.harness.mount(h, "demo_review", {}), html);
+  const ready = await waitFor(async () => (await events(page, "ready"))[0]);
+  check("demo: bridge ready with persistence", ready && ready.persistence, JSON.stringify(ready));
+  const link = await waitFor(async () => {
+    const f = pieceFrame(page);
+    return f && (await f.$("a[target=_blank]"));
+  }, 5000);
+  const href = link ? await link.getAttribute("href") : null;
+  const [popup] = await Promise.all([
+    context.waitForEvent("page", { timeout: 5000 }).catch(() => null),
+    link ? link.click() : Promise.resolve(),
+  ]);
+  if (popup) await popup.waitForLoadState("load").catch(() => {});
+  const popupInfo = popup ? await popup.evaluate(() => {
+    let storage = false;
+    try { localStorage.setItem("probe", "1"); storage = localStorage.getItem("probe") === "1"; } catch { storage = false; }
+    return { url: location.href, storage, opener: window.opener === null };
+  }).catch((e) => ({ error: String(e) })) : null;
+  check("demo: a target=_blank link opens a new tab", popup && popupInfo && popupInfo.url === href, popupInfo ? JSON.stringify(popupInfo) : "no new tab");
+  check("demo: the new tab is not sandboxed and has no opener", popupInfo && popupInfo.storage && popupInfo.opener, JSON.stringify(popupInfo));
+  check("demo: the piece stays open in the portal", await page.evaluate(() => Boolean(document.querySelector("iframe.piece-frame"))));
+  check("demo: no page errors in harness", errors.length === 0, errors.join(" | "));
   await context.close();
 }
 
@@ -275,7 +357,10 @@ const IDS = {
   member: "33333333-3333-4333-8333-333333333333",
   questions: "44444444-4444-4444-8444-444444444444",
   flow: "55555555-5555-4555-8555-555555555555",
+  demo: "77777777-7777-4777-8777-777777777777",
+  replaced: "88888888-8888-4888-8888-888888888888",
 };
+const EXPIRED = { code: "PGRST303", message: "JWT expired", details: null, hint: null };
 
 function fakeSession() {
   const now = Math.floor(Date.now() / 1000);
@@ -297,6 +382,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     backend.requests.push(`${request.method()} ${url.pathname}${url.search}`);
     if (url.pathname.endsWith("/logout")) return backend.logoutFails ? route.abort("internetdisconnected") : route.fulfill({ status: 204 });
+    if (url.pathname.endsWith("/verify")) return json(fakeSession()); // signing in again with a code
     if (url.pathname.startsWith("/auth/v1/")) return json(fakeSession().user);
     const table = url.pathname.replace("/rest/v1/", "");
     const select = url.searchParams.get("select") || "";
@@ -316,6 +402,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
       case "piece_drafts": return json(backend.draft ? [{ storage: backend.draft, updated_at: new Date().toISOString() }] : []);
       case "piece_responses": return json(backend.submits.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
       case "rpc/save_draft": {
+        if (backend.authExpired) return json(EXPIRED, 401);
         if (backend.saveFails) return route.abort("internetdisconnected");
         const body = request.postDataJSON();
         backend.drafts.push(body);
@@ -324,7 +411,9 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         return route.fulfill({ status: 204 });
       }
       case "rpc/submit_response":
-        if (backend.submitFails) return json({ code: "P0001", message: "boom", details: null, hint: null }, 400);
+        if (backend.authExpired) return json(EXPIRED, 401);
+        if (backend.submitMode === "network") return route.abort("internetdisconnected");
+        if (backend.submitMode === "rejected") return json({ code: "P0001", message: "boom", details: null, hint: null }, 400);
         backend.submits.push(request.postDataJSON()); backend.submittedAt = new Date().toISOString();
         return json("66666666-6666-4666-8666-666666666666");
       default: return json({ message: `unexpected ${table}` }, 404);
@@ -333,21 +422,25 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
   return context;
 }
 
-function newBackend(html, flowHtml) {
+function newBackend(html, flowHtml, demoHtml) {
   const backend = {
-    requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitFails: false,
+    requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitMode: "ok", authExpired: false,
     saveFails: false, saveDelayMs: 0, logoutFails: false,
-    members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client" }],
+    members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
       { id: IDS.questions, project_id: IDS.project, kind: "questions", title: "Preguntas · ronda 1", revision: 1, language: "es", created_at: "2026-10-16T15:00:00Z" },
       { id: IDS.flow, project_id: IDS.project, kind: "flow_review", title: "Recorrido de flujos v2", revision: 2, language: "es", created_at: "2026-10-10T15:00:00Z" },
+      { id: IDS.demo, project_id: IDS.project, kind: "demo_review", title: "Demo v2", revision: 2, language: "es", created_at: "2026-10-09T15:00:00Z" },
+      { id: IDS.replaced, project_id: IDS.project, kind: "demo_review", title: "Demo v1", revision: 1, language: "es", created_at: "2026-10-01T15:00:00Z" },
     ],
-    html: { [IDS.questions]: html, [IDS.flow]: flowHtml || "<!doctype html><title>x</title>" },
+    html: { [IDS.questions]: html, [IDS.flow]: flowHtml || "<!doctype html><title>x</title>", [IDS.demo]: demoHtml || "<!doctype html><title>x</title>" },
     assignments() {
       return [
         { piece_id: IDS.questions, member_id: IDS.member, status: backend.submits.length ? "submitted" : backend.draft ? "in_progress" : "pending", assigned_at: "2026-10-16T15:00:00Z", updated_at: "2026-10-16T15:00:00Z" },
         { piece_id: IDS.flow, member_id: IDS.member, status: "submitted", assigned_at: "2026-10-10T15:00:00Z", updated_at: "2026-10-12T15:00:00Z" },
+        { piece_id: IDS.demo, member_id: IDS.member, status: "submitted", assigned_at: "2026-10-09T15:00:00Z", updated_at: "2026-10-11T15:00:00Z" },
+        { piece_id: IDS.replaced, member_id: IDS.member, status: "replaced", assigned_at: "2026-10-01T15:00:00Z", updated_at: "2026-10-09T15:00:00Z" },
       ];
     },
   };
@@ -367,14 +460,24 @@ async function noHorizontalScroll(page) {
   return page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 }
 
-async function mockedAppChecks(browser, base, html, flowHtml) {
-  const backend = newBackend(html, flowHtml);
+// The questions piece inside the app, once its script runs.
+async function appPiece(page, timeout = 10000) {
+  return waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function").catch(() => false)) ? f : null; }, timeout);
+}
+const pieceState = (frame) => frame.evaluate(() => ({ error: ST.submitError || null, sent: isSent(), text: document.body.innerText }));
+async function settledSend(frame, timeout = 10000) {
+  return waitFor(async () => { const s = await pieceState(frame).catch(() => null); return s && !s.text.includes("Enviando…") && (s.error || s.sent) ? s : null; }, timeout);
+}
+
+async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
+  const backend = newBackend(html, flowHtml, demoHtml);
   const context = await mockedContext(browser, { backend });
   const page = await context.newPage();
   const errors = [];
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("dialog", (d) => d.accept());
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
   let downloads = 0;
   page.on("download", () => { downloads += 1; });
 
@@ -385,18 +488,23 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
     h1: document.querySelector("h1")?.textContent,
     rows: [...document.querySelectorAll(".row")].map((r) => r.textContent),
   }));
-  check("app: home lists the assigned pieces", home.rows.length === 2, JSON.stringify(home.rows));
+  check("app: home lists the assigned pieces, without the replaced version", home.rows.length === 3 && !home.rows.some((r) => r.includes("Demo v1")), JSON.stringify(home.rows));
   check("app: project language (es) wins over browser (en-US)", home.lang === "es" && home.h1 === "Lo que te compartimos", `${home.lang} · ${home.h1}`);
   check("app: statuses in words", home.rows[0].includes("Por empezar") && home.rows[1].includes("Enviada"));
+  check("app: the three kinds have their label", ["Preguntas", "Revisión de recorridos", "Revisión de la demo"].every((label) => home.rows.some((r) => r.includes(label))), JSON.stringify(home.rows));
   check("app: list query never asks for pieces.html",
     backend.requests.filter((r) => r.includes("/rest/v1/pieces")).every((r) => !decodeURIComponent(r).includes("html")));
   check("app: home 360px no horizontal scroll", await noHorizontalScroll(page));
   await page.screenshot({ path: join(outDir, "home-360.png"), fullPage: true });
   const homeAxe = await axeViolations(page);
   if (homeAxe) check("app: axe on home has no violations", homeAxe.length === 0, homeAxe.join(", "));
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.screenshot({ path: join(outDir, "home-1440.png"), fullPage: true });
-  await page.setViewportSize({ width: 360, height: 780 });
+  // On its own page: resizing this one breaks clicks into the piece iframe later (headless Chrome).
+  const wide = await context.newPage();
+  await wide.setViewportSize({ width: 1440, height: 900 });
+  await wide.goto(`${base}/`, { waitUntil: "networkidle" });
+  await wide.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+  await wide.screenshot({ path: join(outDir, "home-1440.png"), fullPage: true });
+  await wide.close();
 
   // Open the questions piece, answer, autosave.
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
@@ -404,44 +512,92 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
   const pieceRequests = backend.requests.filter((r) => r.includes("/rest/v1/pieces") && decodeURIComponent(r).includes("html"));
   check("app: html fetched only when the piece opens", pieceRequests.length === 1, pieceRequests.join(" | "));
   const sandbox = await page.getAttribute("iframe.piece-frame", "sandbox");
-  check("app: iframe sandbox has no allow-same-origin", sandbox === "allow-scripts allow-downloads allow-modals allow-forms", sandbox);
-  const frame = await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof responder === "function").catch(() => false)) ? f : null; });
-  await frame.evaluate(() => { responder("Q-001", "si"); responder("Q-002", "no_se"); escribir("Q-002", "quien", "Luis"); });
+  check("app: iframe sandbox allows popups, never allow-same-origin",
+    sandbox === "allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox", sandbox);
+  check("app: the portal has no send button of its own", (await page.$$(".piece-bar button, .piece-bar [data-rol=accion-principal]")).length === 0);
+  let frame = await appPiece(page);
+  check("app: the piece gets the member's display name as reviewerName", (await frame.evaluate(() => factoryHost.reviewerName)) === "Ana Pérez");
+  await frame.evaluate(() => { responder("q-001", "si"); responder("q-002", "no_se"); escribir("q-002", "quien", "Luis"); });
   const saved = await waitFor(async () => backend.drafts.length && (await page.textContent(".piece-status")).includes("Guardado"), 5000);
   check("app: autosave calls save_draft and shows «Guardado»", saved, `${backend.drafts.length} save_draft call(s)`);
   const lastDraft = backend.drafts.at(-1);
   check("app: save_draft carries the piece localStorage", lastDraft && lastDraft.p_piece_id === IDS.questions &&
-    JSON.parse(lastDraft.p_storage["preguntas-portal-test-ronda-1-ana-perez"]).respuestas["Q-002"].quien === "Luis");
+    JSON.parse(lastDraft.p_storage[QUESTIONS_KEY]).respuestas["q-002"].quien === "Luis");
   check("app: piece 360px no horizontal scroll", await noHorizontalScroll(page));
   const pieceAxe = await axeViolations(page);
   if (pieceAxe) check("app: axe on the piece screen (portal chrome) has no violations", pieceAxe.length === 0, pieceAxe.join(", "));
 
-  // Send.
-  await page.click("[data-rol=accion-principal]");
-  const sent = await waitFor(async () => backend.submits.length && (await page.textContent(".piece-status")).includes("Enviada el"), 8000);
+  // (1) The piece sends through factorySubmit; submit_response answers ok.
+  await sendQuestions(frame);
+  const sent = await settledSend(frame);
   const body = backend.submits[0];
-  check("app: Enviar calls submit_response with respuestas-fabrica/1", sent && body.p_piece_id === IDS.questions && body.p_payload.formato === "respuestas-fabrica/1" && body.p_payload.respuestas.length === 2,
-    body ? JSON.stringify(body.p_payload.respuestas.map((r) => r.tipo)) : "no call");
-  check("app: the change confirms (button «Enviar otra vez», status «Enviada el…»)", (await page.textContent("[data-rol=accion-principal]")) === "Enviar otra vez");
-  check("app: submit did not trigger a download", downloads === 0);
-  await page.screenshot({ path: join(outDir, "piece-360.png") });
-
+  check("app: the piece's send calls submit_response once with respuestas-fabrica/1", sent && backend.submits.length === 1 && body.p_piece_id === IDS.questions &&
+    body.p_payload.formato === "respuestas-fabrica/1" && body.p_payload.respuestas.length === 2, body ? JSON.stringify(body.p_payload.respuestas.map((r) => r.tipo)) : "no call");
+  check("app: after the server saved, the piece shows its sent screen", sent && sent.sent && sent.text.includes(QUESTIONS_SENT), sent ? sent.error : "");
+  const order = backend.requests.filter((r) => r.includes("rpc/"));
+  const saveWithTime = backend.drafts.findIndex((d) => JSON.parse(d.p_storage[QUESTIONS_KEY]).enviada_en === body.p_payload.enviada_en);
+  // Position, among all RPC calls, of the save_draft that carried the send time.
+  const savePositions = order.map((r, i) => (r === "POST /rest/v1/rpc/save_draft" ? i : -1)).filter((i) => i !== -1);
+  check("app: the draft with the send time was saved before submit_response", saveWithTime !== -1 &&
+    savePositions[saveWithTime] < order.indexOf("POST /rest/v1/rpc/submit_response"), order.join(" > "));
+  check("app: the status line shows «Enviada el…»", await waitFor(async () => (await page.textContent(".piece-status")).includes("Enviada el"), 3000));
+  check("app: sending did not trigger a download", downloads === 0);
+  await page.screenshot({ path: join(outDir, "piece-sent-360.png") });
   check("app: no console errors up to here", errors.length === 0, errors.join(" | "));
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
 
-  // A failing submit explains itself in the page and keeps the answers (the 400 below is on purpose).
-  backend.submitFails = true;
-  await page.click("[data-rol=accion-principal]");
-  const notice = await waitFor(async () => page.evaluate(() => {
-    const n = document.querySelector("[data-rol=avisos] .notice[role=alert]");
-    if (!n) return null;
-    const pos = getComputedStyle(n).position;
-    return { text: n.textContent, inFrame: Boolean(n.closest("[data-rol=marco]")), pos };
-  }), 8000);
-  check("app: failed submit shows an in-page alert (not floating)", notice && notice.inFrame && notice.pos === "static" && notice.text.includes("No se pudo enviar"), notice ? notice.text : "none");
+  // (2) Network failure: the piece shows its error, never its sent screen; a retry with the server back works.
+  await frame.evaluate(() => editar());
+  backend.submitMode = "network";
+  await sendQuestions(frame);
+  const offline = await settledSend(frame);
+  check("app: network failure -> the piece gets «network» and shows its error", offline && offline.error === "network" && !offline.sent &&
+    offline.text.includes("No se pudieron enviar") && !offline.text.includes(QUESTIONS_SENT), offline ? offline.error : "no result");
+  check("app: nothing reached piece_responses", backend.submits.length === 1);
   await page.screenshot({ path: join(outDir, "piece-error-360.png") });
-  backend.submitFails = false;
+  backend.submitMode = "ok";
+  await frame.click("button[data-rol=accion-principal]"); // «Reintentar»
+  const retried = await settledSend(frame);
+  check("app: the retry with the server back works", retried && retried.sent && backend.submits.length === 2, `${backend.submits.length} row(s)`);
+
+  // A rejection from the server is «rejected».
+  await frame.evaluate(() => editar());
+  backend.submitMode = "rejected";
+  await sendQuestions(frame);
+  const refused = await settledSend(frame);
+  check("app: a server rejection -> the piece gets «rejected»", refused && refused.error === "rejected" && !refused.sent, refused ? refused.error : "");
+  backend.submitMode = "ok";
+
+  // (3) The session expired: «session-expired», the portal asks to sign in again, the draft stays on the server.
+  backend.authExpired = true;
+  await frame.click("button[data-rol=accion-principal]"); // «Reintentar»
+  const expired = await settledSend(frame);
+  check("app: expired session -> the piece gets «session-expired»", expired && expired.error === "session-expired" && !expired.sent, expired ? expired.error : "");
+  const ask = await waitFor(async () => page.evaluate(() => {
+    const n = document.querySelector("[data-rol=avisos] .notice[role=alert]");
+    return n && n.textContent.includes("Tu sesión terminó") ? { text: n.textContent, pos: getComputedStyle(n).position } : null;
+  }), 5000);
+  check("app: the portal shows its in-page sign-in-again notice", ask && ask.pos === "static" && ask.text.includes("Entrar de nuevo"), ask ? ask.text : "none");
+  const kept = backend.draft && JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas["q-002"]?.quien === "Luis";
+  check("app: the draft is still in piece_drafts", kept);
+  await page.click("text=Entrar de nuevo");
+  await page.waitForSelector("#email", { timeout: 10000 });
+  backend.authExpired = false;
+  await page.fill("#email", USER.email);
+  await page.click("button[type=submit]");
+  await page.waitForSelector("#code", { timeout: 10000 });
+  await page.fill("#code", "1".repeat(await page.evaluate(async () => (await import("./config.js")).EMAIL_OTP_LENGTH)));
+  await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+  await page.click(`a[href="#/piece/${IDS.questions}"]`);
+  frame = await appPiece(page);
+  const back = frame && await frame.evaluate(() => ({ n: respondidas(), quien: ST.respuestas["q-002"] && ST.respuestas["q-002"].quien }));
+  check("app: after signing in again the answers come back from piece_drafts", back && back.n === 2 && back.quien === "Luis", JSON.stringify(back));
+  const before = backend.submits.length;
+  await sendQuestions(frame);
+  const resent = await settledSend(frame);
+  check("app: after signing in again, sending works", resent && resent.sent && backend.submits.length === before + 1);
+  check("app: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
 
   // Back home: the list reflects the new status; reopen restores from the server draft.
   await page.click(".back-link");
@@ -455,14 +611,14 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
   // Reopen while the save is still in flight: the tab's newest copy must win over the old server copy.
   backend.saveDelayMs = 2500;
   const savesBefore = backend.drafts.length;
-  await pieceFrame(page).evaluate(() => { responder("Q-004", "cambio"); escribir("Q-004", "texto", "carrera"); });
+  await pieceFrame(page).evaluate(() => { responder("q-004", "cambio"); escribir("q-004", "texto", "carrera"); });
   await waitFor(async () => backend.drafts.length > savesBefore, 5000);
   await page.click(".back-link");
   await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   const raced = await waitFor(async () => {
     const f = pieceFrame(page);
-    return f && (await f.evaluate(() => typeof ST === "object" && ST.respuestas["Q-004"] ? ST.respuestas["Q-004"].texto : null).catch(() => null));
+    return f && (await f.evaluate(() => typeof ST === "object" && ST.respuestas["q-004"] ? ST.respuestas["q-004"].texto : null).catch(() => null));
   }, 10000);
   check("app: reopening during an in-flight save keeps the newest answers", raced === "carrera", String(raced));
   backend.saveDelayMs = 0;
@@ -470,15 +626,15 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
   // Sign out offline with unsaved changes: ask in the page; confirming lands on a clean sign-in.
   backend.saveFails = true;
   backend.logoutFails = true;
-  await pieceFrame(page).evaluate(() => responder("Q-001", "no_se"));
+  await pieceFrame(page).evaluate(() => responder("q-001", "no_se"));
   await page.click(".back-link");
   await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 });
   await page.click(".masthead .button--secondary");
-  const ask = await waitFor(async () => page.evaluate(() => {
+  const askOut = await waitFor(async () => page.evaluate(() => {
     const n = document.querySelector("[data-rol=avisos] .notice");
     return n && n.textContent.includes("se perderán") ? { h1: document.querySelector("h1").textContent, text: n.textContent } : null;
   }), 10000);
-  check("app: sign-out with unsaved changes asks before losing them", ask && ask.h1 === "Lo que te compartimos", ask ? ask.text : "no notice");
+  check("app: sign-out with unsaved changes asks before losing them", askOut && askOut.h1 === "Lo que te compartimos", askOut ? askOut.text : "no notice");
   const stillSignedIn = await page.evaluate((k) => Boolean(localStorage.getItem(k)), STORAGE_KEY);
   check("app: nothing is discarded until the person confirms", stillSignedIn && !(await page.$("#email")));
   await page.click("text=Salir y perder los cambios");
@@ -489,7 +645,7 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
   check("app: offline sign-out still lands on a clean sign-in screen", signedOut && !signedOut.session && signedOut.notice && signedOut.notice.includes("You signed out on this device"), // sign-in follows the browser (en-US here)
     signedOut ? JSON.stringify(signedOut) : "no sign-in screen");
 
-  check("app: no page errors after the forced failure", pageErrors.length === 0, pageErrors.join(" | "));
+  check("app: no page errors after the forced failures", pageErrors.length === 0, pageErrors.join(" | "));
   await context.close();
 
   // Empty state: signed in, nothing assigned.
@@ -512,11 +668,13 @@ async function mockedAppChecks(browser, base, html, flowHtml) {
 const { chromium } = loadPlaywright();
 const { child, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
+const read = (path) => (path ? readFileSync(path, "utf8") : null);
 try {
   if (!args["skip-portal"]) await portalChecks(browser, base);
-  if (args.questions) await questionsChecks(browser, base, readFileSync(args.questions, "utf8"));
-  if (args.flow) await flowChecks(browser, base, readFileSync(args.flow, "utf8"));
-  if (args.questions) await mockedAppChecks(browser, base, readFileSync(args.questions, "utf8"), args.flow ? readFileSync(args.flow, "utf8") : null);
+  if (args.questions) await questionsChecks(browser, base, read(args.questions));
+  if (args.flow) await flowChecks(browser, base, read(args.flow));
+  if (args.demo) await demoChecks(browser, base, read(args.demo));
+  if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
 } finally {
   await browser.close();
   child.kill();

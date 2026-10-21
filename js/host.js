@@ -3,7 +3,16 @@
 
 export const MAX_MESSAGE_BYTES = 1000000;
 
-export const SUBMIT_ERROR_REASONS = ["unsupported", "busy", "empty", "cancelled", "too-large", "invalid", "error"];
+// What globalThis.factorySubmit can resolve with in the piece: { ok: false, error: one of these }.
+export const SUBMIT_ERRORS = ["invalid", "too-large", "timeout", "network", "session-expired", "rejected"];
+
+// The shape a submitted payload must have for each piece kind: `field` must equal `value`, and
+// `list` must be an array. The bridge gets the shape of its kind and checks it before posting.
+export const PAYLOAD_SHAPES = {
+  questions: { field: "formato", value: "respuestas-fabrica/1", list: "respuestas" },
+  flow_review: { field: "artefacto", value: "ux-flows.md", list: "flujos" },
+  demo_review: { field: "esquema", value: "revision-demo/1", list: "flujos" },
+};
 
 const encoder = new TextEncoder();
 
@@ -18,10 +27,9 @@ function isPlainObject(value) {
 }
 
 export function isValidPayload(kind, payload) {
-  if (!isPlainObject(payload)) return false;
-  if (kind === "questions") return payload.formato === "respuestas-fabrica/1" && Array.isArray(payload.respuestas);
-  if (kind === "flow_review") return payload.artefacto === "ux-flows.md" && Array.isArray(payload.flujos);
-  return false;
+  if (!isPlainObject(payload) || !Object.hasOwn(PAYLOAD_SHAPES, kind)) return false;
+  const shape = PAYLOAD_SHAPES[kind];
+  return payload[shape.field] === shape.value && Array.isArray(payload[shape.list]);
 }
 
 // Returns { ok: true, message } or { ok: false, reason }. The caller has already checked that
@@ -36,8 +44,8 @@ export function parseBridgeMessage(data, kind, nonce) {
     case "factory:dirty":
       return { ok: true, message: { type: data.type } };
     case "factory:ready":
-      if (typeof data.persistence !== "boolean" || typeof data.canSubmit !== "boolean") return no("shape");
-      return { ok: true, message: { type: data.type, persistence: data.persistence, canSubmit: data.canSubmit } };
+      if (typeof data.persistence !== "boolean") return no("shape");
+      return { ok: true, message: { type: data.type, persistence: data.persistence } };
     case "factory:flushed":
       return { ok: true, message: { type: data.type } };
     case "factory:draft": {
@@ -46,12 +54,9 @@ export function parseBridgeMessage(data, kind, nonce) {
       return { ok: true, message: { type: data.type, storage: data.storage } };
     }
     case "factory:submit":
-      if (typeof data.requestId !== "string") return no("shape");
+      if (typeof data.requestId !== "string" || !data.requestId || data.requestId.length > 100) return no("shape");
       if (!isValidPayload(kind, data.payload)) return no("payload");
       return { ok: true, message: { type: data.type, requestId: data.requestId, payload: data.payload } };
-    case "factory:submit-error":
-      if (typeof data.requestId !== "string" || !SUBMIT_ERROR_REASONS.includes(data.reason)) return no("shape");
-      return { ok: true, message: { type: data.type, requestId: data.requestId, reason: data.reason } };
     default:
       return no("type");
   }

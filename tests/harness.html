@@ -17,8 +17,8 @@
   <p>Local harness: mounts a piece HTML with the real bridge and host code, without Supabase.
   Load a file, or drive it from <code>window.harness</code>.</p>
   <label>Piece file <input type="file" id="file" accept=".html,text/html"></label>
-  <label>Kind <select id="kind"><option value="questions">questions</option><option value="flow_review">flow_review</option></select></label>
-  <button type="button" id="submit">Send</button>
+  <label>Kind <select id="kind"><option value="questions">questions</option><option value="flow_review">flow_review</option><option value="demo_review">demo_review</option></select></label>
+  <label><input type="checkbox" id="auto" checked> Answer every send with ok</label>
   <output id="last"></output>
 </header>
 <main id="stage"></main>
@@ -28,25 +28,30 @@ import { mountPiece } from "../js/piece-frame.js";
 const stage = document.getElementById("stage");
 const last = document.getElementById("last");
 let frame = null;
-let counter = 0;
 
 const harness = {
   events: [],
-  mount(html, kind, storage = {}) {
+  // options: { host: { reviewerName }, submitTimeoutMs, autoRespond }. Without autoRespond, a send
+  // waits until the test calls harness.respond(requestId, result).
+  mount(html, kind, storage = {}, options = {}) {
     if (frame) frame.destroy();
     harness.events = [];
     const record = (type) => (detail) => {
       harness.events.push({ type, detail });
       last.textContent = `${type}: ${String(JSON.stringify(detail ?? null)).slice(0, 200)}`;
     };
-    frame = mountPiece({
+    const onSubmit = record("submit");
+    const mounted = mountPiece({
       container: stage, html, kind, storage, title: "Piece under test",
-      onReady: record("ready"), onDirty: record("dirty"), onDraft: record("draft"), onSubmit: record("submit"),
-      onSubmitError: record("submit-error"), onRejected: record("rejected"), onNavigatedAway: record("navigated"),
+      host: options.host, submitTimeoutMs: options.submitTimeoutMs,
+      onReady: record("ready"), onDirty: record("dirty"), onDraft: record("draft"),
+      onSubmit: (message) => { onSubmit(message); if (options.autoRespond) mounted.respond(message.requestId, { ok: true }); },
+      onRejected: record("rejected"), onNavigatedAway: record("navigated"),
     });
+    frame = mounted;
     return frame;
   },
-  submit() { const id = `req-${++counter}`; frame.collect(id); return id; },
+  respond(requestId, result) { frame.respond(requestId, result); },
   flush(ms) { return frame.flush(ms); },
   frameElement() { return frame && frame.iframe; },
 };
@@ -54,9 +59,8 @@ window.harness = harness;
 
 document.getElementById("file").addEventListener("change", async (event) => {
   const file = event.target.files[0];
-  if (file) harness.mount(await file.text(), document.getElementById("kind").value);
+  if (file) harness.mount(await file.text(), document.getElementById("kind").value, {}, { autoRespond: document.getElementById("auto").checked });
 });
-document.getElementById("submit").addEventListener("click", () => harness.submit());
 </script>
 </body>
 </html>

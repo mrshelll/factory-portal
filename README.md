@@ -35,8 +35,10 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
 2. **Home**: the pieces assigned to the person, grouped by project, with status (not started, in
    progress, sent) and date. The list never fetches `pieces.html`; it is fetched only when a piece is
    opened.
-3. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms">`
+3. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
+   The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
+   normal tab.
 
 Text shown to people follows the project language (`projects.language`, `es` or `en`); before the
 project is known (sign-in), the browser language is used, Spanish by default. All strings live in
@@ -58,23 +60,25 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   `save_draft` (one request at a time, newest data wins, retries when offline). The draft is also
   flushed when the person leaves the piece or the page is hidden. `sessionStorage` gets the same
   shim without persistence.
-- **Sending.** The portal's "Send" button asks the bridge to collect (`factory:collect`). The bridge
-  arms a one-shot capture and calls the piece's own export function (the one behind its download
-  button: `enviar()` + `descargar()` for questions, `downloadReview()` for flow reviews). It
-  intercepts the JSON `Blob` that function hands to a temporary `<a download>` (wrapping
-  `URL.createObjectURL` and `HTMLAnchorElement.prototype.click`, plus a capture-phase click
-  listener), cancels that download and posts `{ type: "factory:submit", payload }`. The portal calls
-  `submit_response`. Outside a capture, downloads work as usual, so the piece's own download button
-  remains a fallback.
+- **Sending.** The piece has the only "Send" button. It calls `globalThis.factorySubmit(payload)`,
+  which the bridge defines: it checks the payload against the piece kind (`respuestas-fabrica/1`,
+  `ux-flows.md`, `revision-demo/1`) and size, sends the pending draft, and posts
+  `{ type: "factory:submit", requestId, payload }`. The portal waits up to 3 s for that draft to be
+  saved, calls `submit_response` and answers `{ type: "factory:submit-result", requestId, ok, error? }`.
+  The promise resolves `{ ok: true }` only after the server saved; otherwise `{ ok: false, error }`
+  with `invalid`, `too-large`, `timeout` (no answer in 45 s), `network`, `session-expired` (the
+  portal also offers to sign in again) or `rejected`. A second call while one is in flight returns
+  the same promise. The piece shows its own sent screen; the portal's status line shows the send
+  time. Downloads are not touched, so the piece's own "Download a copy" stays as the fallback.
+- **Host.** The bridge also defines a frozen `globalThis.factoryHost = { persistence, reviewerName }`:
+  `persistence` is `"server"` when the storage shim took (else `"none"`), and `reviewerName` is the
+  member's `project_members.display_name` (or `null`).
 - **Messages.** Each mounted piece gets a random nonce (`crypto.getRandomValues`) inside its
   injected config. The portal only accepts messages whose `event.source` is the piece iframe and that
   carry that nonce, with a known type, the expected shape and under 1 MB. The bridge only posts to the
-  portal's origin and only accepts messages from its parent with the nonce. If the iframe loads a
+  portal's origin and only accepts messages (`factory:flush`, `factory:submit-result`) from its
+  parent, from the portal's origin, with the nonce. If the iframe loads a
   second document (the piece navigated away or reloaded), the portal removes it and offers to reopen.
-
-Fragility: the capture depends on the piece templates keeping those global function names and
-exporting through a `Blob` + `<a download>`. If a template changes that, the bridge reports
-`unsupported` and the person is told to use the download button inside the piece.
 
 Reopening a piece waits briefly for a save still in flight and always starts from the newest copy
 seen in the tab. Signing out first tries to save pending drafts; if that is not possible (offline),
@@ -85,7 +89,7 @@ the page asks before discarding them. Sign-out always ends on a clean sign-in sc
 
 ```sh
 npm test   # node --test: bridge serialization/injection, message validation, draft queue, errors, i18n
-node tests/browser/run-checks.mjs --questions <questions-piece.html> --flow <flow-review-piece.html>
+node tests/browser/run-checks.mjs --questions <questions-piece.html> --flow <flow-review-piece.html> --demo <demo-sheet.html>
 ```
 
 The browser checks start `python3 -m http.server`, drive Chrome headless with `playwright-core`
@@ -103,7 +107,7 @@ piece file.
 | `config.js` | Public Supabase configuration |
 | `js/app.js` | Router and screens: sign in, home, piece |
 | `js/api.js` | Supabase queries and RPCs |
-| `js/bridge.js` | Script injected into each piece (storage shim, export capture) |
+| `js/bridge.js` | Script injected into each piece (storage shim, `factorySubmit`, `factoryHost`) |
 | `js/piece-frame.js` | Mounts a piece in the sandboxed iframe and speaks the bridge protocol |
 | `js/host.js` | Message validation and the draft save queue |
 | `js/auth-errors.js`, `js/i18n.js`, `js/dom.js`, `js/supabase-client.js` | Helpers |

@@ -32,7 +32,7 @@ test("every key the app uses exists in the dictionaries", async () => {
   const source = await readFile(new URL("../../js/app.js", import.meta.url), "utf8");
   const used = new Set([...source.matchAll(/\bt\(\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
   // keys picked through lookup tables
-  for (const m of source.matchAll(/:\s*"((?:status|submit)[A-Z][A-Za-z]*|saving|saved|saveError)"/g)) used.add(m[1]);
+  for (const m of source.matchAll(/:\s*"((?:status|kind)[A-Z][A-Za-z]*|saving|saved|saveError)"/g)) used.add(m[1]);
   const missing = [...used].filter((key) => !(key in dictionaries.es) || !(key in dictionaries.en));
   assert.deepEqual(missing, []);
 });
