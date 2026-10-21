@@ -88,9 +88,10 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
 Reopening a piece waits briefly for a save still in flight and always starts from the newest copy
 seen in the tab. When the session ends (it expired, or it was closed elsewhere), the open piece
 hands over its last change first, and every draft the server has not confirmed stays in the tab: it
-is saved as soon as the same account signs in again (if another account signs in on that tab, those
-drafts are dropped, since they could not be saved under it). Leaving the page with such a draft
-still asks for confirmation. Signing out first tries to save pending drafts; if that is not possible
+is saved as soon as the same account signs in again. A draft is only ever saved with its owner's
+session: if another account signs in on that tab, the previous account's drafts are set aside (never
+sent with the new session, never shown to it) and are saved when their owner signs in again. Leaving
+the page with such a draft still asks for confirmation. Signing out first tries to save pending drafts; if that is not possible
 (offline), the page asks before discarding them. Sign-out always ends on a clean sign-in screen:
 with scope `local`, supabase-js removes the local session even when the network call fails.
 

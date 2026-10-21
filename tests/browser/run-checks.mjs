@@ -426,6 +426,11 @@ function fakeSession(user = USER) {
     user: { id: user.id, email: user.email, aud: "authenticated", role: "authenticated" } };
 }
 
+function tokenSubject(request) {
+  const match = /^Bearer\s+([^.]+)\.([^.]+)\./.exec(request.headers().authorization || "");
+  try { return match ? JSON.parse(Buffer.from(match[2], "base64url").toString("utf8")).sub || null : null; } catch { return null; }
+}
+
 async function mockedContext(browser, { width = 360, locale = "en-US", backend }) {
   const context = await browser.newContext({ viewport: { width, height: 780 }, locale });
   await context.addInitScript(([key, value]) => {
@@ -437,6 +442,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
     const url = new URL(request.url());
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     backend.requests.push(`${request.method()} ${url.pathname}${url.search}`);
+    const sub = tokenSubject(request); // whose session made the request (null without one)
     if (backend.readsExpired && request.method() === "GET" && url.pathname.startsWith("/rest/v1/")) return json(EXPIRED, 401);
     if (url.pathname.endsWith("/logout")) return backend.logoutFails ? route.abort("internetdisconnected") : route.fulfill({ status: 204 });
     if (url.pathname.endsWith("/verify")) return json(fakeSession(backend.signInAs || USER)); // signing in again with a code
@@ -448,7 +454,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
       case "projects": return json(backend.projects);
       case "piece_assignments": {
         const eq = url.searchParams.get("piece_id");
-        const rows = backend.assignments();
+        const rows = backend.assignments(sub);
         return json(eq ? rows.filter((a) => `eq.${a.piece_id}` === eq) : rows);
       }
       case "pieces": {
@@ -456,15 +462,20 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         if (select.includes("html")) return json(backend.pieces.filter((p) => `eq.${p.id}` === eq).map((p) => ({ ...p, html: backend.html[p.id] })));
         return json(backend.pieces);
       }
-      case "piece_drafts": return json(backend.draft ? [{ storage: backend.draft, updated_at: new Date().toISOString() }] : []);
+      case "piece_drafts": {
+        const draft = sub && sub !== USER.id ? backend.draftBy[sub] : backend.draft;
+        return json(draft ? [{ storage: draft, updated_at: new Date().toISOString() }] : []);
+      }
       case "piece_responses": return json(backend.submits.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
       case "rpc/save_draft": {
         if (backend.authExpired) { backend.expiredSaves += 1; return json(EXPIRED, 401); }
         if (backend.saveFails) return route.abort("internetdisconnected");
         const body = request.postDataJSON();
-        backend.drafts.push(body);
+        backend.drafts.push({ ...body, sub });
         if (backend.saveDelayMs) await sleep(backend.saveDelayMs);
-        backend.draft = body.p_storage; // the server copy changes only when the save completes
+        // The server copy changes only when the save completes, and it is the caller's own.
+        if (sub && sub !== USER.id) backend.draftBy[sub] = body.p_storage;
+        else backend.draft = body.p_storage;
         return route.fulfill({ status: 204 });
       }
       case "rpc/submit_response":
@@ -482,7 +493,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
 function newBackend(html, flowHtml, demoHtml) {
   const backend = {
     requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitMode: "ok", authExpired: false,
-    readsExpired: false, expiredSaves: 0, saveFails: false, saveDelayMs: 0, logoutFails: false,
+    readsExpired: false, expiredSaves: 0, draftBy: {}, saveFails: false, saveDelayMs: 0, logoutFails: false,
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
@@ -739,11 +750,20 @@ async function sessionEndDraftChecks(browser, base, html) {
   for (const other of [false, true]) await sessionEndDraftRun(browser, base, html, other);
 }
 
-// other = true: someone else signs in on the same tab; the kept change is not theirs and is never sent.
+// other = true: after the session ends, someone else (B) signs in on the same tab. Nothing of A's is
+// sent with B's session or shown to B; when A signs in again, A's kept change is saved.
+const OTHER = { id: "99999999-9999-4999-8999-999999999999", email: "luis@example.com", member: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
 async function sessionEndDraftRun(browser, base, html, other) {
   const tag = other ? "session end, another account" : "session end";
   const backend = newBackend(html);
-  if (other) backend.signInAs = { id: "99999999-9999-4999-8999-999999999999", email: "luis@example.com" };
+  if (other) {
+    backend.signInAs = OTHER;
+    backend.members.push({ id: OTHER.member, project_id: IDS.project, email: OTHER.email, user_id: OTHER.id, role: "client", display_name: "Luis Gómez" });
+    const ownRows = backend.assignments;
+    backend.assignments = (sub) => (sub === OTHER.id
+      ? [{ piece_id: IDS.questions, member_id: OTHER.member, status: "pending", assigned_at: "2026-10-16T15:00:00Z", updated_at: "2026-10-16T15:00:00Z" }]
+      : ownRows());
+  }
   const context = await mockedContext(browser, { backend });
   const page = await context.newPage();
   const errors = [];
@@ -777,18 +797,32 @@ async function sessionEndDraftRun(browser, base, html, other) {
   await signInThroughScreens(page);
   await page.waitForSelector(".row-link, .empty", { timeout: 10000 }); // the other account has nothing shared
   if (other) {
-    await sleep(2000);
-    check(`${tag}: the kept change is not saved under the new account`, !backend.drafts.some((d) => edited(d.p_storage)), `${backend.drafts.length} save_draft call(s)`);
-    await context.close();
-    return;
+    await sleep(3500); // longer than the first retry (3 s) of the kept draft
+    check(`${tag}: nothing of A's is sent with B's session`, !backend.drafts.some((d) => d.sub === OTHER.id || edited(d.p_storage)),
+      JSON.stringify(backend.drafts.map((d) => d.sub)));
+    const homeB = await page.evaluate(() => ({ notice: document.querySelector("[data-rol=avisos] .notice")?.textContent || null, rows: document.querySelectorAll(".row").length }));
+    check(`${tag}: B's home does not warn about A's unsaved changes`, homeB.rows === 1 && !homeB.notice, JSON.stringify(homeB));
+    await page.click(`a[href="#/piece/${IDS.questions}"]`);
+    frame = await appPiece(page);
+    const seenByB = frame && await frame.evaluate(() => ({ answered: respondidas(), q1: ST.respuestas["q-001"] || null, q3: ST.respuestas["q-003"] || null }));
+    check(`${tag}: B opens the same piece and sees none of A's answers`, seenByB && seenByB.answered === 0 && !seenByB.q1 && !seenByB.q3, JSON.stringify(seenByB));
+    // B leaves and signs out (nothing unsaved: a clean sign-out); then A signs in again on the tab.
+    await page.click(".back-link");
+    await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 });
+    await page.click(".masthead .button--secondary");
+    backend.signInAs = USER;
+    await signInThroughScreens(page);
+    await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
   }
   const reached = await waitFor(() => backend.draft && edited(backend.draft), 8000);
-  check(`${tag}: after signing in again, the unsaved change reaches piece_drafts`, reached,
+  check(`${tag}: after ${other ? "A signs" : "signing"} in again, the unsaved change reaches piece_drafts`, reached,
     backend.draft ? JSON.stringify(JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas) : "no server draft");
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   frame = await appPiece(page);
   const shown = frame && await frame.evaluate(() => ({ q1: ST.respuestas["q-001"]?.tipo, q3: ST.respuestas["q-003"]?.texto }));
   check(`${tag}: the piece shows the change after signing in again`, shown && shown.q1 === "si" && shown.q3 === "Escrito al final de la sesión", JSON.stringify(shown));
+  if (other) check(`${tag}: every save of A's change went with A's session`, backend.drafts.filter((d) => edited(d.p_storage)).every((d) => d.sub === USER.id),
+    JSON.stringify(backend.drafts.map((d) => d.sub)));
   check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
   await context.close();
 }

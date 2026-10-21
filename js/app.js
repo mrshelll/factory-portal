@@ -33,8 +33,9 @@ const state = {
   signingOut: false,
   savers: new Map(),          // pieceId -> draft saver (outlives the piece screen and a session end)
   localDrafts: new Map(),     // pieceId -> newest storage seen in this tab
-  draftOwner: null,           // user id the savers and local drafts belong to
+  draftOwner: null,           // user id the savers and local drafts above belong to
   resumeSaves: false,         // the session ended with unsaved drafts: save them after signing in again
+  setAside: new Map(),        // user id -> { savers, localDrafts } kept unsaved while another account is in
   statusListeners: new Map(), // pieceId -> save status callback of the open piece screen
 };
 
@@ -336,16 +337,30 @@ function keepOnlyUnsaved() {
   if (state.savers.size) state.resumeSaves = true;
 }
 
-// Runs on every screen with a session. Drafts kept from another account are dropped (they could not
-// be saved under this one); with the same account, the kept drafts are saved now.
+// Runs on every screen with a session. When another account signs in on the tab, the drafts the
+// previous one could not save are set aside (never sent with this session, never shown to it) and the
+// new account starts with its own; when an account comes back, its drafts set aside are restored and
+// saved. Kept drafts are only dropped once the server confirmed them or on an explicit sign-out.
 function adoptSession() {
   const userId = state.session.user.id;
-  if (state.draftOwner && state.draftOwner !== userId) disposeSavers();
-  state.draftOwner = userId;
+  if (state.draftOwner !== userId) {
+    if (state.draftOwner && state.savers.size) {
+      state.setAside.set(state.draftOwner, { savers: state.savers, localDrafts: state.localDrafts });
+    } else disposeSavers();
+    const own = state.setAside.get(userId);
+    state.setAside.delete(userId);
+    state.savers = own ? own.savers : new Map();
+    state.localDrafts = own ? own.localDrafts : new Map();
+    state.draftOwner = userId;
+    state.resumeSaves = Boolean(own);
+  }
   if (!state.resumeSaves) return;
   state.resumeSaves = false;
   for (const saver of state.savers.values()) saver.retryNow();
 }
+
+const hasUnsavedDrafts = () => [state.savers, ...[...state.setAside.values()].map((b) => b.savers)]
+  .some((savers) => [...savers.values()].some((s) => s.hasUnsaved()));
 
 // Signing out never drops unsaved drafts silently: it first tries to save them, and if that is not
 // possible (offline) it asks in the page before discarding them.
@@ -474,10 +489,17 @@ async function showHome(viewId) {
 
 function saverFor(pieceId) {
   if (!state.savers.has(pieceId)) {
+    const owner = state.draftOwner;
+    const own = () => Boolean(owner) && state.session?.user?.id === owner;
     state.savers.set(pieceId, createDraftSaver({
-      // Without a session the save fails at once and the saver keeps the data for later.
-      save: (storage) => (state.session ? saveDraft(supabase, pieceId, storage) : Promise.reject(new Error("signed out"))),
-      onStatus: (status) => { const listener = state.statusListeners.get(pieceId); if (listener) listener(status); },
+      // Only with its owner's session: signed out, or with another account in, the save fails at once
+      // without a request and the saver keeps the data for later.
+      save: (storage) => (own() ? saveDraft(supabase, pieceId, storage) : Promise.reject(new Error("not the draft owner's session"))),
+      onStatus: (status) => {
+        if (state.draftOwner !== owner) return;
+        const listener = state.statusListeners.get(pieceId);
+        if (listener) listener(status);
+      },
     }));
   }
   return state.savers.get(pieceId);
@@ -541,6 +563,7 @@ async function showPiece(pieceId, viewId) {
   const { notices, status, main, live } = layout;
 
   const saver = saverFor(pieceId);
+  const localDrafts = state.localDrafts; // this account's, even if the maps are swapped later
   let saveStatus = saver.hasUnsaved() ? "error" : "idle";
   let lastSubmittedAt = context.lastSubmittedAt;
   const handled = new Set();
@@ -593,7 +616,7 @@ async function showPiece(pieceId, viewId) {
     host: { reviewerName: context.memberDisplayName },
     onReady: (ready) => { if (!ready.persistence) showNotice(notices, { tone: "warning", text: t("noPersistence") }); },
     onDirty: () => saver.markPending(),
-    onDraft: (storage) => { state.localDrafts.set(pieceId, storage); saver.push(storage); },
+    onDraft: (storage) => { localDrafts.set(pieceId, storage); saver.push(storage); },
     onNavigatedAway: () => {
       frame = null;
       showNotice(notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });
@@ -608,7 +631,7 @@ async function showPiece(pieceId, viewId) {
 window.addEventListener("hashchange", route);
 window.addEventListener("online", () => { for (const saver of state.savers.values()) saver.retryNow(); });
 window.addEventListener("beforeunload", (event) => {
-  if ([...state.savers.values()].some((s) => s.hasUnsaved())) { event.preventDefault(); event.returnValue = ""; }
+  if (hasUnsavedDrafts()) { event.preventDefault(); event.returnValue = ""; }
 });
 
 supabase.auth.onAuthStateChange((event, session) => {
