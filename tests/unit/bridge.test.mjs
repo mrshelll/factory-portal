@@ -74,6 +74,12 @@ import vm from "node:vm";
 const ORIGIN = "https://portal.test";
 const questions = (extra = {}) => ({ formato: "respuestas-fabrica/1", respuestas: [{ id: "Q-1", tipo: "si" }], ...extra });
 
+// The piece's <html>: only what the bridge touches.
+function fakeRoot() {
+  const attributes = {};
+  return { attributes, setAttribute(name, value) { attributes[name] = String(value); } };
+}
+
 // Runs the built bridge script in a context that plays the piece window. Returns the window, the
 // messages the bridge posted to its parent and a way to post messages back as the parent.
 function runBridge(overrides = {}) {
@@ -82,10 +88,15 @@ function runBridge(overrides = {}) {
   const source = script.slice("<script>".length, -"</script>".length);
   const posted = [];
   const listeners = {};
+  const docListeners = {};
   const parent = { postMessage(message, origin) { posted.push({ message: structuredClone(message), origin }); } };
   const win = {
     parent, setTimeout, clearTimeout, TextEncoder, structuredClone,
-    document: { readyState: "complete", visibilityState: "visible", addEventListener() {} },
+    document: {
+      readyState: overrides.readyState || "complete", visibilityState: "visible",
+      addEventListener(type, fn) { (docListeners[type] ||= []).push(fn); },
+      documentElement: overrides.documentElement === undefined ? fakeRoot() : overrides.documentElement,
+    },
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
   };
   win.window = win;
@@ -95,7 +106,9 @@ function runBridge(overrides = {}) {
   const fromParent = (data, { origin = ORIGIN, source: src = parent } = {}) =>
     (listeners.message || []).forEach((fn) => fn({ source: src, origin, data }));
   const of = (type) => posted.filter((p) => p.message.type === type).map((p) => p.message);
-  return { win, posted, of, fromParent };
+  // The piece's document finished parsing (only meaningful with readyState "loading").
+  const parsed = () => (docListeners.DOMContentLoaded || []).forEach((fn) => fn());
+  return { win, posted, of, fromParent, parsed };
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 // Objects made inside the vm context have that realm's prototypes; compare them as plain data.
@@ -107,6 +120,16 @@ test("the injected script defines factorySubmit and a frozen factoryHost", () =>
   assert.ok(Object.isFrozen(win.factoryHost));
   assert.equal(win.factoryHost.persistence, "server");
   assert.equal(win.factoryHost.reviewerName, "Ana Pérez");
+});
+
+test("the bridge marks the piece's <html> with data-factory-host=portal before the piece runs", () => {
+  const { win } = runBridge();
+  assert.equal(win.document.documentElement.attributes["data-factory-host"], "portal");
+});
+
+test("without a documentElement the bridge still defines factorySubmit", () => {
+  const { win } = runBridge({ documentElement: null });
+  assert.equal(typeof win.factorySubmit, "function");
 });
 
 test("reviewerName travels escaped: </script><b> does not break the script", () => {
@@ -283,4 +306,31 @@ test("without a refusal, re-writing the stored value is still not a change", () 
   win.dispatchPagehide();
   assert.equal(of("factory:dirty").length, 1);
   assert.equal(of("factory:draft").length, drafts);
+});
+
+// The piece's own start-up writes (restoring, stamping the opening time, probing the storage) are not the
+// person's doing: they post nothing and travel with the first change made after the piece opened.
+test("writes made while the piece opens post nothing, not even on flush or pagehide", async () => {
+  const { win, posted, fromParent, parsed } = runBridge({ readyState: "loading" });
+  win.localStorage.setItem("opened", "t0");
+  win.localStorage.setItem("probe", "1"); win.localStorage.removeItem("probe");
+  parsed();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready"]);
+  win.dispatchPagehide();
+  fromParent({ type: "factory:flush", nonce: "n-1" });
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:flushed"]);
+});
+
+test("factory:ready comes once the opening is over, and the first change after it carries the opening writes", async () => {
+  const { win, of, parsed } = runBridge({ readyState: "loading" });
+  win.localStorage.setItem("opened", "t0");
+  parsed();
+  assert.equal(of("factory:ready").length, 0, "not before the piece's start-up code has run");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(of("factory:ready").length, 1);
+  win.localStorage.setItem("answer", "yes");
+  assert.equal(of("factory:dirty").length, 1);
+  win.dispatchPagehide();
+  assert.deepEqual(await plain(of("factory:draft").at(-1).storage), { opened: "t0", answer: "yes" });
 });

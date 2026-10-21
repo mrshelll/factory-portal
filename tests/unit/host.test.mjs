@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseBridgeMessage, isValidPayload, createDraftSaver, trySaveAll, MAX_MESSAGE_BYTES } from "../../js/host.js";
+import { parseBridgeMessage, isValidPayload, createDraftSaver, trySaveAll, MAX_MESSAGE_BYTES, sendNotInDraft } from "../../js/host.js";
 
 const N = "nonce-1";
 const questionsPayload = { formato: "respuestas-fabrica/1", proyecto: "portal-test", respuestas: [] };
@@ -157,4 +157,17 @@ test("parseBridgeMessage accepts factory:save-failed only with reason too-large"
   }
   assert.equal(parseBridgeMessage({ type: "factory:save-failed", reason: "too-large" }, "questions", N).ok, false, "needs the nonce");
   assert.equal(parseBridgeMessage({ nonce: "other", type: "factory:save-failed", reason: "too-large" }, "questions", N).ok, false);
+});
+
+// The piece shows its own send, from its saved draft. Only when the server has a send and the saved draft
+// is older than it (the piece never saved its «sent» mark) does the portal say it.
+test("sendNotInDraft: a send newer than the saved draft, or with no draft, is not in the draft", () => {
+  const sent = "2026-10-21T15:00:00.000Z";
+  assert.equal(sendNotInDraft({ lastSubmittedAt: sent, draftUpdatedAt: "2026-10-21T14:59:00.000Z" }), true);
+  assert.equal(sendNotInDraft({ lastSubmittedAt: sent, draftUpdatedAt: null }), true);
+  assert.equal(sendNotInDraft({ lastSubmittedAt: sent, draftUpdatedAt: "2026-10-21T15:00:01.000Z" }), false, "saved after the send");
+  assert.equal(sendNotInDraft({ lastSubmittedAt: sent, draftUpdatedAt: sent }), true, "the same instant is not after it");
+  assert.equal(sendNotInDraft({ lastSubmittedAt: null, draftUpdatedAt: null }), false, "nothing sent");
+  assert.equal(sendNotInDraft({ lastSubmittedAt: "garbage", draftUpdatedAt: null }), false, "an unreadable send time says nothing");
+  assert.equal(sendNotInDraft({ lastSubmittedAt: sent, draftUpdatedAt: "garbage" }), true, "an unreadable draft time is as no draft");
 });

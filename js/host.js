@@ -157,3 +157,13 @@ export async function trySaveAll(savers, timeoutMs) {
   clearTimeout(timer);
   return !list.some((saver) => saver.hasUnsaved());
 }
+
+// The piece shows its own send from its saved draft (its «sent» mark). True when the server has a send that
+// the saved draft cannot reflect: there is no draft, or it was last saved at or before the send (the piece
+// did not get to save its mark). Both times come from the server's clock.
+export function sendNotInDraft({ lastSubmittedAt, draftUpdatedAt }) {
+  const sent = Date.parse(lastSubmittedAt);
+  if (!Number.isFinite(sent)) return false;
+  const saved = Date.parse(draftUpdatedAt);
+  return !Number.isFinite(saved) || saved <= sent;
+}

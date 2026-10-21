@@ -175,8 +175,11 @@ async function harnessContext(browser, base) {
 const pieceFrame = (page) => page.frames().find((f) => f !== page.mainFrame());
 const events = (page, type) => page.evaluate((t) => window.harness.events.filter((e) => e.type === t).map((e) => e.detail), type);
 const QUESTIONS_KEY = "preguntas-portal-test-ronda-1-ana-perez";
-const QUESTIONS_SENT = "Listo, tus respuestas llegaron";
-const FLOW_SENT = "Listo, tu revisión llegó";
+// The sent screens' headings. They are compared as a whole line: the demo sheet can also say «Tu revisión
+// llegó, pero cambiaste algo…», which must not count as its sent screen.
+const QUESTIONS_SENT = "Tus respuestas llegaron";
+const FLOW_SENT = "Tu revisión llegó";
+const isLine = (line) => (text) => text.trim() === line;
 const frameText = (frame) => frame.evaluate(() => document.body.innerText);
 // The questions piece: go to "Revisa y envía" and tap its send button (the piece's own).
 async function sendQuestions(frame) {
@@ -242,13 +245,13 @@ async function questionsChecks(browser, base, html) {
   check("questions: the draft with the send time was flushed before the send", sentDraft && JSON.parse(sentDraft[QUESTIONS_KEY]).enviada_en === p.enviada_en);
   await sleep(300);
   const waiting = await frameText(pieceFrame(page));
-  check("questions: while the portal has not answered, the piece does not say it was sent", !waiting.includes(QUESTIONS_SENT) && waiting.includes("Enviando"));
+  check("questions: while the portal has not answered, the piece does not say it was sent", !waiting.split("\n").some(isLine(QUESTIONS_SENT)) && waiting.includes("Enviando"));
   // A result without the nonce (posted by the parent page, but forged) is ignored.
   await page.evaluate((id) => window.harness.frameElement().contentWindow.postMessage({ type: "factory:submit-result", requestId: id, ok: true, nonce: "guess" }, "*"), submitted.requestId);
   await sleep(200);
-  check("questions: a submit-result without the mount nonce is ignored", !(await frameText(pieceFrame(page))).includes(QUESTIONS_SENT));
+  check("questions: a submit-result without the mount nonce is ignored", !(await frameText(pieceFrame(page))).split("\n").some(isLine(QUESTIONS_SENT)));
   await page.evaluate((id) => window.harness.respond(id, { ok: true }), submitted.requestId);
-  const sentText = await waitFor(async () => { const t = await frameText(pieceFrame(page)); return t.includes(QUESTIONS_SENT) ? t : null; }, 3000);
+  const sentText = await waitFor(async () => { const t = await frameText(pieceFrame(page)); return t.split("\n").some(isLine(QUESTIONS_SENT)) ? t : null; }, 3000);
   check("questions: after the portal answers ok, the piece shows its sent screen", sentText);
   check("questions: sending did not trigger a download", downloads === 0, `${downloads} download(s)`);
   check("questions: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
@@ -287,10 +290,10 @@ async function questionsChecks(browser, base, html) {
   const lost = await waitFor(async () => (await events(page, "submit"))[0]);
   const timedOut = await waitFor(async () => pieceFrame(page).evaluate(() => (ST.submitError ? { error: ST.submitError, text: document.body.innerText } : null)), 4000);
   check("questions: no answer from the portal -> factorySubmit resolves timeout", lost && timedOut && timedOut.error === "timeout", timedOut ? timedOut.error : "still waiting");
-  check("questions: after the timeout the piece shows its error, never its sent screen", timedOut && timedOut.text.includes("No se pudieron enviar") && !timedOut.text.includes(QUESTIONS_SENT));
+  check("questions: after the timeout the piece shows its error, never its sent screen", timedOut && timedOut.text.includes("No se pudieron enviar") && !timedOut.text.split("\n").some(isLine(QUESTIONS_SENT)));
   await page.evaluate((id) => window.harness.respond(id, { ok: true }), lost.requestId);
   await sleep(300);
-  check("questions: a late answer after the timeout is ignored", !(await frameText(pieceFrame(page))).includes(QUESTIONS_SENT));
+  check("questions: a late answer after the timeout is ignored", !(await frameText(pieceFrame(page))).split("\n").some(isLine(QUESTIONS_SENT)));
 
   // Flush on demand returns the pending draft before the debounce.
   await page.evaluate((h) => window.harness.mount(h, "questions", {}), html);
@@ -377,13 +380,13 @@ async function flowChecks(browser, base, html) {
   await first;
   const failed = await pieceFrame(page).evaluate(() => ({ error: ST.submitError, sent: ST.submittedAt || null, text: document.body.innerText }));
   check("flow: a failed send shows the piece's error, not its sent screen", failed.error === "network" && !failed.sent &&
-    failed.text.includes("No se pudo enviar tu revisión") && !failed.text.includes(FLOW_SENT), JSON.stringify({ error: failed.error, sent: failed.sent }));
+    failed.text.includes("No se pudo enviar tu revisión") && !failed.text.split("\n").some(isLine(FLOW_SENT)), JSON.stringify({ error: failed.error, sent: failed.sent }));
   const retry = pieceFrame(page).evaluate(() => submitReview());
   const again = await waitFor(async () => (await events(page, "submit"))[1]);
   await page.evaluate((id) => window.harness.respond(id, { ok: true }), again.requestId);
   await retry;
   const ok = await pieceFrame(page).evaluate(() => ({ sent: ST.submittedAt || null, text: document.body.innerText }));
-  check("flow: the retry works and the piece shows its sent screen", again && ok.sent && ok.text.includes(FLOW_SENT));
+  check("flow: the retry works and the piece shows its sent screen", again && ok.sent && ok.text.split("\n").some(isLine(FLOW_SENT)));
   check("flow: sending did not trigger a download", downloads === 0);
   const drafts = await waitFor(async () => {
     const d = await events(page, "draft");
@@ -489,7 +492,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
       }
       case "piece_drafts": {
         const draft = sub && sub !== USER.id ? backend.draftBy[sub] : backend.draft;
-        return json(draft ? [{ storage: draft, updated_at: new Date().toISOString() }] : []);
+        return json(draft ? [{ storage: draft, updated_at: backend.draftUpdatedAt || new Date().toISOString() }] : []);
       }
       case "piece_responses": {
         const eq = url.searchParams.get("piece_id");
@@ -522,7 +525,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
 function newBackend(html, flowHtml, demoHtml) {
   const backend = {
     requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitMode: "ok", authExpired: false,
-    readsExpired: false, expiredSaves: 0, draftBy: {}, saveFails: false, saveDelayMs: 0, logoutFails: false,
+    readsExpired: false, expiredSaves: 0, draftBy: {}, saveFails: false, saveDelayMs: 0, logoutFails: false, draftUpdatedAt: null,
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
@@ -631,14 +634,17 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   const body = backend.submits[0];
   check("app: the piece's send calls submit_response once with respuestas-fabrica/1", sent && backend.submits.length === 1 && body.p_piece_id === IDS.questions &&
     body.p_payload.formato === "respuestas-fabrica/1" && body.p_payload.respuestas.length === 2, body ? JSON.stringify(body.p_payload.respuestas.map((r) => r.tipo)) : "no call");
-  check("app: after the server saved, the piece shows its sent screen", sent && sent.sent && sent.text.includes(QUESTIONS_SENT), sent ? sent.error : "");
+  check("app: after the server saved, the piece shows its sent screen", sent && sent.sent && sent.text.split("\n").some(isLine(QUESTIONS_SENT)), sent ? sent.error : "");
   const order = backend.requests.filter((r) => r.includes("rpc/"));
   const saveWithTime = backend.drafts.findIndex((d) => JSON.parse(d.p_storage[QUESTIONS_KEY]).enviada_en === body.p_payload.enviada_en);
   // Position, among all RPC calls, of the save_draft that carried the send time.
   const savePositions = order.map((r, i) => (r === "POST /rest/v1/rpc/save_draft" ? i : -1)).filter((i) => i !== -1);
   check("app: the draft with the send time was saved before submit_response", saveWithTime !== -1 &&
     savePositions[saveWithTime] < order.indexOf("POST /rest/v1/rpc/submit_response"), order.join(" > "));
-  check("app: the status line shows «Enviada el…»", await waitFor(async () => (await page.textContent(".piece-status")).includes("Enviada el"), 3000));
+  // The piece shows its own send date («Enviado el …» on its sent screen): the portal's line does not repeat it.
+  await sleep(1200); // the draft with the send time has been saved
+  const afterSend = await page.textContent(".piece-status");
+  check("app: the status line does not repeat the send date the piece already shows", !afterSend.includes("Enviada"), afterSend);
   check("app: sending did not trigger a download", downloads === 0);
   await page.screenshot({ path: join(outDir, "piece-sent-360.png") });
   check("app: no console errors up to here", errors.length === 0, errors.join(" | "));
@@ -651,7 +657,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await sendQuestions(frame);
   const offline = await settledSend(frame);
   check("app: network failure -> the piece gets «network» and shows its error", offline && offline.error === "network" && !offline.sent &&
-    offline.text.includes("No se pudieron enviar") && !offline.text.includes(QUESTIONS_SENT), offline ? offline.error : "no result");
+    offline.text.includes("No se pudieron enviar") && !offline.text.split("\n").some(isLine(QUESTIONS_SENT)), offline ? offline.error : "no result");
   check("app: nothing reached piece_responses", backend.submits.length === 1);
   await page.screenshot({ path: join(outDir, "piece-error-360.png") });
   backend.submitMode = "ok";
@@ -762,6 +768,235 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
   await snapshot(emptyPage, "home-empty", "lista");
   await emptyContext.close();
+}
+
+// The piece screen has one frame: the portal's masthead with the brand on top, then «Volver» and the
+// title band in the same container and on the same left edge, and the piece's content on that edge too
+// (keeping its reading measure); the piece hides its own brand bar inside the portal (the bridge marks
+// its <html> before it is parsed), and shows it when opened on its own. Opening a piece says nothing
+// about saving until the person changes something. Checked at the review widths (320, 768, 1440, light
+// and dark) and at the portal's verification widths (672, where its margin changes, and 1008, its frame
+// at its cap).
+async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
+  const layoutOf = (page) => page.evaluate(() => {
+    const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; };
+    const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, bottom: r.bottom }; };
+    const marks = [...document.querySelectorAll("[data-rol=marca-producto]")].filter(visible);
+    const frame = document.querySelector("[data-rol=marco]");
+    const back = document.querySelector(".back-link");
+    return {
+      marks: marks.length, name: marks[0] && marks[0].textContent, logo: Boolean(marks[0] && marks[0].querySelector("svg")),
+      brand: box(marks[0]), back: box(back), title: box(document.querySelector("h1.piece-title")),
+      sameFrame: Boolean(frame && marks[0] && back && frame.contains(marks[0]) && frame.contains(back)),
+      scroll: document.documentElement.scrollWidth <= window.innerWidth,
+    };
+  });
+  // Inside the piece: is its own bar (and anything saying «ninben») on screen?
+  const pieceBar = (frame) => frame.evaluate(() => {
+    const bar = document.querySelector("header.bar");
+    const shown = (el) => Boolean(el) && getComputedStyle(el).display !== "none" && el.getBoundingClientRect().height > 0;
+    const home = document.getElementById("homeBtn");
+    return { host: document.documentElement.getAttribute("data-factory-host"), bar: shown(bar),
+      brand: shown(document.querySelector("header.bar .brand")), where: [...document.querySelectorAll("header.bar .where")].some(shown),
+      homeButton: shown(home), ninben: document.body.innerText.includes("ninben") };
+  });
+  // Where the piece's content starts, in the portal page's coordinates: every visible top-level block of the
+  // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .column,
+  // .flows-panel, .walk) must start on the brand's edge; plus the «Ver todos los flujos» link and the width of
+  // the questions' or flows' column.
+  const contentOf = async (page, frame) => {
+    const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f.getBoundingClientRect().left + f.clientLeft; });
+    const inner = await frame.evaluate(() => {
+      const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(el).visibility !== "hidden"; };
+      const containers = [...document.querySelectorAll("main, main #app, main #view, main .frame, main .column, main .flows-panel, main .walk")].filter(shown);
+      const blocks = [...new Set(containers.flatMap((c) => [...c.children]))].filter((el) => shown(el) && el.tagName !== "NOSCRIPT");
+      const name = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.classList.length ? "." + [...el.classList].join(".") : ""}`;
+      const column = document.querySelector("main .column");
+      const home = document.getElementById("homeBtn");
+      return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left })),
+        home: home && shown(home) ? home.getBoundingClientRect().left : null, column: column ? column.getBoundingClientRect().width : null };
+    });
+    const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset }));
+    return { blocks, home: inner.home === null ? null : inner.home + offset, column: inner.column };
+  };
+  // Every top-level block on the brand's edge (±1 px); the detail names the ones that are not.
+  const onEdge = (tag, what, content, brand) => {
+    const off = content ? content.blocks.filter((b) => Math.abs(b.left - brand.left) > 1) : [];
+    check(`${tag}: ${what}: every top-level block starts on the brand's left edge`, content && content.blocks.length > 0 && off.length === 0,
+      JSON.stringify({ brand: brand.left, blocks: content ? content.blocks.length : 0, off: off.slice(0, 4) }));
+  };
+  const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+  // Opened and left alone: no «Guardando…» (nor any save line) and nothing sent to save_draft.
+  const quietOpen = async (tag, page, backend) => {
+    await sleep(2000); // longer than the draft debounce (800 ms) and a save
+    const line = await page.evaluate(() => { const s = document.querySelector(".piece-status"); return s && !s.hidden ? s.textContent : ""; });
+    check(`${tag}: opened and left alone, the portal says nothing about saving and saves nothing`, line === "" && backend.drafts.length === 0,
+      `«${line}» · ${backend.drafts.length} save_draft call(s)`);
+  };
+  async function openInApp(width, scheme, pieceId, ready) {
+    const backend = newBackend(html, flowHtml, demoHtml);
+    const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: scheme });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto(`${base}/#/piece/${pieceId}`, { waitUntil: "networkidle" });
+    const frame = await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(ready).catch(() => false)) ? f : null; }, 10000);
+    return { backend, context, page, frame, errors };
+  }
+  const runs = [[320, "light"], [320, "dark"], [672, "light"], [768, "light"], [768, "dark"], [1008, "light"], [1440, "light"], [1440, "dark"]];
+
+  for (const [width, scheme] of runs) {
+    const tag = `piece view ${width}px ${scheme}`;
+    const { backend, context, page, frame, errors } = await openInApp(width, scheme, IDS.questions, () => typeof respondidas === "function");
+    const layout = await layoutOf(page);
+    check(`${tag}: one brand on screen, the portal's (logo and «ninben»)`, layout.marks === 1 && layout.name === "ninben" && layout.logo, JSON.stringify(layout));
+    check(`${tag}: the brand is above «Volver», and «Volver» above the title`, layout.brand && layout.back && layout.title &&
+      layout.brand.bottom <= layout.back.top && layout.back.bottom <= layout.title.top, JSON.stringify([layout.brand, layout.back, layout.title]));
+    check(`${tag}: brand, «Volver» and the title share the left edge, in the same container`, layout.sameFrame &&
+      near(layout.brand?.left, layout.back?.left) && near(layout.brand?.left, layout.title?.left), JSON.stringify([layout.brand?.left, layout.back?.left, layout.title?.left]));
+    check(`${tag}: no horizontal scroll`, layout.scroll);
+    const bar = frame ? await pieceBar(frame) : null;
+    check(`${tag}: the piece's own brand bar is not shown inside the portal`, bar && bar.host === "portal" && !bar.bar && !bar.ninben, JSON.stringify(bar));
+    const content = frame && await contentOf(page, frame);
+    onEdge(tag, "start", content, layout.brand);
+    check(`${tag}: the questions keep their reading measure (680 px at most)`, content && content.column <= 680, JSON.stringify(content && content.column));
+    if (width === 320 || width === 1440) await page.screenshot({ path: join(outDir, `piece-view-${width}-${scheme}.png`) });
+    await quietOpen(tag, page, backend);
+    // The first change the person makes is saved, with what the piece wrote while it opened.
+    await frame.evaluate(() => responder("q-001", "si"));
+    const saved = await waitFor(async () => (await page.textContent(".piece-status")).includes("Guardado"), 5000);
+    const opened = backend.draft && JSON.parse(backend.draft[QUESTIONS_KEY]).abierta_en;
+    check(`${tag}: the first change says «Guardado» and carries the opening time the piece wrote`, saved && opened, String(opened));
+    await frame.evaluate(() => showReview());
+    onEdge(tag, "review", await contentOf(page, frame), layout.brand);
+    await sendQuestions(frame);
+    const sentShown = await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(QUESTIONS_SENT)), 8000);
+    check(`${tag}: the piece sends and shows its sent screen`, sentShown);
+    onEdge(tag, "sent", await contentOf(page, frame), layout.brand);
+    check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // The flow review in the portal: no brand bar at the list of flows; inside a flow only «Ver todos los
+  // flujos» stays (without the logo or the «where»), on the brand's edge, and it goes back to the list.
+  if (flowHtml) {
+    for (const [width, scheme] of runs) {
+      const tag = `flow in the portal ${width}px ${scheme}`;
+      const { backend, context, page, frame, errors } = await openInApp(width, scheme, IDS.flow, () => typeof openFlow === "function");
+      const brand = (await layoutOf(page)).brand;
+      const atList = frame && await pieceBar(frame);
+      check(`${tag}: the list of flows shows no brand bar`, atList && atList.host === "portal" && !atList.bar && !atList.ninben, JSON.stringify(atList));
+      const list = frame && await contentOf(page, frame);
+      onEdge(tag, "list of flows", list, brand);
+      check(`${tag}: the flows keep their reading measure (680 px at most)`, list && list.column <= 680, JSON.stringify(list && list.column));
+      if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-start-${width}.png`) });
+      await quietOpen(tag, page, backend);
+      if (frame) await frame.evaluate(() => openFlow(IDS[0]));
+      const inFlow = frame && await pieceBar(frame);
+      check(`${tag}: inside a flow only «Ver todos los flujos» stays, without logo or «where»`,
+        inFlow && inFlow.homeButton && !inFlow.brand && !inFlow.where && !inFlow.ninben, JSON.stringify(inFlow));
+      const banners = frame ? await frame.getByRole("banner").count() : -1;
+      check(`${tag}: inside a flow the piece has no banner of its own (the portal's masthead is the one)`, banners === 0, `${banners} banner(s)`);
+      const walk = frame && await contentOf(page, frame);
+      check(`${tag}: inside a flow, «Ver todos los flujos» starts on the brand's left edge`, walk && near(walk.home, brand?.left), JSON.stringify({ brand: brand?.left, home: walk && walk.home }));
+      onEdge(tag, "inside a flow", walk, brand);
+      if (width === 320 && scheme === "light") await page.screenshot({ path: join(outDir, "piece-view-flow-320.png") });
+      if (width === 1440) await page.screenshot({ path: join(outDir, `piece-view-flow-1440-${scheme}.png`) });
+      if (frame) {
+        // The screen with a note being written on the sketch.
+        await frame.getByRole("button", { name: "Anotar una observación", exact: true }).click();
+        await sleep(300);
+        onEdge(tag, "writing a note", await contentOf(page, frame), brand);
+        if (width === 1440 && scheme === "light") await page.screenshot({ path: join(outDir, "piece-view-flow-note-1440.png") });
+      }
+      if (frame) await frame.click("#homeBtn");
+      const back = frame && await waitFor(async () => { const s = await pieceBar(frame); return !s.homeButton && !s.bar ? s : null; }, 3000);
+      check(`${tag}: «Ver todos los flujos» goes back to the list`, back, JSON.stringify(back));
+      // Every flow reviewed: the final screen (the notes per flow before sending), then the sent screen.
+      if (frame) await frame.evaluate(() => { usarRevisor("Ana Pérez"); for (const id of IDS) { const st = fs(id); st.veredicto = "ok"; st.estado = "ok"; } save(); home(); });
+      const final = frame && await frame.evaluate(() => Boolean(document.querySelector(".frame.final")));
+      check(`${tag}: the final screen opens`, final);
+      onEdge(tag, "final screen", frame && await contentOf(page, frame), brand);
+      if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-final-${width}.png`) });
+      if (frame) await frame.evaluate(() => submitReview());
+      const flowSent = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(FLOW_SENT)), 8000);
+      check(`${tag}: the review is sent and the piece shows its sent screen`, flowSent);
+      onEdge(tag, "sent", frame && await contentOf(page, frame), brand);
+      check(`${tag}: one brand on screen, the portal's`, (await layoutOf(page)).marks === 1);
+      check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+  }
+
+  // The demo sheet in the portal: no brand bar, its content on the brand's edge.
+  if (demoHtml) {
+    for (const [width, scheme] of runs) {
+      const tag = `demo in the portal ${width}px ${scheme}`;
+      const { backend, context, page, frame, errors } = await openInApp(width, scheme, IDS.demo, () => Boolean(document.querySelector("#app h1")));
+      const brand = (await layoutOf(page)).brand;
+      const bar = frame && await pieceBar(frame);
+      check(`${tag}: the sheet shows no brand bar`, bar && bar.host === "portal" && !bar.bar && !bar.ninben, JSON.stringify(bar));
+      onEdge(tag, "the sheet", frame && await contentOf(page, frame), brand);
+      const measure = frame && await frame.evaluate(() => document.querySelector("main").clientWidth - parseFloat(getComputedStyle(document.querySelector("main")).paddingLeft) - parseFloat(getComputedStyle(document.querySelector("main")).paddingRight));
+      check(`${tag}: the sheet keeps its reading measure (728 px at most)`, measure <= 728, String(measure));
+      if (width === 1440) await page.screenshot({ path: join(outDir, `piece-view-demo-1440-${scheme}.png`) });
+      await quietOpen(tag, page, backend);
+      if (frame) await sendButton(frame).click();
+      const demoSent = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(DEMO_SENT)), 8000);
+      check(`${tag}: the sheet sends and shows its sent screen`, demoSent);
+      onEdge(tag, "sent", frame && await contentOf(page, frame), brand);
+      check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+  }
+
+  // Each piece opened on its own (a downloaded or loose file): its brand bar is there, as before.
+  const alone = [["questions", html], ["flow", flowHtml], ["demo", demoHtml]].filter(([, h]) => h);
+  for (const [name, pieceHtml] of alone) {
+    const context = await browser.newContext({ viewport: { width: 320, height: 780 } });
+    const page = await context.newPage();
+    await page.setContent(pieceHtml, { waitUntil: "load" });
+    const own = await pieceBar(page.mainFrame());
+    check(`${name} on its own: no portal mark, and its brand bar shows the logo and «ninben»`, own.host === null && own.bar && own.brand && own.ninben, JSON.stringify(own));
+    if (name === "flow") {
+      await page.evaluate(() => openFlow(IDS[0]));
+      const inFlow = await pieceBar(page.mainFrame());
+      check("flow on its own: inside a flow the bar keeps the brand and «Ver todos los flujos»", inFlow.bar && inFlow.brand && inFlow.homeButton, JSON.stringify(inFlow));
+      check("flow on its own: its bar is still the page's banner", (await page.getByRole("banner").count()) === 1);
+    }
+    await context.close();
+  }
+}
+
+// The server has a send the piece's saved draft does not reflect (the piece did not get to save its «sent»
+// mark): only then the portal's line says «Enviada el …», until the person changes something. When the draft
+// was saved after the send (the usual case), the piece says it and the portal does not repeat it.
+async function sentLineChecks(browser, base, html) {
+  for (const draftAfterSend of [false, true]) {
+    const tag = draftAfterSend ? "sent, draft saved after it" : "sent, draft older than the send";
+    const backend = newBackend(html);
+    backend.submits.push({ p_piece_id: IDS.questions, p_payload: {} });
+    backend.submittedAt = new Date(Date.now() - 60000).toISOString();
+    backend.draft = { other: "x" };
+    backend.draftUpdatedAt = new Date(Date.now() + (draftAfterSend ? 0 : -120000)).toISOString();
+    const context = await mockedContext(browser, { backend });
+    const page = await context.newPage();
+    await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+    const frame = await appPiece(page);
+    await sleep(300);
+    const line = await page.textContent(".piece-status");
+    const pieceSays = frame && (await frameText(frame)).split("\n").some(isLine(QUESTIONS_SENT));
+    if (!draftAfterSend) {
+      check(`${tag}: the piece cannot show it, so the portal's line says «Enviada el …»`, !pieceSays && line.includes("Enviada el"), line);
+      await frame.evaluate(() => responder("q-001", "si"));
+      const after = await waitFor(async () => { const t = await page.textContent(".piece-status"); return t.includes("Guardado") ? t : null; }, 5000);
+      check(`${tag}: after the person's first change the line only says the save`, after && !after.includes("Enviada"), String(after));
+    } else {
+      check(`${tag}: the portal's line does not say «Enviada»`, !line.includes("Enviada"), line);
+    }
+    await context.close();
+  }
 }
 
 // A change too long for the piece's storage (the real quota): the status line says it was not saved,
@@ -903,7 +1138,7 @@ async function sessionEndDraftRun(browser, base, html, other) {
 
 // ---- the demo sheet and a replaced version, in the app ----------------------------------------
 
-const DEMO_SENT = "Listo, tu revisión llegó";
+const DEMO_SENT = "Tu revisión llegó";
 // The demo sheet inside the app, once it rendered.
 async function appSheet(page, timeout = 10000) {
   return waitFor(async () => { const f = pieceFrame(page); return f && (await f.$("#app h1").catch(() => null)) ? f : null; }, timeout);
@@ -911,8 +1146,8 @@ async function appSheet(page, timeout = 10000) {
 const sendsOf = (backend, pieceId) => backend.submits.filter((b) => b.p_piece_id === pieceId);
 const sendButton = (frame) => frame.getByRole("button", { name: "Enviar revisión", exact: true });
 
-// R1: the demo sheet sends through the portal. A failure shows its error and never «Listo»; the retry
-// arrives once and the sheet says «Listo».
+// R1: the demo sheet sends through the portal. A failure shows its error and never «Tu revisión llegó»;
+// the retry arrives once and the sheet says «Tu revisión llegó».
 async function demoAppChecks(browser, base, html, flowHtml, demoHtml) {
   const backend = newBackend(html, flowHtml, demoHtml);
   const context = await mockedContext(browser, { backend });
@@ -926,17 +1161,19 @@ async function demoAppChecks(browser, base, html, flowHtml, demoHtml) {
   backend.submitMode = "network";
   await sendButton(frame).click();
   const failed = await waitFor(async () => { const t = await frameText(frame); return t.includes("No se pudo enviar tu revisión") ? t : null; }, 8000);
-  check("demo in app: a failed send shows the sheet's error, never «Listo»", failed && !failed.includes(DEMO_SENT) && sendsOf(backend, IDS.demo).length === 0,
+  check("demo in app: a failed send shows the sheet's error, never «Tu revisión llegó»", failed && !failed.split("\n").some(isLine(DEMO_SENT)) && sendsOf(backend, IDS.demo).length === 0,
     failed ? "" : (await frameText(frame)).slice(0, 200));
   check("demo in app: after the failure the portal does not say «Enviada»", !(await page.textContent(".piece-status")).includes("Enviada"), await page.textContent(".piece-status"));
   backend.submitMode = "ok";
   await frame.getByRole("button", { name: "Reintentar", exact: true }).click();
-  const done = await waitFor(async () => ((await frameText(frame)).includes(DEMO_SENT) ? true : null), 8000);
+  const done = await waitFor(async () => ((await frameText(frame)).split("\n").some(isLine(DEMO_SENT)) ? true : null), 8000);
   await sleep(500); // nothing else arrives afterwards
   const rows = sendsOf(backend, IDS.demo);
-  check("demo in app: the retry shows «Listo, tu revisión llegó» and the row arrives once", done && rows.length === 1 &&
+  check("demo in app: the retry shows «Tu revisión llegó» and the row arrives once", done && rows.length === 1 &&
     rows[0].p_payload.esquema === "revision-demo/1" && rows[0].p_payload.revisor === "Ana Pérez", `${rows.length} row(s)`);
-  check("demo in app: the status line shows «Enviada el…»", await waitFor(async () => (await page.textContent(".piece-status")).includes("Enviada el"), 3000));
+  await sleep(1200);
+  const afterSend = await page.textContent(".piece-status");
+  check("demo in app: the status line does not repeat the send date the sheet already shows", !afterSend.includes("Enviada"), afterSend);
   check("demo in app: no page errors", errors.length === 0, errors.join(" | "));
   await context.close();
 }
@@ -977,9 +1214,10 @@ async function replacedAppChecks(browser, base, html, flowHtml, demoHtml) {
     const saved = await waitFor(async () => { const t = await page.textContent(".piece-status"); return backend.drafts.length && t && !t.includes("…") ? t : null; }, 5000);
     check(`${tag}: a saved draft reads «Guardado aquí, sin enviar», never just «Guardado»`, saved === "Guardado aquí, sin enviar", String(saved));
     await sendButton(frame).click();
-    const sent = await waitFor(async () => ((await frameText(frame)).includes(DEMO_SENT) ? true : null), 8000);
+    const sent = await waitFor(async () => ((await frameText(frame)).split("\n").some(isLine(DEMO_SENT)) ? true : null), 8000);
     check(`${tag}: sending it still works (one row for this version)`, sent && sendsOf(backend, IDS.replaced).length === 1, `${sendsOf(backend, IDS.replaced).length} row(s)`);
-    check(`${tag}: then the status line says «Enviada el…»`, await waitFor(async () => (await page.textContent(".piece-status")).includes("Enviada el"), 3000));
+    const afterSend = await waitFor(async () => { const line = await page.textContent(".piece-status"); return line.includes("sin enviar") ? null : { line }; }, 3000);
+    check(`${tag}: once sent, the status line no longer says «sin enviar» and does not repeat the send date`, afterSend && !afterSend.line.includes("Enviada"), JSON.stringify(afterSend));
     if (notice) await page.click("[data-rol=aviso-fijo] a");
     const opened = await waitFor(async () => (await page.evaluate(() => location.hash)) === `#/piece/${IDS.demo}` &&
       (await page.textContent("h1.piece-title").catch(() => "")) === "Demo v2", 8000);
@@ -1031,6 +1269,8 @@ try {
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
   if (args.questions) await sessionReturnsChecks(browser, base, read(args.questions));
+  if (args.questions) await pieceViewChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
+  if (args.questions) await sentLineChecks(browser, base, read(args.questions));
   if (args.questions && args.demo) await demoAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
 } finally {

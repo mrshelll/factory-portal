@@ -220,23 +220,34 @@ input[aria-invalid="true"] { border-color: var(--error); box-shadow: inset 0 0 0
 
 .piece-layout { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 .piece-layout > .frame { flex: none; }
+/* Under the masthead, at every width: «Volver», then the title band (the piece's title and its save
+   line). Both start on the brand's left edge, the frame's. */
 .piece-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "back" "heading";
-  align-items: center;
-  column-gap: var(--space-4);
+  justify-items: start;
   row-gap: var(--space-1);
   padding-block: var(--space-1) var(--space-3);
 }
-.back-link { grid-area: back; justify-self: start; display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--signal); font-weight: 600; text-decoration: none; }
+.back-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--signal); font-weight: 600; text-decoration: none; }
 @media (hover: hover) { .back-link:hover { text-decoration: underline; text-underline-offset: 3px; } }
-.piece-heading { grid-area: heading; display: grid; gap: var(--space-1); min-width: 0; }
+.piece-heading { display: grid; gap: var(--space-1); min-width: 0; max-width: 100%; }
 .piece-title { font-size: var(--text-body); font-weight: 600; line-height: 1.3; }
 .piece-status { color: var(--muted); font-size: var(--text-small); }
-@media (min-width: 672px) {
-  .piece-bar { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "back heading"; padding-block: var(--space-2); }
-}
 .piece-layout .notices { margin: 0 0 var(--space-3); }
-.piece-main { flex: 1; min-height: 0; padding: 0; border-top: 1px solid var(--line); }
-.piece-frame { display: block; width: 100%; height: 100%; border: 0; }
+/* The piece takes the frame's box, its margins included, and starts its content at the frame's margin
+   itself (the factory's pieces do so inside the portal, with the same 16/24 px margin and the same 672 px
+   tier, measured on the iframe, which is as wide as the window up to the frame's cap). So its content
+   shares the brand's left edge, and a focus ring at that edge is never cut by the iframe. The rule above
+   it spans the frame's content, like the masthead's. */
+.piece-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: calc(var(--frame-page) + 2 * var(--margin-page));
+  margin-inline: auto;
+  padding: 0;
+}
+.piece-main::before { content: ""; flex: none; margin-inline: var(--margin-page); border-top: 1px solid var(--line); }
+.piece-frame { display: block; flex: 1; min-height: 0; width: 100%; border: 0; }

@@ -15,7 +15,9 @@
 //    shim without persistence (session semantics).
 //
 //    The first change after each draft also posts `{ type: "factory:dirty" }` at once, so the
-//    parent knows there is unsaved work during the debounce. Every message carries a per-mount
+//    parent knows there is unsaved work during the debounce. Writes the piece makes while it opens
+//    (before one task after DOMContentLoaded, when `factory:ready` is posted) post nothing on their
+//    own: they are not the person's doing, and they travel with the first later change. Every message carries a per-mount
 //    nonce, and the bridge ignores parent messages without it.
 //
 //    A write that would take the shim past its quota throws QuotaExceededError (as a real
@@ -36,7 +38,9 @@
 //    promise. Downloads are not touched, so the piece's own "Download a copy" works as usual.
 //
 // 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName }`.
-//    `persistence` is "server" when the localStorage shim took, "none" otherwise.
+//    `persistence` is "server" when the localStorage shim took, "none" otherwise. It also sets
+//    `data-factory-host="portal"` on the piece's <html> before any of the piece is parsed, so the
+//    piece's CSS can drop its own brand bar inside the portal without a flash.
 //
 // `bridgeRuntime` is serialized with Function.prototype.toString, so it must stay self-contained
 // (no references to module scope) and must never contain the character sequences "</script" or
@@ -59,6 +63,10 @@ function bridgeRuntime(cfg) {
   var nonce = cfg.nonce;
   var debounceMs = cfg.debounceMs;
   var quota = cfg.quotaChars;
+
+  // The bridge runs first in <head>, before the piece's styles and body are parsed, so the piece's CSS
+  // can hide what the portal already shows (its own brand bar) from the first paint.
+  try { document.documentElement.setAttribute("data-factory-host", "portal"); } catch (e) { /* no root: leave it */ }
 
   // Every message carries this mount's nonce; a page the iframe navigates to never sees it.
   function post(message) {
@@ -140,8 +148,14 @@ function bridgeRuntime(cfg) {
   var timer = null;
   var dirty = false;
   var refused = false; // a write was refused for the quota and no write has fit since
+  // What the piece writes while it opens (restoring, stamping the opening time, probing the storage) is
+  // not the person's doing: it posts nothing (no dirty, no draft, not even on flush or pagehide), so the
+  // portal never says «Guardando…» for it, and it travels with the first change made after that. The
+  // opening ends one task after DOMContentLoaded, once the piece's start-up code has run.
+  var opening = true;
   function onLocalChange() {
     refused = false;
+    if (opening) return;
     // Tell the parent right away (without the content) so it knows there is unsaved work
     // during the debounce, e.g. for its beforeunload warning.
     if (!dirty) post({ type: "factory:dirty" });
@@ -241,9 +255,9 @@ function bridgeRuntime(cfg) {
   window.addEventListener("pagehide", sendDraft);
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") sendDraft(); });
 
-  function ready() { post({ type: "factory:ready", persistence: persistence }); }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ready);
-  else ready();
+  function opened() { opening = false; post({ type: "factory:ready", persistence: persistence }); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(opened, 0); });
+  else opened();
 }
 
 // JSON that is safe inside an inline <script>: every "<", ">" and "&" travels as a \u escape

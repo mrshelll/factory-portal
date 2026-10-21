@@ -97,6 +97,7 @@ export async function loadPiece(client, user, pieceId) {
     project,
     assignment,
     draftStorage: draft && draft.storage && typeof draft.storage === "object" && !Array.isArray(draft.storage) ? draft.storage : {},
+    draftUpdatedAt: draft && typeof draft.updated_at === "string" ? draft.updated_at : null,
     lastSubmittedAt: responses && responses[0] ? responses[0].submitted_at : null,
     memberDisplayName: displayName || null,
     newerPieceId,

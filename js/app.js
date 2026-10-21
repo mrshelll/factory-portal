@@ -6,7 +6,7 @@ import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
 import { loadSharedWithMe, loadPiece, saveDraft, submitResponse, isAuthExpired } from "./api.js";
-import { createDraftSaver, trySaveAll } from "./host.js";
+import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
 
 const root = document.getElementById("app");
@@ -67,6 +67,14 @@ function visuallyHiddenStatus() {
   return h("p", { class: "visually-hidden", role: "status", "aria-live": "polite" });
 }
 
+// The masthead with the ninben brand, the same on every screen (the piece screen included, where it is a
+// <div> inside the screen's single <header>).
+function masthead(headerActions = [], tag = "header") {
+  return h(tag, { class: "masthead" },
+    h("p", { class: "brand", "data-rol": "marca-producto" }, logo(), h("span", {}, t("brand"))),
+    headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
+}
+
 // One frame for every screen: masthead, then inside <main> the title band, the notice zone and
 // the body.
 function frameLayout({ title, meta = [], headerActions = [] }) {
@@ -74,9 +82,7 @@ function frameLayout({ title, meta = [], headerActions = [] }) {
   const body = h("div", { class: "body", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
   replaceChildren(root, h("div", { class: "frame", "data-rol": "marco" },
-    h("header", { class: "masthead" },
-      h("p", { class: "brand", "data-rol": "marca-producto" }, logo(), h("span", {}, t("brand"))),
-      headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null),
+    masthead(headerActions),
     h("main", { id: "main" },
       h("div", { class: "page-head", "data-rol": "cabecera" },
         h("h1", {}, title),
@@ -507,6 +513,8 @@ function saverFor(pieceId) {
   return state.savers.get(pieceId);
 }
 
+// The frame of the piece screen: the same masthead as every screen, then «Volver» and the title band
+// on the same left edge, the notices, and the piece below (it drops its own brand bar in the portal).
 function pieceLayout(titleText) {
   // A notice that stays for the whole visit (a replaced version); the zone below takes the passing ones.
   const pinned = h("div", { class: "notices", "data-rol": "aviso-fijo" });
@@ -518,9 +526,11 @@ function pieceLayout(titleText) {
   main.append(live);
   replaceChildren(root, h("div", { class: "piece-layout" },
     h("div", { class: "frame", "data-rol": "marco" },
-      h("header", { class: "piece-bar", "data-rol": "cabecera" },
-        h("a", { class: "back-link", href: "#/", "aria-label": t("backLabel") }, h("span", { "aria-hidden": "true" }, "←"), t("back")),
-        h("div", { class: "piece-heading" }, title, status)),
+      h("header", {},
+        masthead([], "div"),
+        h("div", { class: "piece-bar" },
+          h("a", { class: "back-link", href: "#/", "aria-label": t("backLabel") }, h("span", { "aria-hidden": "true" }, "←"), t("back")),
+          h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, status))),
       pinned, notices),
     main));
   return { pinned, notices, title, status, main, live };
@@ -575,6 +585,13 @@ async function showPiece(pieceId, viewId) {
   let tooLarge = false;
   let draftSinceTooLarge = false;
   let lastSubmittedAt = context.lastSubmittedAt;
+  // The newest storage this tab saw is never older than the server copy it sent, so it wins.
+  const seededHere = state.localDrafts.has(pieceId);
+  const seed = seededHere ? state.localDrafts.get(pieceId) : context.draftStorage;
+  // A send the server has but the piece's saved draft cannot show (it did not get to save its «sent» mark):
+  // only then the line says «Enviada el …». A copy from this tab was taken after the piece wrote its mark.
+  // The person's first change or a new send here leaves it to the piece again.
+  let sendUnshown = !seededHere && sendNotInDraft(context);
   const handled = new Set();
   // A version replaced by a newer one (opened from an old email, say): what is saved here is never picked
   // up on its own, only what is sent. The notice says so and points to the newer version.
@@ -586,15 +603,18 @@ async function showPiece(pieceId, viewId) {
     });
   }
 
+  // The line next to the title says whether the draft was saved (EST-08). It does not repeat the send
+  // date: every piece shows its own («Enviado el …» on its sent screen) and says when a change needs a new
+  // send; only a send its saved draft cannot show (sendUnshown) is said here.
   function render() {
-    const parts = [];
     // On a replaced version a saved draft has not reached anyone: the line says so until it is sent.
     const savedKey = replaced && !lastSubmittedAt ? "savedNotSent" : "saved";
-    if (tooLarge) parts.push(t("saveTooLarge"));
-    else if (saveStatus !== "idle") parts.push(t({ saving: "saving", saved: savedKey, error: "saveError" }[saveStatus]));
-    if (lastSubmittedAt) parts.push(t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) }));
-    status.textContent = parts.join(" · ");
-    status.hidden = !parts.length;
+    const line = tooLarge ? t("saveTooLarge")
+      : saveStatus !== "idle" ? t({ saving: "saving", saved: savedKey, error: "saveError" }[saveStatus]) : "";
+    const sent = sendUnshown ? t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) }) : "";
+    const text = [line, sent].filter(Boolean).join(" · ");
+    status.textContent = text;
+    status.hidden = !text;
   }
   state.statusListeners.set(pieceId, (next) => {
     // "saved" or "error" after a draft that fit: the newest change is no longer too large.
@@ -610,8 +630,6 @@ async function showPiece(pieceId, viewId) {
     render();
   }
 
-  // The newest storage this tab saw is never older than the server copy it sent, so it wins.
-  const seed = state.localDrafts.has(pieceId) ? state.localDrafts.get(pieceId) : context.draftStorage;
 
   // The piece sent through globalThis.factorySubmit; it only says "sent" when this answers ok, and
   // this answers ok only after submit_response saved on the server.
@@ -625,9 +643,10 @@ async function showPiece(pieceId, viewId) {
     try {
       await submitResponse(supabase, pieceId, payload);
       result = { ok: true };
+      // The piece moves focus to its own sent screen, which says it; the portal does not announce it again.
       lastSubmittedAt = new Date().toISOString();
+      sendUnshown = false;
       clearNotice(notices);
-      live.textContent = t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) });
     } catch (error) {
       if (isAuthExpired(error)) {
         result = { ok: false, error: "session-expired" };
@@ -647,6 +666,7 @@ async function showPiece(pieceId, viewId) {
     onDirty: () => saver.markPending(),
     onDraft: (storage) => {
       if (tooLarge) draftSinceTooLarge = true; // the bridge sends what fit before a refusal ahead of it
+      if (sendUnshown) { sendUnshown = false; render(); } // the person changed something: the piece speaks for it now
       localDrafts.set(pieceId, storage);
       saver.push(storage);
     },

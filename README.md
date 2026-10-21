@@ -42,7 +42,16 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
 3. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
-   normal tab.
+   normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
+   screen, then «Volver» and the piece's title with its save line («Guardando…», «Guardado»), all on
+   the brand's left edge. The iframe takes the frame's box (margins included, so as wide as the window
+   up to 1008 px), and the factory's pieces, inside the portal, start their content at the frame's
+   margin (16 px, 24 px from 672 px), on the brand's edge, keeping their reading measure. The piece does
+   not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
+   which the piece shows on its own sent screen, and says nothing until the person changes something.
+   Only when the server has a send that the piece's saved draft cannot show (the draft was last saved
+   at or before it, or there is none: the piece did not get to save its «sent» mark) does the line say
+   «Enviada el …», until the person changes something or sends again.
 4. **A replaced version** (the factory published a newer one; the home list hides the old one) still
    opens from an old email or a tab left open, and can still send. Until it is sent, a fixed notice says
    there is a newer version, links to it (the newest piece of the same kind in the project among the
@@ -65,7 +74,10 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   `persistence`); if it did not, the portal warns that progress will not be kept. The first change
   posts `{ type: "factory:dirty" }` at once (no content), so the portal knows there is unsaved work
   and warns before the page closes; the full `{ type: "factory:draft", storage }` follows after
-  800 ms of quiet; the portal calls
+  800 ms of quiet. What the piece writes while it opens (restoring, stamping the opening time,
+  probing the storage, until one task after `DOMContentLoaded`, when `factory:ready` is posted) posts
+  nothing on its own: it is not the person's doing, so the portal does not say «Guardando…» for it
+  and the piece stays «Por empezar» until a real change, which carries those writes along. The portal calls
   `save_draft` (one request at a time, newest data wins, retries when offline). The draft is also
   flushed when the person leaves the piece or the page is hidden. `sessionStorage` gets the same
   shim without persistence.
@@ -87,11 +99,16 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   The promise resolves `{ ok: true }` only after the server saved; otherwise `{ ok: false, error }`
   with `invalid`, `too-large`, `timeout` (no answer in 45 s), `network`, `session-expired` (the
   portal also offers to sign in again) or `rejected`. A second call while one is in flight returns
-  the same promise. The piece shows its own sent screen; the portal's status line shows the send
-  time. Downloads are not touched, so the piece's own "Download a copy" stays as the fallback.
+  the same promise. The piece shows its own sent screen, with the send date; the portal's status line
+  does not repeat it (except for a send the saved draft cannot show, see **Piece** above). Downloads are not touched, so the piece's own "Download a copy" stays as the fallback.
 - **Host.** The bridge also defines a frozen `globalThis.factoryHost = { persistence, reviewerName }`:
   `persistence` is `"server"` when the storage shim took (else `"none"`), and `reviewerName` is the
-  member's `project_members.display_name` (or `null`).
+  member's `project_members.display_name` (or `null`). Before anything of the piece is parsed, it sets
+  `data-factory-host="portal"` on the piece's `<html>`: the factory's pieces hide their own brand bar
+  with it (the portal's masthead already shows the brand) and move their content to the portal's
+  edge, from the first paint. The flow review keeps
+  «Ver todos los flujos» inside a flow, without the logo, and its bar is then not a banner landmark
+  (`role="none"`), so the portal's masthead is the only one. Opened on its own, a piece shows its bar.
 - **Messages.** Each mounted piece gets a random nonce (`crypto.getRandomValues`) inside its
   injected config. The portal only accepts messages whose `event.source` is the piece iframe and that
   carry that nonce, with a known type (`factory:ready`, `factory:dirty`, `factory:draft`,
@@ -180,8 +197,18 @@ font), the bridge on real pieces through `tests/harness.html` (no Supabase), and
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
 change was saved, a session that comes back while the piece hands over its draft, a change too long
 to keep). With `--demo` as well: the demo sheet sends through the app (a failure shows its error and
-never «Listo»; the retry arrives once), and a replaced version opened from an old email shows its
-fixed notice, links to the newer version and still sends.
+never «Tu revisión llegó»; the retry arrives once), and a replaced version opened from an old email shows its
+fixed notice, links to the newer version and still sends. The piece screen is checked at 320, 768 and
+1440 px, light and dark, and at 672 and 1008 px: one brand on screen (the portal's), above «Volver» and
+the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
+the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),
+and «Ver todos los flujos» in a flow, on that same edge, with the reading measure kept; no second
+banner inside the piece; a piece opened and left alone says nothing about saving and saves nothing;
+and «Enviada el …» only for a send the saved draft cannot show. Each piece opened on its own still
+shows its bar. Screenshots in `<out>`: `piece-view-<width>-<scheme>.png` (questions),
+`piece-view-flow-320.png`, `piece-view-flow-1440-<scheme>.png`, `piece-view-flow-note-1440.png`,
+`piece-view-flow-start-<768|1440>.png`, `piece-view-flow-final-<768|1440>.png` and
+`piece-view-demo-1440-<scheme>.png`.
 
 **The pieces.** The checks do not generate pieces: pass the three files with `--questions`, `--flow`
 and `--demo`. Emit them from the factory's current templates into a scratch folder (never into either
