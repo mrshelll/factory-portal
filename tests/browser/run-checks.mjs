@@ -305,6 +305,28 @@ async function questionsChecks(browser, base, html) {
   const soon = { dirty: (await events(page, "dirty")).length, drafts: (await events(page, "draft")).length };
   check("questions: factory:dirty arrives before the debounced draft", soon.dirty === before.dirty + 1 && soon.drafts === before.drafts, JSON.stringify({ before, soon }));
 
+  // A change that does not fit (quota lowered for the test): the piece's write throws, the portal is
+  // told once with factory:save-failed, and again only after a change that fits.
+  await page.evaluate((h) => window.harness.mount(h, "questions", {}, { quotaChars: 20000 }), html);
+  await waitFor(async () => (await events(page, "ready"))[0]);
+  const refused = await pieceFrame(page).evaluate(() => {
+    responder("q-003", "cambio");
+    let threw = null;
+    try { localStorage.setItem("probe", "x".repeat(30000)); } catch (e) { threw = e.name; }
+    escribir("q-003", "texto", "y".repeat(30000)); // the piece's own save hits the quota too
+    const stored = localStorage.getItem("probe");
+    return { threw, stored: stored === null ? null : stored.length };
+  });
+  await sleep(200);
+  const failedOnce = await events(page, "save-failed");
+  check("questions: a write past the quota throws QuotaExceededError in the piece", refused.threw === "QuotaExceededError" && refused.stored === null, JSON.stringify(refused));
+  check("questions: the portal gets factory:save-failed «too-large» once for refusals in a row", failedOnce.length === 1 && failedOnce[0] === "too-large", JSON.stringify(failedOnce));
+  await pieceFrame(page).evaluate(() => escribir("q-003", "texto", "Corto"));
+  await sleep(100);
+  await pieceFrame(page).evaluate(() => escribir("q-003", "texto", "z".repeat(30000)));
+  await sleep(200);
+  check("questions: after a change that fits, a new refusal is reported again", (await events(page, "save-failed")).length === 2);
+
   // If the iframe navigates away, the new page cannot speak for the piece.
   await context.route("**/__forged__", (route) => route.fulfill({ contentType: "text/html", body:
     `<script>
@@ -735,6 +757,45 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await emptyContext.close();
 }
 
+// A change too long for the piece's storage (the real quota): the status line says it was not saved,
+// a save of the draft from before the refusal does not bring back «Guardado», and a shorter text does.
+const TOO_LARGE_ES = "Sin guardar: lo que escribiste es demasiado largo para guardarlo. Acorta tu último texto o descarga una copia.";
+async function tooLargeAppChecks(browser, base, html) {
+  const backend = newBackend(html);
+  backend.saveDelayMs = 600; // the draft from before the refusal lands after it
+  const context = await mockedContext(browser, { backend });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+  const frame = await appPiece(page);
+  const statusText = () => page.textContent(".piece-status");
+  await frame.evaluate(() => responder("q-001", "si"));
+  check("too large: a change that fits shows «Guardado» first", await waitFor(async () => (await statusText()).includes("Guardado"), 5000));
+  const savesBefore = backend.drafts.length;
+  const quota = await page.evaluate(async () => (await import("./js/bridge.js")).STORAGE_QUOTA_CHARS);
+  // A fitting change still in the debounce, then a text past the quota.
+  await frame.evaluate((n) => { responder("q-003", "cambio"); escribir("q-003", "texto", "x".repeat(n)); }, quota);
+  const told = await waitFor(async () => ((await statusText()) === TOO_LARGE_ES ? true : null), 3000);
+  check("too large: the status line says the change was not saved", told, await statusText());
+  const live = await page.textContent("#main > [role=status]");
+  check("too large: the live region announces it", live === TOO_LARGE_ES, live);
+  await waitFor(async () => backend.drafts.length > savesBefore, 3000);
+  await sleep(1500); // the earlier draft's save has landed
+  const after = await statusText();
+  check("too large: a save of the draft from before does not bring back «Guardado»",
+    backend.drafts.length > savesBefore && after === TOO_LARGE_ES && !after.includes("Guardado"), `${backend.drafts.length - savesBefore} save(s) · ${after}`);
+  check("too large: the long text never reached save_draft", backend.drafts.every((d) => !JSON.stringify(d.p_storage).includes("x".repeat(1000))));
+  await frame.evaluate(() => escribir("q-003", "texto", "Más corto"));
+  const back = await waitFor(async () => ((await statusText()).includes("Guardado") ? statusText() : null), 5000);
+  check("too large: a shorter text is saved and the line says «Guardado» again", back && !back.includes("demasiado largo") &&
+    JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas["q-003"].texto === "Más corto", back || await statusText());
+  await frame.evaluate((n) => escribir("q-003", "texto", "w".repeat(n)), quota);
+  check("too large: a new long text is reported again", await waitFor(async () => (await statusText()) === TOO_LARGE_ES, 3000));
+  check("too large: no page errors", errors.length === 0, errors.join(" | "));
+  await context.close();
+}
+
 // Signs in through the real screens (mocked /otp and /verify), from the email step.
 async function signInThroughScreens(page) {
   await page.waitForSelector("#email", { timeout: 10000 });
@@ -838,6 +899,7 @@ try {
   if (args.demo) await demoChecks(browser, base, read(args.demo));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
+  if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
 } finally {
   await browser.close();
   child.kill();

@@ -565,21 +565,35 @@ async function showPiece(pieceId, viewId) {
   const saver = saverFor(pieceId);
   const localDrafts = state.localDrafts; // this account's, even if the maps are swapped later
   let saveStatus = saver.hasUnsaved() ? "error" : "idle";
+  // The piece's last change did not fit in its storage, so it was not kept (factory:save-failed).
+  // The line says so until a later change that fits has been through the saver: a save of a draft
+  // from before the refusal must not bring back «Guardado».
+  let tooLarge = false;
+  let draftSinceTooLarge = false;
   let lastSubmittedAt = context.lastSubmittedAt;
   const handled = new Set();
 
   function render() {
     const parts = [];
-    if (saveStatus !== "idle") parts.push(t({ saving: "saving", saved: "saved", error: "saveError" }[saveStatus]));
+    if (tooLarge) parts.push(t("saveTooLarge"));
+    else if (saveStatus !== "idle") parts.push(t({ saving: "saving", saved: "saved", error: "saveError" }[saveStatus]));
     if (lastSubmittedAt) parts.push(t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) }));
     status.textContent = parts.join(" · ");
     status.hidden = !parts.length;
   }
   state.statusListeners.set(pieceId, (next) => {
-    if (next === "error" && saveStatus !== "error") live.textContent = t("saveError");
+    // "saved" or "error" after a draft that fit: the newest change is no longer too large.
+    if (tooLarge && draftSinceTooLarge && next !== "saving") { tooLarge = false; draftSinceTooLarge = false; }
+    if (next === "error" && saveStatus !== "error" && !tooLarge) live.textContent = t("saveError");
     saveStatus = next;
     render();
   });
+  function onSaveFailed() {
+    tooLarge = true;
+    draftSinceTooLarge = false;
+    live.textContent = t("saveTooLarge");
+    render();
+  }
 
   // The newest storage this tab saw is never older than the server copy it sent, so it wins.
   const seed = state.localDrafts.has(pieceId) ? state.localDrafts.get(pieceId) : context.draftStorage;
@@ -616,7 +630,12 @@ async function showPiece(pieceId, viewId) {
     host: { reviewerName: context.memberDisplayName },
     onReady: (ready) => { if (!ready.persistence) showNotice(notices, { tone: "warning", text: t("noPersistence") }); },
     onDirty: () => saver.markPending(),
-    onDraft: (storage) => { localDrafts.set(pieceId, storage); saver.push(storage); },
+    onDraft: (storage) => {
+      if (tooLarge) draftSinceTooLarge = true; // the bridge sends what fit before a refusal ahead of it
+      localDrafts.set(pieceId, storage);
+      saver.push(storage);
+    },
+    onSaveFailed,
     onNavigatedAway: () => {
       frame = null;
       showNotice(notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });

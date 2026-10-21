@@ -31,7 +31,7 @@ let frame = null;
 
 const harness = {
   events: [],
-  // options: { host: { reviewerName }, submitTimeoutMs, autoRespond }. Without autoRespond, a send
+  // options: { host: { reviewerName }, submitTimeoutMs, quotaChars, autoRespond }. Without autoRespond, a send
   // waits until the test calls harness.respond(requestId, result).
   mount(html, kind, storage = {}, options = {}) {
     if (frame) frame.destroy();
@@ -43,8 +43,8 @@ const harness = {
     const onSubmit = record("submit");
     const mounted = mountPiece({
       container: stage, html, kind, storage, title: "Piece under test",
-      host: options.host, submitTimeoutMs: options.submitTimeoutMs,
-      onReady: record("ready"), onDirty: record("dirty"), onDraft: record("draft"),
+      host: options.host, submitTimeoutMs: options.submitTimeoutMs, quotaChars: options.quotaChars,
+      onReady: record("ready"), onDirty: record("dirty"), onDraft: record("draft"), onSaveFailed: record("save-failed"),
       onSubmit: (message) => { onSubmit(message); if (options.autoRespond) mounted.respond(message.requestId, { ok: true }); },
       onRejected: record("rejected"), onNavigatedAway: record("navigated"),
     });

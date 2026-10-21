@@ -18,8 +18,9 @@ export function randomNonce() {
 // host: { reviewerName } for globalThis.factoryHost inside the piece. onSubmit({ requestId, payload })
 // must end with respond(requestId, { ok: true } | { ok: false, error }). onNavigatedAway: the iframe
 // loaded a second document (the piece navigated or reloaded); the frame is already destroyed when it
-// is called. submitTimeoutMs only changes in tests.
-export function mountPiece({ container, html, kind, storage, title, host, submitTimeoutMs, onReady, onDirty, onDraft, onSubmit, onRejected, onNavigatedAway }) {
+// is called. onSaveFailed(reason): the piece tried to keep a change that does not fit ("too-large");
+// the change was not stored. submitTimeoutMs and quotaChars only change in tests.
+export function mountPiece({ container, html, kind, storage, title, host, submitTimeoutMs, quotaChars, onReady, onDirty, onDraft, onSaveFailed, onSubmit, onRejected, onNavigatedAway }) {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", SANDBOX);
   iframe.setAttribute("title", title);
@@ -38,6 +39,7 @@ export function mountPiece({ container, html, kind, storage, title, host, submit
     if (message.type === "factory:ready" && onReady) onReady(message);
     else if (message.type === "factory:dirty" && onDirty) onDirty();
     else if (message.type === "factory:draft" && onDraft) onDraft(message.storage);
+    else if (message.type === "factory:save-failed" && onSaveFailed) onSaveFailed(message.reason);
     else if (message.type === "factory:submit" && onSubmit) onSubmit(message);
     else if (message.type === "factory:flushed") { const w = flushWaiters; flushWaiters = []; w.forEach((r) => r(true)); }
   }
@@ -55,7 +57,7 @@ export function mountPiece({ container, html, kind, storage, title, host, submit
       if (onNavigatedAway) onNavigatedAway();
     }
   });
-  iframe.srcdoc = injectBridge(html, { parentOrigin: window.location.origin, kind, storage, nonce, host, submitTimeoutMs });
+  iframe.srcdoc = injectBridge(html, { parentOrigin: window.location.origin, kind, storage, nonce, host, submitTimeoutMs, quotaChars });
   container.append(iframe);
 
   const api = {

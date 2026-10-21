@@ -18,6 +18,13 @@
 //    parent knows there is unsaved work during the debounce. Every message carries a per-mount
 //    nonce, and the bridge ignores parent messages without it.
 //
+//    A write that would take the shim past its quota throws QuotaExceededError (as a real
+//    localStorage does) and nothing is stored. The bridge then sends the pending draft and posts
+//    `{ type: "factory:save-failed", reason: "too-large" }`, once: further refused writes stay
+//    quiet until a change that fits, after which a new refusal posts again. Because the pending
+//    draft goes first, any draft the parent gets after factory:save-failed holds a change made
+//    after the refusal.
+//
 // 2. Submit: defines `globalThis.factorySubmit(payload)`, the piece's single way to send. It checks
 //    the payload against the shape of the piece kind, flushes the pending draft, posts
 //    `{ type: "factory:submit", requestId, payload }` and resolves with the parent's
@@ -62,7 +69,8 @@ function bridgeRuntime(cfg) {
     catch (e) { var err = new Error("QuotaExceededError"); err.name = "QuotaExceededError"; return err; }
   }
 
-  function makeStorage(seed, onChange) {
+  // onQuota runs when a write is refused for the quota, just before it throws.
+  function makeStorage(seed, onChange, onQuota) {
     var data = new Map();
     var size = 0;
     if (seed && typeof seed === "object" && !Array.isArray(seed)) {
@@ -78,7 +86,7 @@ function bridgeRuntime(cfg) {
         key = String(key); value = String(value);
         var old = data.has(key) ? key.length + data.get(key).length : 0;
         var next = size - old + key.length + value.length;
-        if (next > quota) throw quotaError();
+        if (next > quota) { if (onQuota) onQuota(); throw quotaError(); }
         if (data.get(key) === value) return;
         data.set(key, value); size = next; changed();
       },
@@ -128,13 +136,20 @@ function bridgeRuntime(cfg) {
   // ---- persistence -------------------------------------------------------------------------
   var timer = null;
   var dirty = false;
+  var refused = false; // a write was refused for the quota and no change has fit since
   var local = makeStorage(cfg.storage, function () {
+    refused = false;
     // Tell the parent right away (without the content) so it knows there is unsaved work
     // during the debounce, e.g. for its beforeunload warning.
     if (!dirty) post({ type: "factory:dirty" });
     dirty = true;
     if (timer) clearTimeout(timer);
     timer = setTimeout(sendDraft, debounceMs);
+  }, function () {
+    if (refused) return;
+    refused = true;
+    sendDraft(); // what fit before the refusal goes first
+    post({ type: "factory:save-failed", reason: "too-large" });
   });
   var session = makeStorage(null, null);
 
@@ -251,19 +266,21 @@ function cleanReviewerName(host) {
   return name || null;
 }
 
-// host: { reviewerName } for globalThis.factoryHost. submitTimeoutMs only changes in tests.
-export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, submitTimeoutMs = SUBMIT_TIMEOUT_MS }) {
+const positiveOr = (value, fallback) => (Number.isFinite(value) && value > 0 ? value : fallback);
+
+// host: { reviewerName } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
+export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, submitTimeoutMs = SUBMIT_TIMEOUT_MS, quotaChars = STORAGE_QUOTA_CHARS }) {
   if (typeof nonce !== "string" || !nonce) throw new Error("buildBridgeScript needs a nonce");
   const cfg = {
     parentOrigin: String(parentOrigin),
     nonce,
     storage: cleanStorage(storage),
     debounceMs: DRAFT_DEBOUNCE_MS,
-    quotaChars: STORAGE_QUOTA_CHARS,
+    quotaChars: positiveOr(quotaChars, STORAGE_QUOTA_CHARS),
     payloadShape: Object.hasOwn(PAYLOAD_SHAPES, kind) ? PAYLOAD_SHAPES[kind] : null,
     submitErrors: SUBMIT_ERRORS,
     submitMaxBytes: SUBMIT_MAX_BYTES,
-    submitTimeoutMs: Number.isFinite(submitTimeoutMs) && submitTimeoutMs > 0 ? submitTimeoutMs : SUBMIT_TIMEOUT_MS,
+    submitTimeoutMs: positiveOr(submitTimeoutMs, SUBMIT_TIMEOUT_MS),
     reviewerName: cleanReviewerName(host),
   };
   return `<script>(${bridgeRuntime.toString()})(${serializeForScript(cfg)});</script>`;

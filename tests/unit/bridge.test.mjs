@@ -207,3 +207,53 @@ test("the bridge no longer wraps downloads", () => {
   assert.ok(!script.includes("HTMLAnchorElement"));
   assert.ok(!script.includes("factory:collect"));
 });
+
+// ---- a write past the storage quota ---------------------------------------------------------
+
+test("the storage quota can be lowered for tests and defaults to STORAGE_QUOTA_CHARS", async () => {
+  const { STORAGE_QUOTA_CHARS } = await import("../../js/bridge.js");
+  assert.ok(buildBridgeScript(config).includes(`"quotaChars":${STORAGE_QUOTA_CHARS}`));
+  assert.ok(buildBridgeScript({ ...config, quotaChars: 100 }).includes('"quotaChars":100'));
+  for (const bad of [0, -1, NaN, "100", null]) {
+    assert.ok(buildBridgeScript({ ...config, quotaChars: bad }).includes(`"quotaChars":${STORAGE_QUOTA_CHARS}`), String(bad));
+  }
+});
+
+test("a write past the quota throws QuotaExceededError and tells the parent once, with the nonce", () => {
+  const { win, of } = runBridge({ quotaChars: 100 });
+  assert.throws(() => win.localStorage.setItem("k", "x".repeat(200)), (e) => e.name === "QuotaExceededError");
+  const failed = of("factory:save-failed");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].reason, "too-large");
+  assert.equal(failed[0].nonce, "n-1");
+  assert.equal(win.localStorage.getItem("k"), null, "nothing was stored");
+  assert.throws(() => win.localStorage.setItem("k", "y".repeat(200)), (e) => e.name === "QuotaExceededError");
+  assert.throws(() => { win.localStorage.big = "z".repeat(200); }, (e) => e.name === "QuotaExceededError");
+  assert.equal(of("factory:save-failed").length, 1, "a second failure in a row does not post again");
+  assert.equal(of("factory:dirty").length, 0, "a refused write is not a change");
+});
+
+test("after a write that fits, a new failure posts again", () => {
+  const { win, of } = runBridge({ quotaChars: 100 });
+  assert.throws(() => win.localStorage.setItem("k", "x".repeat(200)));
+  win.localStorage.setItem("k", "short");
+  assert.equal(of("factory:save-failed").length, 1);
+  assert.throws(() => win.localStorage.setItem("k", "x".repeat(200)));
+  assert.equal(of("factory:save-failed").length, 2);
+  assert.equal(win.localStorage.getItem("k"), "short", "the last write that fit stays");
+});
+
+test("on a failure the pending draft goes first, so any later draft has a change made after it", () => {
+  const { win, posted } = runBridge({ quotaChars: 100 });
+  win.localStorage.setItem("a", "1"); // debounced: no draft yet
+  assert.throws(() => win.localStorage.setItem("b", "x".repeat(200)));
+  const types = posted.map((p) => p.message.type);
+  assert.deepEqual(types.slice(-2), ["factory:draft", "factory:save-failed"], types.join(","));
+  assert.deepEqual({ ...posted.at(-2).message.storage }, { a: "1" });
+});
+
+test("sessionStorage past the quota throws but does not report a failed save", () => {
+  const { win, of } = runBridge({ quotaChars: 100 });
+  assert.throws(() => win.sessionStorage.setItem("k", "x".repeat(200)), (e) => e.name === "QuotaExceededError");
+  assert.equal(of("factory:save-failed").length, 0);
+});

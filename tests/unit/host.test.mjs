@@ -148,3 +148,13 @@ test("trySaveAll reports whether every saver could save", async () => {
   assert.equal(await trySaveAll([], 50), true, "nothing to save");
   saver.dispose();
 });
+
+test("parseBridgeMessage accepts factory:save-failed only with reason too-large", () => {
+  assert.deepEqual(parseBridgeMessage({ nonce: N, type: "factory:save-failed", reason: "too-large" }, "questions", N),
+    { ok: true, message: { type: "factory:save-failed", reason: "too-large" } });
+  for (const reason of [undefined, "", "network", "TOO-LARGE", 1, null]) {
+    assert.deepEqual(parseBridgeMessage({ nonce: N, type: "factory:save-failed", reason }, "questions", N), { ok: false, reason: "shape" }, String(reason));
+  }
+  assert.equal(parseBridgeMessage({ type: "factory:save-failed", reason: "too-large" }, "questions", N).ok, false, "needs the nonce");
+  assert.equal(parseBridgeMessage({ nonce: "other", type: "factory:save-failed", reason: "too-large" }, "questions", N).ok, false);
+});

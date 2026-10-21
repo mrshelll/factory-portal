@@ -64,6 +64,14 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   `save_draft` (one request at a time, newest data wins, retries when offline). The draft is also
   flushed when the person leaves the piece or the page is hidden. `sessionStorage` gets the same
   shim without persistence.
+- **Too large to keep.** The shim holds up to 900,000 characters (keys + values,
+  `STORAGE_QUOTA_CHARS`). A write past that throws `QuotaExceededError` in the piece, as a real
+  `localStorage` does, and stores nothing. The bridge sends the pending draft and posts
+  `{ type: "factory:save-failed", reason: "too-large" }` once; more refused writes stay quiet until a
+  change that fits, and a refusal after that posts again. The portal's status line then says the
+  change was not saved and suggests shortening the last text or downloading a copy (the live region
+  announces it). A later save of a draft from before the refusal does not bring back «Saved»; the
+  line leaves that state once a change that fits has been through the save queue.
 - **Sending.** The piece has the only "Send" button. It calls `globalThis.factorySubmit(payload)`
   (opened outside the portal, a piece finds no `factorySubmit` and offers its own download instead),
   which the bridge defines: it checks the payload against the piece kind (`respuestas-fabrica/1`,
@@ -80,7 +88,8 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   member's `project_members.display_name` (or `null`).
 - **Messages.** Each mounted piece gets a random nonce (`crypto.getRandomValues`) inside its
   injected config. The portal only accepts messages whose `event.source` is the piece iframe and that
-  carry that nonce, with a known type, the expected shape and under 1 MB. The bridge only posts to the
+  carry that nonce, with a known type (`factory:ready`, `factory:dirty`, `factory:draft`,
+  `factory:save-failed`, `factory:submit`, `factory:flushed`), the expected shape and under 1 MB. The bridge only posts to the
   portal's origin and only accepts messages (`factory:flush`, `factory:submit-result`) from its
   parent, from the portal's origin, with the nonce. If the iframe loads a
   second document (the piece navigated away or reloaded), the portal removes it and offers to reopen.
@@ -163,7 +172,8 @@ The browser checks start `python3 -m http.server`, drive Chrome headless with `p
 360, 768 and 1440 px (no console errors, no horizontal scroll, axe, the brand's logo, colour and
 font), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
-change was saved). `tests/harness.html` can also be opened by hand in any browser to try a piece file.
+change was saved, a change too long to keep). The harness takes `submitTimeoutMs` and `quotaChars`
+options so the timeout and the storage quota can be lowered for a check. `tests/harness.html` can also be opened by hand in any browser to try a piece file.
 
 **Visual manual.** Each run saves four screens to `<out>/screens/`: `sign-in-email.html`,
 `sign-in-code.html` (pattern `formulario`), `home-pieces.html` and `home-empty.html` (pattern

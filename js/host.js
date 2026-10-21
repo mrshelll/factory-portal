@@ -6,6 +6,9 @@ export const MAX_MESSAGE_BYTES = 1000000;
 // What globalThis.factorySubmit can resolve with in the piece: { ok: false, error: one of these }.
 export const SUBMIT_ERRORS = ["invalid", "too-large", "timeout", "network", "session-expired", "rejected"];
 
+// Why the bridge could not keep a change (factory:save-failed): the storage quota was exceeded.
+export const SAVE_FAILED_REASONS = ["too-large"];
+
 // The shape a submitted payload must have for each piece kind: `field` must equal `value`, and
 // `list` must be an array. The bridge gets the shape of its kind and checks it before posting.
 export const PAYLOAD_SHAPES = {
@@ -48,6 +51,9 @@ export function parseBridgeMessage(data, kind, nonce) {
       return { ok: true, message: { type: data.type, persistence: data.persistence } };
     case "factory:flushed":
       return { ok: true, message: { type: data.type } };
+    case "factory:save-failed":
+      if (!SAVE_FAILED_REASONS.includes(data.reason)) return no("shape");
+      return { ok: true, message: { type: data.type, reason: data.reason } };
     case "factory:draft": {
       if (!isPlainObject(data.storage)) return no("shape");
       if (!Object.values(data.storage).every((v) => typeof v === "string")) return no("shape");
