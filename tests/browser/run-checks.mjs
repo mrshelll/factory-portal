@@ -1,15 +1,22 @@
 // Browser checks for the portal and the bridge. Dev-only; nothing here is served to users.
 //
 //   node tests/browser/run-checks.mjs --questions <piece.html> [--flow <piece.html>] [--demo <piece.html>] [--out <dir>]
+//                                     [--factory <software factory repo>]
 //
 // Starts `python3 -m http.server` on the repo, drives system Chrome headless with playwright-core
 // and prints one PASS/FAIL line per check. playwright-core is loaded from PLAYWRIGHT_CORE_DIR, or
 // from the software factory cache (~/.cache/fabrica-software/playwright-core@1.63.0). Chrome is
 // taken from CHROME_PATH or the default macOS / Linux locations.
+//
+// Screen snapshots: the sign-in screens (email step, code step) and home (with pieces, empty) are
+// saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
+// brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
+// design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and
+// 1440 px, light and dark, and every run is one check. The JSON of each run is in <out>/screens/.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -20,6 +27,13 @@ const args = Object.fromEntries(
 );
 const outDir = resolve(args.out || join(os.tmpdir(), "factory-portal-checks"));
 mkdirSync(outDir, { recursive: true });
+const screensDir = join(outDir, "screens");
+rmSync(screensDir, { recursive: true, force: true }); // no stale snapshot from an earlier run
+mkdirSync(screensDir, { recursive: true });
+cpSync(join(root, "css"), join(screensDir, "css"), { recursive: true });
+cpSync(join(root, "brand"), join(screensDir, "brand"), { recursive: true });
+// Screen name -> visual manual pattern, filled as the snapshots are taken.
+const screens = new Map();
 
 function loadPlaywright() {
   const dir = process.env.PLAYWRIGHT_CORE_DIR || join(os.homedir(), ".cache", "fabrica-software", "playwright-core@1.63.0");
@@ -44,6 +58,18 @@ async function startServer() {
     if (ok) return { child, base: `http://127.0.0.1:${port}` };
   }
   throw new Error("could not start http.server");
+}
+
+// Saves the screen as it is now: the rendered DOM without scripts (nothing re-renders it), with the
+// same relative links to css/ and brand/.
+async function snapshot(page, name, pattern) {
+  const html = await page.evaluate(() => {
+    const doc = document.documentElement.cloneNode(true);
+    for (const script of doc.querySelectorAll("script")) script.remove();
+    return `<!doctype html>\n${doc.outerHTML}\n`;
+  });
+  writeFileSync(join(screensDir, `${name}.html`), html);
+  screens.set(name, pattern);
 }
 
 const results = [];
@@ -82,6 +108,22 @@ async function portalChecks(browser, base) {
     check(`login ${width}px: no console errors`, errors.length === 0, errors.join(" | "));
     check(`login ${width}px: no horizontal scroll`, info.scrollWidth <= info.innerWidth, `${info.scrollWidth} <= ${info.innerWidth}`);
     if (width === 360) {
+      const brand = await page.evaluate(async () => {
+        await document.fonts.ready;
+        const mark = document.querySelector("[data-rol=marca-producto]");
+        return {
+          logo: Boolean(mark && mark.querySelector("svg path")),
+          name: mark && mark.textContent,
+          stroke: mark && mark.querySelector("svg") && getComputedStyle(mark.querySelector("svg")).stroke,
+          signal: getComputedStyle(document.documentElement).getPropertyValue("--signal").trim(),
+          inter: [...document.fonts].some((f) => f.family.replace(/"/g, "") === "Inter" && f.status === "loaded"),
+          body: getComputedStyle(document.body).fontFamily.split(",")[0].replace(/"/g, ""),
+        };
+      });
+      check("brand: the masthead shows the ninben logo and name", brand.logo && brand.name === "ninben", JSON.stringify(brand));
+      check("brand: the logo stroke is the signal colour", brand.stroke === "rgb(65, 55, 255)" && brand.signal === "#4137FF", `${brand.stroke} · ${brand.signal}`);
+      check("brand: Inter loads from brand/fonts and is the body font", brand.inter && brand.body === "Inter");
+      await snapshot(page, "sign-in-email", "formulario");
       const violations = await axeViolations(page);
       if (violations) check("login: axe has no violations", violations.length === 0, violations.join(", "));
       check("login: h1 and email field rendered", info.h1 && info.email, info.h1);
@@ -103,6 +145,20 @@ async function portalChecks(browser, base) {
   });
   check("login: empty email shows an inline error", fieldError);
   await context.close();
+
+  // The code step, as after asking for a code (the pending sign-in survives a reload).
+  const codeContext = await browser.newContext({ viewport: { width: 360, height: 800 }, locale: "es-CO" });
+  await codeContext.addInitScript((email) => {
+    localStorage.setItem("factory-portal.pending-sign-in", JSON.stringify({ email, sentAt: Date.now() }));
+  }, USER.email);
+  const codePage = await codeContext.newPage();
+  await codePage.goto(`${base}/`, { waitUntil: "networkidle" });
+  const code = await codePage.waitForSelector("#code", { timeout: 10000 }).catch(() => null);
+  check("login: a pending sign-in opens on the code step", code);
+  if (code) await snapshot(codePage, "sign-in-code", "formulario");
+  const codeAxe = await axeViolations(codePage);
+  if (codeAxe) check("login: axe on the code step has no violations", codeAxe.length === 0, codeAxe.join(", "));
+  await codeContext.close();
 }
 
 async function harnessContext(browser, base) {
@@ -497,6 +553,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
     backend.requests.filter((r) => r.includes("/rest/v1/pieces")).every((r) => !decodeURIComponent(r).includes("html")));
   check("app: home 360px no horizontal scroll", await noHorizontalScroll(page));
   await page.screenshot({ path: join(outDir, "home-360.png"), fullPage: true });
+  await snapshot(page, "home-pieces", "lista");
   const homeAxe = await axeViolations(page);
   if (homeAxe) check("app: axe on home has no violations", homeAxe.length === 0, homeAxe.join(", "));
   // On its own page: resizing this one breaks clicks into the piece iframe later (headless Chrome).
@@ -663,6 +720,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: empty state explains and offers another email", empty.title === "Aquí verás lo que te compartan" && empty.action === "Entrar con otro correo", JSON.stringify(empty));
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
+  await snapshot(emptyPage, "home-empty", "lista");
   await emptyContext.close();
 }
 
@@ -750,6 +808,26 @@ try {
   await browser.close();
   child.kill();
 }
+// Every snapshot through the factory's verifier, at the three review widths, light and dark.
+if (args.factory) {
+  const verifier = join(resolve(args.factory), "design-system", "assets", "verifica-pantalla.mjs");
+  if (!existsSync(verifier)) check("manual: verifica-pantalla.mjs found", false, verifier);
+  else {
+    check("manual: the four screens were captured", ["sign-in-email", "sign-in-code", "home-pieces", "home-empty"].every((n) => screens.has(n)), [...screens.keys()].join(", "));
+    for (const [name, pattern] of screens) {
+      for (const width of [320, 768, 1440]) {
+        for (const scheme of ["light", "dark"]) {
+          const out = join(screensDir, `${name}-${width}-${scheme}.json`);
+          const run = spawnSync(process.execPath, [verifier, "--html", join(screensDir, `${name}.html`), "--patron", pattern,
+            "--ancho", String(width), "--color-scheme", scheme, "--salida", out], { encoding: "utf8" });
+          const failing = `${run.stdout}${run.stderr}`.split("\n").filter((line) => line.startsWith("✗") || line.startsWith("verifica-pantalla: ") && run.status !== 0);
+          check(`manual: ${name} (${pattern}) ${width}px ${scheme}: verifica-pantalla rc=${run.status}`, run.status === 0, failing.join(" | "));
+        }
+      }
+    }
+  }
+}
+
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} checks passed · screenshots in ${outDir}`);
 process.exit(failed ? 1 : 0);

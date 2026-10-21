@@ -6,7 +6,7 @@ export const DEFAULT_LANGUAGE = "es";
 
 export const dictionaries = {
   es: {
-    brand: "Portal de proyectos",
+    brand: "ninben",
     dismiss: "Cerrar aviso",
     retry: "Reintentar",
 
@@ -88,7 +88,7 @@ export const dictionaries = {
     signInAgain: "Entrar de nuevo",
   },
   en: {
-    brand: "Project portal",
+    brand: "ninben",
     dismiss: "Dismiss notice",
     retry: "Try again",
 

@@ -21,6 +21,8 @@ const REOPEN_SAVE_WAIT_MS = 3000;
 const SUBMIT_SAVE_WAIT_MS = 3000; // a send waits this long for the last draft to land first
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIECE_ROUTE = /^#\/piece\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const LOGO_URL = new URL("../brand/logo.svg", import.meta.url);
+const LOGO_TIMEOUT_MS = 3000;
 
 const state = {
   session: null,
@@ -37,6 +39,19 @@ const state = {
 };
 
 const t = (key, params) => translate(state.lang, key, params);
+
+// The ninben logo, read once from brand/logo.svg and placed inline (its stroke is var(--signal), so it
+// follows light and dark). Without it the masthead still shows the name.
+let logoTemplate = null;
+async function loadLogo() {
+  try {
+    const response = await fetch(LOGO_URL, { signal: AbortSignal.timeout(LOGO_TIMEOUT_MS) });
+    if (!response.ok) return;
+    const svg = new DOMParser().parseFromString(await response.text(), "image/svg+xml").documentElement;
+    if (svg.namespaceURI === "http://www.w3.org/2000/svg" && svg.localName === "svg" && !svg.querySelector("parsererror")) logoTemplate = document.importNode(svg, true);
+  } catch { /* offline or blocked: the name alone */ }
+}
+const logo = () => (logoTemplate ? logoTemplate.cloneNode(true) : null);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function setLanguage(lang) {
@@ -59,7 +74,7 @@ function frameLayout({ title, meta = [], headerActions = [] }) {
   const live = visuallyHiddenStatus();
   replaceChildren(root, h("div", { class: "frame", "data-rol": "marco" },
     h("header", { class: "masthead" },
-      h("p", { class: "brand", "data-rol": "marca-producto" }, t("brand")),
+      h("p", { class: "brand", "data-rol": "marca-producto" }, logo(), h("span", {}, t("brand"))),
       headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null),
     h("main", { id: "main" },
       h("div", { class: "page-head", "data-rol": "cabecera" },
@@ -606,6 +621,6 @@ supabase.auth.onAuthStateChange((event, session) => {
 
 // The module graph (supabase-js included) loaded: the boot fallback in index.html can stand down.
 document.documentElement.dataset.ready = "true";
-const { data } = await supabase.auth.getSession();
+const [{ data }] = await Promise.all([supabase.auth.getSession(), loadLogo()]);
 state.session = data.session;
 route();

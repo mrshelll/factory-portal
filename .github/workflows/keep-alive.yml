@@ -1,0 +1,39 @@
+# Keeps the Supabase project awake: the free plan pauses a project after 7 days without activity.
+# Every 3 days (and on demand) it calls public.keep_alive(), which only returns 1, with the
+# publishable key from config.js (public by design; no secret is needed or used here).
+# GitHub turns scheduled workflows off after 60 days without activity in the repository: if that
+# happens, re-enable it in Actions > Keep Supabase awake.
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: "0 12 */3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Call keep_alive
+        run: |
+          set -euo pipefail
+          url=$(sed -nE 's/^export const SUPABASE_URL = "([^"]+)";$/\1/p' config.js)
+          key=$(sed -nE 's/^export const SUPABASE_PUBLISHABLE_KEY = "([^"]+)";$/\1/p' config.js)
+          if [ -z "$url" ] || [ -z "$key" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY not found in config.js"
+            exit 1
+          fi
+          code=$(curl -sS -o response.txt -w '%{http_code}' --retry 3 --retry-delay 10 --max-time 30 \
+            -X POST "$url/rest/v1/rpc/keep_alive" \
+            -H "apikey: $key" -H "Content-Type: application/json" -d '{}')
+          body=$(cat response.txt)
+          echo "keep_alive: HTTP $code, body $body"
+          if [ "$code" != "200" ] || [ "$body" != "1" ]; then
+            echo "::error::keep_alive answered HTTP $code with $body (expected 200 and 1)"
+            exit 1
+          fi
