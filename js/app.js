@@ -89,7 +89,9 @@ function frameLayout({ title, meta = [], headerActions = [] }) {
 function showNotice(container, { tone = "info", text, actions = [], dismissible = true }) {
   const notice = h("div", { class: `notice notice--${tone}`, role: tone === "error" ? "alert" : "status" },
     h("p", {}, text));
-  const buttons = actions.map((a) => h("button", { type: "button", class: "link-button", onclick: a.onClick }, a.label));
+  // An action with `href` is a link (it goes somewhere); one with `onClick`, a button.
+  const buttons = actions.map((a) => (a.href ? h("a", { class: "link-button", href: a.href }, a.label)
+    : h("button", { type: "button", class: "link-button", onclick: a.onClick }, a.label)));
   if (dismissible) buttons.push(h("button", { type: "button", class: "link-button", onclick: () => notice.remove() }, t("dismiss")));
   if (buttons.length) notice.append(h("div", { class: "notice-actions" }, buttons));
   replaceChildren(container, notice);
@@ -506,6 +508,8 @@ function saverFor(pieceId) {
 }
 
 function pieceLayout(titleText) {
+  // A notice that stays for the whole visit (a replaced version); the zone below takes the passing ones.
+  const pinned = h("div", { class: "notices", "data-rol": "aviso-fijo" });
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const title = h("h1", { class: "piece-title" }, titleText);
   const status = h("p", { class: "piece-status" });
@@ -517,9 +521,9 @@ function pieceLayout(titleText) {
       h("header", { class: "piece-bar", "data-rol": "cabecera" },
         h("a", { class: "back-link", href: "#/", "aria-label": t("backLabel") }, h("span", { "aria-hidden": "true" }, "←"), t("back")),
         h("div", { class: "piece-heading" }, title, status)),
-      notices),
+      pinned, notices),
     main));
-  return { notices, title, status, main, live };
+  return { pinned, notices, title, status, main, live };
 }
 
 async function showPiece(pieceId, viewId) {
@@ -560,7 +564,7 @@ async function showPiece(pieceId, viewId) {
   const pieceTitle = piece.title || t("untitled");
   setTitle(pieceTitle);
   layout = pieceLayout(pieceTitle);
-  const { notices, status, main, live } = layout;
+  const { pinned, notices, status, main, live } = layout;
 
   const saver = saverFor(pieceId);
   const localDrafts = state.localDrafts; // this account's, even if the maps are swapped later
@@ -572,11 +576,22 @@ async function showPiece(pieceId, viewId) {
   let draftSinceTooLarge = false;
   let lastSubmittedAt = context.lastSubmittedAt;
   const handled = new Set();
+  // A version replaced by a newer one (opened from an old email, say): what is saved here is never picked
+  // up on its own, only what is sent. The notice says so and points to the newer version.
+  const replaced = context.assignment.status === "replaced" && !context.lastSubmittedAt;
+  if (replaced) {
+    showNotice(pinned, {
+      tone: "warning", text: t("replacedNotice"), dismissible: false,
+      actions: [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: "#/" }],
+    });
+  }
 
   function render() {
     const parts = [];
+    // On a replaced version a saved draft has not reached anyone: the line says so until it is sent.
+    const savedKey = replaced && !lastSubmittedAt ? "savedNotSent" : "saved";
     if (tooLarge) parts.push(t("saveTooLarge"));
-    else if (saveStatus !== "idle") parts.push(t({ saving: "saving", saved: "saved", error: "saveError" }[saveStatus]));
+    else if (saveStatus !== "idle") parts.push(t({ saving: "saving", saved: savedKey, error: "saveError" }[saveStatus]));
     if (lastSubmittedAt) parts.push(t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) }));
     status.textContent = parts.join(" · ");
     status.hidden = !parts.length;

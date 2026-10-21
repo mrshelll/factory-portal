@@ -48,8 +48,31 @@ export async function loadSharedWithMe(client, user) {
     .sort((a, b) => String(a.project.name).localeCompare(String(b.project.name)));
 }
 
+// A replaced version's newer one: the newest piece of the same kind in the same project that this person
+// has a current (not replaced) assignment for. null when there is none or it cannot be read.
+async function newerVersion(client, members, piece) {
+  try {
+    const memberIds = members.filter((m) => m.project_id === piece.project_id).map((m) => m.id);
+    if (!memberIds.length) return null;
+    const rows = unwrap(await client.from("piece_assignments").select("piece_id, member_id, status")
+      .in("member_id", memberIds).neq("status", "replaced"));
+    const ids = new Set((rows || []).filter((a) => a.status !== "replaced" && memberIds.includes(a.member_id) && a.piece_id !== piece.id)
+      .map((a) => a.piece_id));
+    if (!ids.size) return null;
+    const pieces = unwrap(await client.from("pieces").select("id, project_id, kind, created_at")
+      .in("id", [...ids]).eq("project_id", piece.project_id).eq("kind", piece.kind));
+    const after = Date.parse(piece.created_at) || 0;
+    const newer = (pieces || [])
+      .filter((p) => ids.has(p.id) && p.project_id === piece.project_id && p.kind === piece.kind && (Date.parse(p.created_at) || 0) > after)
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+    return newer ? newer.id : null;
+  } catch {
+    return null; // the notice then points to the list, where the newer version is
+  }
+}
+
 // -> null when the piece is not assigned to this user (or does not exist). A replaced version still
-// opens: a tab left open on it can still send.
+// opens: a tab left open on it, or an old email, can still send; `newerPieceId` names its newer version.
 export async function loadPiece(client, user, pieceId) {
   const members = await myMemberships(client, user);
   if (!members.length) return null;
@@ -68,6 +91,7 @@ export async function loadPiece(client, user, pieceId) {
   const project = unwrap(await client.from("projects").select("id, slug, name, language").eq("id", piece.project_id).maybeSingle());
   const member = members.find((m) => m.id === assignment.member_id);
   const displayName = member && typeof member.display_name === "string" ? member.display_name.trim() : "";
+  const newerPieceId = assignment.status === "replaced" ? await newerVersion(client, members, piece) : null;
   return {
     piece,
     project,
@@ -75,6 +99,7 @@ export async function loadPiece(client, user, pieceId) {
     draftStorage: draft && draft.storage && typeof draft.storage === "object" && !Array.isArray(draft.storage) ? draft.storage : {},
     lastSubmittedAt: responses && responses[0] ? responses[0].submitted_at : null,
     memberDisplayName: displayName || null,
+    newerPieceId,
   };
 }
 

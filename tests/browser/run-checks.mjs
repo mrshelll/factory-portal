@@ -8,6 +8,9 @@
 // from the software factory cache (~/.cache/fabrica-software/playwright-core@1.63.0). Chrome is
 // taken from CHROME_PATH or the default macOS / Linux locations.
 //
+// With --demo, the demo sheet also sends through the app (error, then success: one row), and a replaced
+// version opened from an old email shows its fixed notice with a link to the newer one and still sends.
+//
 // Screen snapshots: the sign-in screens (email step, code step) and home (with pieces, empty) are
 // saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
@@ -488,7 +491,11 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         const draft = sub && sub !== USER.id ? backend.draftBy[sub] : backend.draft;
         return json(draft ? [{ storage: draft, updated_at: new Date().toISOString() }] : []);
       }
-      case "piece_responses": return json(backend.submits.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
+      case "piece_responses": {
+        const eq = url.searchParams.get("piece_id");
+        const sent = backend.submits.filter((b) => !eq || `eq.${b.p_piece_id}` === eq);
+        return json(sent.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
+      }
       case "rpc/save_draft": {
         if (backend.authExpired) { backend.expiredSaves += 1; return json(EXPIRED, 401); }
         if (backend.saveFails) return route.abort("internetdisconnected");
@@ -894,6 +901,65 @@ async function sessionEndDraftRun(browser, base, html, other) {
   await context.close();
 }
 
+// ---- the demo sheet and a replaced version, in the app ----------------------------------------
+
+const DEMO_SENT = "Listo, tu revisión llegó";
+// The demo sheet inside the app, once it rendered.
+async function appSheet(page, timeout = 10000) {
+  return waitFor(async () => { const f = pieceFrame(page); return f && (await f.$("#app h1").catch(() => null)) ? f : null; }, timeout);
+}
+const sendsOf = (backend, pieceId) => backend.submits.filter((b) => b.p_piece_id === pieceId);
+const sendButton = (frame) => frame.getByRole("button", { name: "Enviar revisión", exact: true });
+
+// The pinned notice of the piece screen, as the person sees it.
+const pinnedNotice = (page) => page.evaluate(() => {
+  const n = document.querySelector("[data-rol=aviso-fijo] .notice");
+  if (!n) return null;
+  const link = n.querySelector("a");
+  return { text: n.querySelector("p").textContent, href: link && link.getAttribute("href"), label: link && link.textContent,
+    dismiss: [...n.querySelectorAll("button")].some((b) => b.textContent === "Cerrar aviso"), visible: n.getBoundingClientRect().height > 0 };
+});
+
+// R11: a replaced version opened from an old email says so in a fixed notice, with a link to the newer
+// version; its status line never makes a draft look sent; and sending it still works.
+async function replacedAppChecks(browser, base, html, flowHtml, demoHtml) {
+  for (const withNewer of [true, false]) {
+    const tag = withNewer ? "replaced version" : "replaced version, no newer one found";
+    const backend = newBackend(html, flowHtml, demoHtml);
+    backend.html[IDS.replaced] = demoHtml;
+    if (!withNewer) { const rows = backend.assignments; backend.assignments = (sub) => rows(sub).filter((a) => a.piece_id !== IDS.demo); }
+    const context = await mockedContext(browser, { backend });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto(`${base}/#/piece/${IDS.replaced}`, { waitUntil: "networkidle" });
+    const frame = await appSheet(page);
+    const notice = await waitFor(() => pinnedNotice(page), 5000);
+    check(`${tag}: a fixed notice says there is a newer version and that sending this one still reaches`, notice && notice.visible && !notice.dismiss &&
+      notice.text.includes("Hay una versión más nueva") && notice.text.includes("le llega a quien te la compartió"), JSON.stringify(notice));
+    check(`${tag}: the notice links to ${withNewer ? "the newer version" : "the list"}`, notice &&
+      notice.href === (withNewer ? `#/piece/${IDS.demo}` : "#/") && notice.label === (withNewer ? "Abrir la versión nueva" : "Ver lo que te compartimos"), JSON.stringify(notice));
+    if (!withNewer || !frame) { await context.close(); continue; }
+    await page.screenshot({ path: join(outDir, "piece-replaced-360.png") });
+    const axe = await axeViolations(page);
+    if (axe) check(`${tag}: axe on the piece screen with the notice has no violations`, axe.length === 0, axe.join(", "));
+    await frame.locator("button.aprobar").first().click();
+    const saved = await waitFor(async () => { const t = await page.textContent(".piece-status"); return backend.drafts.length && t && !t.includes("…") ? t : null; }, 5000);
+    check(`${tag}: a saved draft reads «Guardado aquí, sin enviar», never just «Guardado»`, saved === "Guardado aquí, sin enviar", String(saved));
+    await sendButton(frame).click();
+    const sent = await waitFor(async () => ((await frameText(frame)).includes(DEMO_SENT) ? true : null), 8000);
+    check(`${tag}: sending it still works (one row for this version)`, sent && sendsOf(backend, IDS.replaced).length === 1, `${sendsOf(backend, IDS.replaced).length} row(s)`);
+    check(`${tag}: then the status line says «Enviada el…»`, await waitFor(async () => (await page.textContent(".piece-status")).includes("Enviada el"), 3000));
+    if (notice) await page.click("[data-rol=aviso-fijo] a");
+    const opened = await waitFor(async () => (await page.evaluate(() => location.hash)) === `#/piece/${IDS.demo}` &&
+      (await page.textContent("h1.piece-title").catch(() => "")) === "Demo v2", 8000);
+    check(`${tag}: the link opens the newer version`, opened, await page.evaluate(() => location.hash));
+    check(`${tag}: the newer version shows no such notice`, !(await pinnedNotice(page)));
+    check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 // A session that comes back while the piece is handing over its last draft (the session ended, the
 // cleanup is still waiting for the piece): the portal must not be left on an empty screen.
 async function sessionReturnsChecks(browser, base, html) {
@@ -935,6 +1001,7 @@ try {
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
   if (args.questions) await sessionReturnsChecks(browser, base, read(args.questions));
+  if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
 } finally {
   await browser.close();
   child.kill();

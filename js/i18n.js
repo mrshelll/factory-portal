@@ -79,6 +79,7 @@ export const dictionaries = {
     pieceNotFound: "No encontramos esto entre lo que te compartieron. Puede que ya no esté disponible.",
     saving: "Guardando…",
     saved: "Guardado",
+    savedNotSent: "Guardado aquí, sin enviar",
     saveError: "Sin guardar: no hay conexión. Lo intentamos de nuevo solos.",
     saveTooLarge: "Sin guardar: lo que escribiste es demasiado largo para guardarlo. Acorta tu último texto o descarga una copia.",
     noPersistence: "En este navegador tus avances no se guardan si sales. Termina y envía antes de cerrar.",
@@ -87,6 +88,9 @@ export const dictionaries = {
     reopen: "Abrir de nuevo",
     sessionExpired: "Tu sesión terminó. Vuelve a entrar con tu correo; lo que respondiste sigue guardado.",
     signInAgain: "Entrar de nuevo",
+    replacedNotice: "Hay una versión más nueva de esto. Lo que marques aquí se guarda solo en esta página y no le llega a nadie hasta que lo envíes. Lo mejor es responder la versión nueva; si ya terminaste esta, envíala y también le llega a quien te la compartió.",
+    openNewer: "Abrir la versión nueva",
+    openList: "Ver lo que te compartimos",
   },
   en: {
     brand: "ninben",
@@ -162,6 +166,7 @@ export const dictionaries = {
     pieceNotFound: "We couldn't find this among what was shared with you. It may no longer be available.",
     saving: "Saving…",
     saved: "Saved",
+    savedNotSent: "Saved here, not sent",
     saveError: "Not saved: you're offline. We'll keep trying on our own.",
     saveTooLarge: "Not saved: what you wrote is too long to save. Shorten your last text or download a copy.",
     noPersistence: "In this browser your progress isn't kept if you leave. Finish and send before closing.",
@@ -170,6 +175,9 @@ export const dictionaries = {
     reopen: "Open again",
     sessionExpired: "Your session ended. Sign in again with your email; your answers are still saved.",
     signInAgain: "Sign in again",
+    replacedNotice: "There's a newer version of this. What you mark here is only kept on this page and reaches no one until you send it. It's best to answer the newer version; if you already finished this one, send it and it still reaches the person who shared it with you.",
+    openNewer: "Open the newer version",
+    openList: "See what we shared with you",
   },
 };
 
