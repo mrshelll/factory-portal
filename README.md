@@ -173,7 +173,41 @@ The browser checks start `python3 -m http.server`, drive Chrome headless with `p
 360, 768 and 1440 px (no console errors, no horizontal scroll, axe, the brand's logo, colour and
 font), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
-change was saved, a change too long to keep). The harness takes `submitTimeoutMs` and `quotaChars`
+change was saved, a session that comes back while the piece hands over its draft, a change too long
+to keep). With `--demo` as well: the demo sheet sends through the app (a failure shows its error and
+never «Listo»; the retry arrives once), and a replaced version opened from an old email shows its
+fixed notice, links to the newer version and still sends.
+
+**The pieces.** The checks do not generate pieces: pass the three files with `--questions`, `--flow`
+and `--demo`. Emit them from the factory's current templates into a scratch folder (never into either
+repo), with `F` the software factory repo and `T` the scratch folder:
+
+```sh
+# questions: a copy of the factory's mini project, renamed portal-test, with four questions for Ana Pérez
+cp -R "$F/factory-orchestrator/evals/preguntas/fixtures/proyecto-mini" "$T/project"
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["proyecto"]="portal-test"; json.dump(d,open(p,"w"))' "$T/project/project-manifest.json"
+for i in 1 2 3 4; do
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["para"]="Ana Pérez"; json.dump(d,open(sys.argv[2],"w"))' \
+    "$F/factory-orchestrator/evals/preguntas/fixtures/entrada-$i.json" "$T/q$i.json"
+  python3 "$F/factory-orchestrator/assets/preguntas.py" agregar --proyecto "$T/project" --archivo "$T/q$i.json" --por prd
+done
+python3 "$F/factory-orchestrator/assets/preguntas.py" emitir --proyecto "$T/project" --para "Ana Pérez"
+cp "$T/project/.factory/preguntas/ronda-1-ana-perez.html" "$T/questions.html"
+# flow review
+python3 "$F/ux-flows/assets/emit-recorrido.py" \
+  --datos "$F/ux-flows/evals/recorrido-flujos/fixtures/golden-recorrido.json" --salida "$T/flow.html"
+# demo sheet (without an expected reviewer: the name comes from the portal member)
+D="$F/design-system/evals/demo-aprobacion/fixtures"
+python3 "$F/design-system/assets/emit-aprobacion.py" --guion "$D/guion.json" --versiones "$D/versiones.json" \
+  --respuestas "$D/revisiones" --enlace https://example.com/prototype --responsable "Ana Gómez" \
+  --proyecto-titulo "la biblioteca" --salida "$T/demo.html"
+
+node tests/browser/run-checks.mjs --questions "$T/questions.html" --flow "$T/flow.html" --demo "$T/demo.html" \
+  --out "$T/checks" --factory "$F"
+```
+
+The checks expect these fixtures (the questions sheet for Ana Pérez in `portal-test`, the demo link on
+`https://example.com/`). Re-emit the pieces whenever a template changes in the factory. The harness takes `submitTimeoutMs` and `quotaChars`
 options so the timeout and the storage quota can be lowered for a check. `tests/harness.html` can also be opened by hand in any browser to try a piece file.
 
 **Visual manual.** Each run saves four screens to `<out>/screens/`: `sign-in-email.html`,

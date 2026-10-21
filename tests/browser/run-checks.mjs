@@ -911,6 +911,36 @@ async function appSheet(page, timeout = 10000) {
 const sendsOf = (backend, pieceId) => backend.submits.filter((b) => b.p_piece_id === pieceId);
 const sendButton = (frame) => frame.getByRole("button", { name: "Enviar revisión", exact: true });
 
+// R1: the demo sheet sends through the portal. A failure shows its error and never «Listo»; the retry
+// arrives once and the sheet says «Listo».
+async function demoAppChecks(browser, base, html, flowHtml, demoHtml) {
+  const backend = newBackend(html, flowHtml, demoHtml);
+  const context = await mockedContext(browser, { backend });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(`${base}/#/piece/${IDS.demo}`, { waitUntil: "networkidle" });
+  const frame = await appSheet(page);
+  check("demo in app: the sheet opens inside the portal", frame);
+  if (!frame) { await context.close(); return; }
+  backend.submitMode = "network";
+  await sendButton(frame).click();
+  const failed = await waitFor(async () => { const t = await frameText(frame); return t.includes("No se pudo enviar tu revisión") ? t : null; }, 8000);
+  check("demo in app: a failed send shows the sheet's error, never «Listo»", failed && !failed.includes(DEMO_SENT) && sendsOf(backend, IDS.demo).length === 0,
+    failed ? "" : (await frameText(frame)).slice(0, 200));
+  check("demo in app: after the failure the portal does not say «Enviada»", !(await page.textContent(".piece-status")).includes("Enviada"), await page.textContent(".piece-status"));
+  backend.submitMode = "ok";
+  await frame.getByRole("button", { name: "Reintentar", exact: true }).click();
+  const done = await waitFor(async () => ((await frameText(frame)).includes(DEMO_SENT) ? true : null), 8000);
+  await sleep(500); // nothing else arrives afterwards
+  const rows = sendsOf(backend, IDS.demo);
+  check("demo in app: the retry shows «Listo, tu revisión llegó» and the row arrives once", done && rows.length === 1 &&
+    rows[0].p_payload.esquema === "revision-demo/1" && rows[0].p_payload.revisor === "Ana Pérez", `${rows.length} row(s)`);
+  check("demo in app: the status line shows «Enviada el…»", await waitFor(async () => (await page.textContent(".piece-status")).includes("Enviada el"), 3000));
+  check("demo in app: no page errors", errors.length === 0, errors.join(" | "));
+  await context.close();
+}
+
 // The pinned notice of the piece screen, as the person sees it.
 const pinnedNotice = (page) => page.evaluate(() => {
   const n = document.querySelector("[data-rol=aviso-fijo] .notice");
@@ -1001,6 +1031,7 @@ try {
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
   if (args.questions) await sessionReturnsChecks(browser, base, read(args.questions));
+  if (args.questions && args.demo) await demoAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
 } finally {
   await browser.close();
