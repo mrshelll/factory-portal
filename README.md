@@ -43,6 +43,11 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
    normal tab.
+4. **A replaced version** (the factory published a newer one; the home list hides the old one) still
+   opens from an old email or a tab left open, and can still send. Until it is sent, a fixed notice says
+   there is a newer version, links to it (the newest piece of the same kind in the project among the
+   person's own assignments, or the list), and the status line reads «Guardado aquí, sin enviar»: a
+   draft saved there never reaches the factory, only a send does.
 
 Text shown to people follows the project language (`projects.language`, `es` or `en`); before the
 project is known (sign-in), the browser language is used, Spanish by default. All strings live in
