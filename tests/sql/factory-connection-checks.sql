@@ -1,4 +1,4 @@
--- Checks for the factory connection (migration 20261021000000_factory_connection.sql).
+-- Checks for the factory connection (migration 20261021033643_factory_connection.sql).
 --
 -- Run as ONE request against the `factory` database (Supabase MCP execute_sql, or psql as postgres).
 -- Everything happens inside `begin; ... rollback;`: no data is left behind. Every failure raises an
