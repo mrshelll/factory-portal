@@ -362,12 +362,12 @@ const IDS = {
 };
 const EXPIRED = { code: "PGRST303", message: "JWT expired", details: null, hint: null };
 
-function fakeSession() {
+function fakeSession(user = USER) {
   const now = Math.floor(Date.now() / 1000);
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  const jwt = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: USER.id, email: USER.email, exp: now + 3600, role: "authenticated", aud: "authenticated" })}.sig`;
+  const jwt = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: user.id, email: user.email, exp: now + 3600, role: "authenticated", aud: "authenticated" })}.sig`;
   return { access_token: jwt, token_type: "bearer", expires_in: 3600, expires_at: now + 3600, refresh_token: "fake-refresh",
-    user: { id: USER.id, email: USER.email, aud: "authenticated", role: "authenticated" } };
+    user: { id: user.id, email: user.email, aud: "authenticated", role: "authenticated" } };
 }
 
 async function mockedContext(browser, { width = 360, locale = "en-US", backend }) {
@@ -381,8 +381,9 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
     const url = new URL(request.url());
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     backend.requests.push(`${request.method()} ${url.pathname}${url.search}`);
+    if (backend.readsExpired && request.method() === "GET" && url.pathname.startsWith("/rest/v1/")) return json(EXPIRED, 401);
     if (url.pathname.endsWith("/logout")) return backend.logoutFails ? route.abort("internetdisconnected") : route.fulfill({ status: 204 });
-    if (url.pathname.endsWith("/verify")) return json(fakeSession()); // signing in again with a code
+    if (url.pathname.endsWith("/verify")) return json(fakeSession(backend.signInAs || USER)); // signing in again with a code
     if (url.pathname.startsWith("/auth/v1/")) return json(fakeSession().user);
     const table = url.pathname.replace("/rest/v1/", "");
     const select = url.searchParams.get("select") || "";
@@ -402,7 +403,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
       case "piece_drafts": return json(backend.draft ? [{ storage: backend.draft, updated_at: new Date().toISOString() }] : []);
       case "piece_responses": return json(backend.submits.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
       case "rpc/save_draft": {
-        if (backend.authExpired) return json(EXPIRED, 401);
+        if (backend.authExpired) { backend.expiredSaves += 1; return json(EXPIRED, 401); }
         if (backend.saveFails) return route.abort("internetdisconnected");
         const body = request.postDataJSON();
         backend.drafts.push(body);
@@ -425,7 +426,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
 function newBackend(html, flowHtml, demoHtml) {
   const backend = {
     requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitMode: "ok", authExpired: false,
-    saveFails: false, saveDelayMs: 0, logoutFails: false,
+    readsExpired: false, expiredSaves: 0, saveFails: false, saveDelayMs: 0, logoutFails: false,
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
@@ -665,6 +666,75 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await emptyContext.close();
 }
 
+// Signs in through the real screens (mocked /otp and /verify), from the email step.
+async function signInThroughScreens(page) {
+  await page.waitForSelector("#email", { timeout: 10000 });
+  await page.fill("#email", USER.email);
+  await page.click("button[type=submit]");
+  await page.waitForSelector("#code", { timeout: 10000 });
+  await page.fill("#code", "1".repeat(await page.evaluate(async () => (await import("./config.js")).EMAIL_OTP_LENGTH)));
+}
+
+// A change the server never confirmed survives the end of the session: it stays in the tab and is
+// saved after the person signs in again (with the same account).
+async function sessionEndDraftChecks(browser, base, html) {
+  for (const other of [false, true]) await sessionEndDraftRun(browser, base, html, other);
+}
+
+// other = true: someone else signs in on the same tab; the kept change is not theirs and is never sent.
+async function sessionEndDraftRun(browser, base, html, other) {
+  const tag = other ? "session end, another account" : "session end";
+  const backend = newBackend(html);
+  if (other) backend.signInAs = { id: "99999999-9999-4999-8999-999999999999", email: "luis@example.com" };
+  const context = await mockedContext(browser, { backend });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+  await page.click(`a[href="#/piece/${IDS.questions}"]`);
+  let frame = await appPiece(page);
+  await frame.evaluate(() => responder("q-001", "si"));
+  await waitFor(async () => backend.draft && (await page.textContent(".piece-status")).includes("Guardado"), 5000);
+
+  // The session expires; the next change cannot be saved.
+  backend.authExpired = true;
+  backend.readsExpired = true;
+  await frame.evaluate(() => { responder("q-003", "cambio"); escribir("q-003", "texto", "Escrito al final de la sesión"); });
+  const refused = await waitFor(() => backend.expiredSaves > 0, 5000);
+  const edited = (storage) => {
+    try { return JSON.parse(storage[QUESTIONS_KEY]).respuestas["q-003"]?.texto === "Escrito al final de la sesión"; } catch { return false; }
+  };
+  check(`${tag}: the change made after the session expired was refused by the server`, refused && !edited(backend.draft));
+  // Going home finds the session over (401) and lands on the sign-in screen.
+  await page.click(".back-link");
+  const ended = await waitFor(async () => page.evaluate(() => {
+    const n = document.querySelector("[data-rol=avisos] .notice");
+    return document.querySelector("#email") && n && n.textContent.includes("Your session ended"); // sign-in follows the browser (en-US)
+  }).catch(() => false), 10000);
+  check(`${tag}: the portal asks to sign in again`, ended);
+
+  backend.authExpired = false;
+  backend.readsExpired = false;
+  await signInThroughScreens(page);
+  await page.waitForSelector(".row-link, .empty", { timeout: 10000 }); // the other account has nothing shared
+  if (other) {
+    await sleep(2000);
+    check(`${tag}: the kept change is not saved under the new account`, !backend.drafts.some((d) => edited(d.p_storage)), `${backend.drafts.length} save_draft call(s)`);
+    await context.close();
+    return;
+  }
+  const reached = await waitFor(() => backend.draft && edited(backend.draft), 8000);
+  check(`${tag}: after signing in again, the unsaved change reaches piece_drafts`, reached,
+    backend.draft ? JSON.stringify(JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas) : "no server draft");
+  await page.click(`a[href="#/piece/${IDS.questions}"]`);
+  frame = await appPiece(page);
+  const shown = frame && await frame.evaluate(() => ({ q1: ST.respuestas["q-001"]?.tipo, q3: ST.respuestas["q-003"]?.texto }));
+  check(`${tag}: the piece shows the change after signing in again`, shown && shown.q1 === "si" && shown.q3 === "Escrito al final de la sesión", JSON.stringify(shown));
+  check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+  await context.close();
+}
+
 const { chromium } = loadPlaywright();
 const { child, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
@@ -675,6 +745,7 @@ try {
   if (args.flow) await flowChecks(browser, base, read(args.flow));
   if (args.demo) await demoChecks(browser, base, read(args.demo));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
+  if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
 } finally {
   await browser.close();
   child.kill();

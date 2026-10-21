@@ -29,8 +29,10 @@ const state = {
   viewId: 0,
   cleanup: null,
   signingOut: false,
-  savers: new Map(),          // pieceId -> draft saver (outlives the piece screen)
+  savers: new Map(),          // pieceId -> draft saver (outlives the piece screen and a session end)
   localDrafts: new Map(),     // pieceId -> newest storage seen in this tab
+  draftOwner: null,           // user id the savers and local drafts belong to
+  resumeSaves: false,         // the session ended with unsaved drafts: save them after signing in again
   statusListeners: new Map(), // pieceId -> save status callback of the open piece screen
 };
 
@@ -94,6 +96,7 @@ async function route() {
   if (state.cleanup) { const cleanup = state.cleanup; state.cleanup = null; await cleanup(); }
   if (viewId !== state.viewId) return;
   if (!state.session) return showSignIn();
+  adoptSession();
   const match = PIECE_ROUTE.exec(location.hash);
   if (match) return showPiece(match[1].toLowerCase(), viewId);
   if (location.hash && location.hash !== "#/") history.replaceState(null, "", `${location.pathname}${location.search}#/`);
@@ -303,6 +306,30 @@ function disposeSavers() {
   for (const saver of state.savers.values()) saver.dispose();
   state.savers.clear();
   state.localDrafts.clear();
+  state.resumeSaves = false;
+}
+
+// Drafts the server already confirmed are not needed once the session is over; the others stay in
+// the tab (their savers keep them) until the person signs in again.
+function keepOnlyUnsaved() {
+  for (const [pieceId, saver] of state.savers) {
+    if (saver.hasUnsaved()) continue;
+    saver.dispose();
+    state.savers.delete(pieceId);
+    state.localDrafts.delete(pieceId);
+  }
+  if (state.savers.size) state.resumeSaves = true;
+}
+
+// Runs on every screen with a session. Drafts kept from another account are dropped (they could not
+// be saved under this one); with the same account, the kept drafts are saved now.
+function adoptSession() {
+  const userId = state.session.user.id;
+  if (state.draftOwner && state.draftOwner !== userId) disposeSavers();
+  state.draftOwner = userId;
+  if (!state.resumeSaves) return;
+  state.resumeSaves = false;
+  for (const saver of state.savers.values()) saver.retryNow();
 }
 
 // Signing out never drops unsaved drafts silently: it first tries to save them, and if that is not
@@ -335,6 +362,7 @@ async function finishSignOut() {
   state.signingOut = false;
   state.session = null;
   disposeSavers();
+  state.draftOwner = null;
   clearPendingSignIn();
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   state.viewId += 1;
@@ -343,12 +371,16 @@ async function finishSignOut() {
   showSignIn({ notice: offline ? () => ({ tone: "info", text: t("signedOutOffline") }) : undefined });
 }
 
-function sessionEnded() {
+// The session ended (expired, or signed out elsewhere). Unsaved drafts are not dropped: the open
+// piece hands over its last change first, and whatever the server has not confirmed is saved after
+// the person signs in again.
+async function sessionEnded() {
   state.session = null;
-  disposeSavers();
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   state.viewId += 1;
-  if (state.cleanup) { const cleanup = state.cleanup; state.cleanup = null; cleanup(); }
+  if (state.cleanup) { const cleanup = state.cleanup; state.cleanup = null; await cleanup(); }
+  keepOnlyUnsaved();
+  if (state.session) return; // signed in again while the piece was handing over its draft
   showSignIn({ notice: () => ({ tone: "info", text: t("sessionExpired") }) });
 }
 
@@ -428,7 +460,8 @@ async function showHome(viewId) {
 function saverFor(pieceId) {
   if (!state.savers.has(pieceId)) {
     state.savers.set(pieceId, createDraftSaver({
-      save: (storage) => saveDraft(supabase, pieceId, storage),
+      // Without a session the save fails at once and the saver keeps the data for later.
+      save: (storage) => (state.session ? saveDraft(supabase, pieceId, storage) : Promise.reject(new Error("signed out"))),
       onStatus: (status) => { const listener = state.statusListeners.get(pieceId); if (listener) listener(status); },
     }));
   }
