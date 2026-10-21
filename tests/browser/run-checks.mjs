@@ -894,6 +894,34 @@ async function sessionEndDraftRun(browser, base, html, other) {
   await context.close();
 }
 
+// A session that comes back while the piece is handing over its last draft (the session ended, the
+// cleanup is still waiting for the piece): the portal must not be left on an empty screen.
+async function sessionReturnsChecks(browser, base, html) {
+  const backend = newBackend(html);
+  const context = await mockedContext(browser, { backend });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+  const frame = await appPiece(page);
+  // Keep the piece busy so the hand-over waits (up to its 1 s limit), then end the session and start it again.
+  frame.evaluate(() => { const t = Date.now(); while (Date.now() - t < 1500) { /* busy */ } }).catch(() => {});
+  await sleep(100);
+  await page.evaluate(async (s) => {
+    const { supabase } = await import("./js/supabase-client.js");
+    await supabase.auth.signOut({ scope: "local" });
+    await new Promise((r) => setTimeout(r, 50));
+    await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
+  }, fakeSession());
+  await sleep(2500); // the hand-over has ended (its limit is 1 s after the piece is free again)
+  const ended = await page.evaluate((id) => location.hash !== `#/piece/${id}`, IDS.questions); // the session end ran
+  const home = await waitFor(() => page.evaluate(() => Boolean(document.querySelector(".row-link"))), 3000);
+  check("session returns during the hand-over: the portal shows home, never an empty piece screen", ended && home,
+    await page.evaluate(() => `hash «${location.hash}» · h1 «${document.querySelector("h1")?.textContent}» · iframe ${Boolean(document.querySelector("iframe.piece-frame"))}`));
+  check("session returns during the hand-over: no page errors", errors.length === 0, errors.join(" | "));
+  await context.close();
+}
+
 const { chromium } = loadPlaywright();
 const { child, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
@@ -906,6 +934,7 @@ try {
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
+  if (args.questions) await sessionReturnsChecks(browser, base, read(args.questions));
 } finally {
   await browser.close();
   child.kill();

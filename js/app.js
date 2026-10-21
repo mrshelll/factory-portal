@@ -410,7 +410,7 @@ async function sessionEnded() {
   state.viewId += 1;
   if (state.cleanup) { const cleanup = state.cleanup; state.cleanup = null; await cleanup(); }
   keepOnlyUnsaved();
-  if (state.session) return; // signed in again while the piece was handing over its draft
+  if (state.session) return route(); // signed in again while the piece was handing over its draft
   showSignIn({ notice: () => ({ tone: "info", text: t("sessionExpired") }) });
 }
 
