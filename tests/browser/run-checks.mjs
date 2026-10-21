@@ -790,8 +790,14 @@ async function tooLargeAppChecks(browser, base, html) {
   const back = await waitFor(async () => ((await statusText()).includes("Guardado") ? statusText() : null), 5000);
   check("too large: a shorter text is saved and the line says «Guardado» again", back && !back.includes("demasiado largo") &&
     JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas["q-003"].texto === "Más corto", back || await statusText());
+  const savedValue = await frame.evaluate((k) => localStorage.getItem(k), QUESTIONS_KEY);
   await frame.evaluate((n) => escribir("q-003", "texto", "w".repeat(n)), quota);
   check("too large: a new long text is reported again", await waitFor(async () => (await statusText()) === TOO_LARGE_ES, 3000));
+  // Undoing the paste brings back exactly the state already saved (this piece stamps each answer with
+  // a time, so the write is done by hand, as a piece without that stamp would): the line must leave «too large».
+  await frame.evaluate(([k, v]) => localStorage.setItem(k, v), [QUESTIONS_KEY, savedValue]);
+  const undone = await waitFor(async () => ((await statusText()).includes("Guardado") ? statusText() : null), 5000);
+  check("too large: going back to the saved text says «Guardado» again", undone && !undone.includes("demasiado largo"), undone || await statusText());
   check("too large: no page errors", errors.length === 0, errors.join(" | "));
   await context.close();
 }

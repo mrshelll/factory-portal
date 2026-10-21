@@ -21,9 +21,11 @@
 //    A write that would take the shim past its quota throws QuotaExceededError (as a real
 //    localStorage does) and nothing is stored. The bridge then sends the pending draft and posts
 //    `{ type: "factory:save-failed", reason: "too-large" }`, once: further refused writes stay
-//    quiet until a change that fits, after which a new refusal posts again. Because the pending
-//    draft goes first, any draft the parent gets after factory:save-failed holds a change made
-//    after the refusal.
+//    quiet until a write that fits, after which a new refusal posts again. A write that fits counts
+//    even when it equals the stored value (the person undid a paste back to what was saved): it
+//    sends a draft, so the parent learns the storage is fine again. Because the pending draft goes
+//    first, any draft the parent gets after factory:save-failed holds a write made after the
+//    refusal.
 //
 // 2. Submit: defines `globalThis.factorySubmit(payload)`, the piece's single way to send. It checks
 //    the payload against the shape of the piece kind, flushes the pending draft, posts
@@ -69,8 +71,9 @@ function bridgeRuntime(cfg) {
     catch (e) { var err = new Error("QuotaExceededError"); err.name = "QuotaExceededError"; return err; }
   }
 
-  // onQuota runs when a write is refused for the quota, just before it throws.
-  function makeStorage(seed, onChange, onQuota) {
+  // onQuota runs when a write is refused for the quota, just before it throws; onSame when a write
+  // fits but equals the stored value (no change).
+  function makeStorage(seed, onChange, onQuota, onSame) {
     var data = new Map();
     var size = 0;
     if (seed && typeof seed === "object" && !Array.isArray(seed)) {
@@ -87,7 +90,7 @@ function bridgeRuntime(cfg) {
         var old = data.has(key) ? key.length + data.get(key).length : 0;
         var next = size - old + key.length + value.length;
         if (next > quota) { if (onQuota) onQuota(); throw quotaError(); }
-        if (data.get(key) === value) return;
+        if (data.get(key) === value) { if (onSame) onSame(); return; }
         data.set(key, value); size = next; changed();
       },
       removeItem: function (key) {
@@ -136,8 +139,8 @@ function bridgeRuntime(cfg) {
   // ---- persistence -------------------------------------------------------------------------
   var timer = null;
   var dirty = false;
-  var refused = false; // a write was refused for the quota and no change has fit since
-  var local = makeStorage(cfg.storage, function () {
+  var refused = false; // a write was refused for the quota and no write has fit since
+  function onLocalChange() {
     refused = false;
     // Tell the parent right away (without the content) so it knows there is unsaved work
     // during the debounce, e.g. for its beforeunload warning.
@@ -145,11 +148,14 @@ function bridgeRuntime(cfg) {
     dirty = true;
     if (timer) clearTimeout(timer);
     timer = setTimeout(sendDraft, debounceMs);
-  }, function () {
+  }
+  var local = makeStorage(cfg.storage, onLocalChange, function () {
     if (refused) return;
     refused = true;
     sendDraft(); // what fit before the refusal goes first
     post({ type: "factory:save-failed", reason: "too-large" });
+  }, function () {
+    if (refused) onLocalChange(); // back to a value that fits: tell the parent with a draft
   });
   var session = makeStorage(null, null);
 

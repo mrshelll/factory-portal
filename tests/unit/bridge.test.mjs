@@ -89,6 +89,7 @@ function runBridge(overrides = {}) {
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
   };
   win.window = win;
+  win.dispatchPagehide = () => (listeners.pagehide || []).forEach((fn) => fn());
   vm.createContext(win);
   vm.runInContext(source, win);
   const fromParent = (data, { origin = ORIGIN, source: src = parent } = {}) =>
@@ -256,4 +257,30 @@ test("sessionStorage past the quota throws but does not report a failed save", (
   const { win, of } = runBridge({ quotaChars: 100 });
   assert.throws(() => win.sessionStorage.setItem("k", "x".repeat(200)), (e) => e.name === "QuotaExceededError");
   assert.equal(of("factory:save-failed").length, 0);
+});
+
+test("after a refusal, re-writing the value already stored unlocks and sends a draft", async () => {
+  const { win, of } = runBridge({ quotaChars: 100 });
+  win.localStorage.setItem("k", "saved");
+  win.dispatchPagehide(); // "saved" went out as a draft
+  assert.throws(() => win.localStorage.setItem("k", "x".repeat(200)));
+  const afterRefusal = of("factory:draft").length; // the pending draft went first
+  win.localStorage.setItem("k", "saved"); // the person undid the paste: same value as stored
+  assert.equal(of("factory:dirty").length, 2, "the identical write counts as a change after the refusal");
+  win.dispatchPagehide();
+  assert.equal(of("factory:draft").length, afterRefusal + 1, "a draft goes out");
+  assert.deepEqual({ ...of("factory:draft").at(-1).storage }, { k: "saved" });
+  assert.throws(() => win.localStorage.setItem("k", "x".repeat(200)));
+  assert.equal(of("factory:save-failed").length, 2, "unlocked: a new refusal posts again");
+});
+
+test("without a refusal, re-writing the stored value is still not a change", () => {
+  const { win, of } = runBridge();
+  win.localStorage.setItem("k", "v");
+  win.dispatchPagehide();
+  const drafts = of("factory:draft").length;
+  win.localStorage.setItem("k", "v");
+  win.dispatchPagehide();
+  assert.equal(of("factory:dirty").length, 1);
+  assert.equal(of("factory:draft").length, drafts);
 });

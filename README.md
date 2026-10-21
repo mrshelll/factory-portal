@@ -68,7 +68,8 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   `STORAGE_QUOTA_CHARS`). A write past that throws `QuotaExceededError` in the piece, as a real
   `localStorage` does, and stores nothing. The bridge sends the pending draft and posts
   `{ type: "factory:save-failed", reason: "too-large" }` once; more refused writes stay quiet until a
-  change that fits, and a refusal after that posts again. The portal's status line then says the
+  write that fits, and a refusal after that posts again. A write that fits counts even when it equals
+  the stored value (the person undid a paste back to what was saved): it sends a draft too. The portal's status line then says the
   change was not saved and suggests shortening the last text or downloading a copy (the live region
   announces it). A later save of a draft from before the refusal does not bring back «Saved»; the
   line leaves that state once a change that fits has been through the save queue.
