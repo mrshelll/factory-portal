@@ -203,6 +203,14 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 :where(.piece) .bar-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: var(--space-2) var(--space-4); padding-block: var(--space-3); }
 :where(.piece) .where { color: var(--muted); font-size: var(--text-small); }
+/* A fold (<details class="more">) with a name that says what it holds (FOR-13): a chevron in SVG, in the signal colour
+   like every link, that turns when it opens; only the words are underlined, and the whole summary is a 44 px target. */
+:where(.piece) .more summary { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; color: var(--signal);
+  cursor: pointer; list-style: none; }
+:where(.piece) .more summary::-webkit-details-marker { display: none; }
+:where(.piece) .more summary span { text-decoration: underline; text-underline-offset: 3px; }
+:where(.piece) .more summary svg { flex: none; width: var(--space-4); height: var(--space-4); }
+:where(.piece) .more[open] summary svg { transform: rotate(90deg); }
 /* Inside the portal the iframe is the portal's frame box: <main> takes the page margin and the frame in it no longer
    pads, so every block, the frame too, starts on the portal brand's left edge (MAR-13). Only a sheet in the portal
    carries data-factory-host. */

@@ -802,8 +802,9 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   });
   // Where the piece's content starts, in the portal page's coordinates: every visible top-level block of the
   // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .view, .layout, .main-col)
-  // must start on the brand's edge; plus the «Ver todos los flujos» link, the questions' reading text (the first
-  // paragraph of the sheet's body, .flow > p) and the flows' one (the paragraph of the title band, .heading > p).
+  // must start on the brand's edge; plus the «Ver todos los flujos» link and the width of three texts the person reads:
+  // the questions' (the first paragraph of the sheet's body, .flow > p), the sentence in the flows' title band
+  // (.heading > p: how many flows, steps and minutes, or what is left) and the text of a step (.step-intro > p).
   const contentOf = async (page, frame) => {
     const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f.getBoundingClientRect().left + f.clientLeft; });
     const inner = await frame.evaluate(() => {
@@ -813,13 +814,15 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const name = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.classList.length ? "." + [...el.classList].join(".") : ""}`;
       const reading = [...document.querySelectorAll("main .flow > p")].find(shown);
       const flowReading = [...document.querySelectorAll("main .view .heading > p")].find(shown);
+      const stepReading = [...document.querySelectorAll("main .step-intro > p")].find(shown);
       const home = document.getElementById("homeBtn");
       return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left })),
         home: home && shown(home) ? home.getBoundingClientRect().left : null, flowReading: flowReading ? flowReading.getBoundingClientRect().width : null,
+        stepReading: stepReading ? stepReading.getBoundingClientRect().width : null,
         reading: reading ? reading.getBoundingClientRect().width : null };
     });
     const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset }));
-    return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, reading: inner.reading };
+    return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, stepReading: inner.stepReading, reading: inner.reading };
   };
   // Every top-level block on the brand's edge (±1 px); the detail names the ones that are not.
   const onEdge = (tag, what, content, brand) => {
@@ -894,8 +897,8 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const list = frame && await contentOf(page, frame);
       onEdge(tag, "list of flows", list, brand);
       // A missing reading text fails: a null width is not a measure.
-      check(`${tag}: the flows keep their reading measure (680 px at most)`, list && typeof list.flowReading === "number" && list.flowReading <= 680,
-        JSON.stringify(list && list.flowReading));
+      check(`${tag}: the sentence of the flows' title band keeps its reading measure (680 px at most)`,
+        list && typeof list.flowReading === "number" && list.flowReading <= 680, JSON.stringify(list && list.flowReading));
       if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-start-${width}.png`) });
       await quietOpen(tag, page, backend);
       if (frame) await frame.evaluate(() => openFlow(IDS[0]));
@@ -905,6 +908,9 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const banners = frame ? await frame.getByRole("banner").count() : -1;
       check(`${tag}: inside a flow the piece has no banner of its own (the portal's masthead is the one)`, banners === 0, `${banners} banner(s)`);
       const walk = frame && await contentOf(page, frame);
+      // A missing step text fails too: a null width is not a measure.
+      check(`${tag}: inside a flow, the text of the step keeps its reading measure (680 px at most)`,
+        walk && typeof walk.stepReading === "number" && walk.stepReading <= 680, JSON.stringify(walk && walk.stepReading));
       check(`${tag}: inside a flow, «Ver todos los flujos» starts on the brand's left edge`, walk && near(walk.home, brand?.left), JSON.stringify({ brand: brand?.left, home: walk && walk.home }));
       onEdge(tag, "inside a flow", walk, brand);
       if (width === 320 && scheme === "light") await page.screenshot({ path: join(outDir, "piece-view-flow-320.png") });
