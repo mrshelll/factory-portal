@@ -529,7 +529,7 @@ function newBackend(html, flowHtml, demoHtml) {
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
-      { id: IDS.questions, project_id: IDS.project, kind: "questions", title: "Preguntas · ronda 1", revision: 1, language: "es", created_at: "2026-10-16T15:00:00Z" },
+      { id: IDS.questions, project_id: IDS.project, kind: "questions", title: "Preguntas sobre Biblioteca del barrio", revision: 1, language: "es", created_at: "2026-10-16T15:00:00Z" },
       { id: IDS.flow, project_id: IDS.project, kind: "flow_review", title: "Recorrido de flujos v2", revision: 2, language: "es", created_at: "2026-10-10T15:00:00Z" },
       { id: IDS.demo, project_id: IDS.project, kind: "demo_review", title: "Demo v2", revision: 2, language: "es", created_at: "2026-10-09T15:00:00Z" },
       { id: IDS.replaced, project_id: IDS.project, kind: "demo_review", title: "Demo v1", revision: 1, language: "es", created_at: "2026-10-01T15:00:00Z" },
@@ -802,8 +802,8 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   });
   // Where the piece's content starts, in the portal page's coordinates: every visible top-level block of the
   // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .column,
-  // .flows-panel, .walk) must start on the brand's edge; plus the «Ver todos los flujos» link and the width of
-  // the questions' or flows' column.
+  // .flows-panel, .walk) must start on the brand's edge; plus the «Ver todos los flujos» link, the width of the
+  // flows' column and the questions' reading text (the first paragraph of the sheet's body, .flow > p).
   const contentOf = async (page, frame) => {
     const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f.getBoundingClientRect().left + f.clientLeft; });
     const inner = await frame.evaluate(() => {
@@ -812,12 +812,14 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const blocks = [...new Set(containers.flatMap((c) => [...c.children]))].filter((el) => shown(el) && el.tagName !== "NOSCRIPT");
       const name = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.classList.length ? "." + [...el.classList].join(".") : ""}`;
       const column = document.querySelector("main .column");
+      const reading = [...document.querySelectorAll("main .flow > p")].find(shown);
       const home = document.getElementById("homeBtn");
       return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left })),
-        home: home && shown(home) ? home.getBoundingClientRect().left : null, column: column ? column.getBoundingClientRect().width : null };
+        home: home && shown(home) ? home.getBoundingClientRect().left : null, column: column ? column.getBoundingClientRect().width : null,
+        reading: reading ? reading.getBoundingClientRect().width : null };
     });
     const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset }));
-    return { blocks, home: inner.home === null ? null : inner.home + offset, column: inner.column };
+    return { blocks, home: inner.home === null ? null : inner.home + offset, column: inner.column, reading: inner.reading };
   };
   // Every top-level block on the brand's edge (±1 px); the detail names the ones that are not.
   const onEdge = (tag, what, content, brand) => {
@@ -860,7 +862,9 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     check(`${tag}: the piece's own brand bar is not shown inside the portal`, bar && bar.host === "portal" && !bar.bar && !bar.ninben, JSON.stringify(bar));
     const content = frame && await contentOf(page, frame);
     onEdge(tag, "start", content, layout.brand);
-    check(`${tag}: the questions keep their reading measure (680 px at most)`, content && content.column <= 680, JSON.stringify(content && content.column));
+    // A missing reading text fails: a null width is not a measure.
+    check(`${tag}: the questions keep their reading measure (680 px at most)`, content && typeof content.reading === "number" && content.reading <= 680,
+      JSON.stringify(content && content.reading));
     if (width === 320 || width === 1440) await page.screenshot({ path: join(outDir, `piece-view-${width}-${scheme}.png`) });
     await quietOpen(tag, page, backend);
     // The first change the person makes is saved, with what the piece wrote while it opened.

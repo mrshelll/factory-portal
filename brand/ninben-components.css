@@ -179,3 +179,32 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 .status-dot { width: 10px; height: 10px; border: 2px solid var(--dot, var(--muted)); border-radius: var(--radius-pill); background: var(--dot-fill, transparent); }
 .status--active .status-dot { --dot: var(--ink); --dot-fill: var(--ink); }
 .status--done .status-dot { --dot: var(--ok); --dot-fill: var(--ok); }
+
+/* ---- pieces ------------------------------------------------------------------------------ */
+
+/* A button that cannot act yet (nothing to send) looks off, never like the signal. */
+.button[disabled] { background: var(--line); border-color: var(--line); color: var(--muted); cursor: not-allowed; }
+
+/* What the factory's HTML sheets (the questions, the flow review, the demo sheet) share and the portal does not:
+   each one carries <body class="piece">, the portal's index.html does not, so none of this reaches the portal's
+   own pages. :where() keeps each selector as light as without the scope, so a sheet's own rules still win. */
+:where(.piece) p, :where(.piece) h1, :where(.piece) h2, :where(.piece) h3, :where(.piece) ul, :where(.piece) dl,
+:where(.piece) dd { margin: 0; }
+:where(.piece) h1 { font-size: var(--text-title); line-height: 1.25; font-weight: 600; letter-spacing: -0.02em; }
+:where(.piece) h1:focus { outline: none; } /* the title takes the focus on each new view; it is not a control */
+:where(.piece) h2, :where(.piece) h3 { font-size: var(--text-body); line-height: 1.4; font-weight: 600; }
+:where(.piece) main p, :where(.piece) main dd, :where(.piece) legend { max-width: var(--measure-text); } /* about 80 characters a line (FUN-12) */
+:where(.piece) main { padding-block: var(--space-6) var(--space-7); }
+/* The title band: the h1 with what goes right before or after it (a step count, a saved state, a date). */
+:where(.piece) .heading { display: grid; gap: var(--space-2); }
+/* A sheet opened on its own brings its bar: the brand and which sheet this is, on the frame's edge (the markup,
+   <header class="bar"><div class="frame bar-inner">…, is each sheet's). Inside the portal the rule above hides it. */
+:where(.piece) .bar { border-bottom: 1px solid var(--line); background: var(--sheet); }
+:where(.piece) .bar-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-2) var(--space-4); padding-block: var(--space-3); }
+:where(.piece) .where { color: var(--muted); font-size: var(--text-small); }
+/* Inside the portal the iframe is the portal's frame box: <main> takes the page margin and the frame in it no longer
+   pads, so every block, the frame too, starts on the portal brand's left edge (MAR-13). Only a sheet in the portal
+   carries data-factory-host. */
+html[data-factory-host="portal"] main { padding-inline: var(--margin-page); }
+html[data-factory-host="portal"] main > .frame { padding-inline: 0; }
