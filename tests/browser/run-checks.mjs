@@ -950,8 +950,13 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const bar = frame && await pieceBar(frame);
       check(`${tag}: the sheet shows no brand bar`, bar && bar.host === "portal" && !bar.bar && !bar.ninben, JSON.stringify(bar));
       onEdge(tag, "the sheet", frame && await contentOf(page, frame), brand);
-      const measure = frame && await frame.evaluate(() => document.querySelector("main").clientWidth - parseFloat(getComputedStyle(document.querySelector("main")).paddingLeft) - parseFloat(getComputedStyle(document.querySelector("main")).paddingRight));
-      check(`${tag}: the sheet keeps its reading measure (728 px at most)`, measure <= 728, String(measure));
+      // The opening text of the sheet (what to do with the demo) keeps the reading measure; a missing text fails: a null
+      // width is not a measure.
+      const opening = frame && await frame.evaluate(() => {
+        const p = [...document.querySelectorAll("main .intro > p")].find((el) => el.getBoundingClientRect().width > 1);
+        return p ? p.getBoundingClientRect().width : null;
+      });
+      check(`${tag}: the sheet's opening text keeps its reading measure (680 px at most)`, typeof opening === "number" && opening <= 680, JSON.stringify(opening));
       if (width === 1440) await page.screenshot({ path: join(outDir, `piece-view-demo-1440-${scheme}.png`) });
       await quietOpen(tag, page, backend);
       if (frame) await sendButton(frame).click();
@@ -1222,7 +1227,11 @@ async function replacedAppChecks(browser, base, html, flowHtml, demoHtml) {
     await page.screenshot({ path: join(outDir, "piece-replaced-360.png") });
     const axe = await axeViolations(page);
     if (axe) check(`${tag}: axe on the piece screen with the notice has no violations`, axe.length === 0, axe.join(", "));
-    await frame.locator("button.aprobar").first().click();
+    // The approve control of the first flow, by its role and name; a sheet without it fails here, it does not pass.
+    const approve = frame.getByRole("button", { name: "Aprobar este flujo", exact: true }).first();
+    const hasApprove = (await approve.count()) > 0;
+    check(`${tag}: the sheet has an «Aprobar este flujo» control to change`, hasApprove);
+    if (hasApprove) await approve.click();
     const saved = await waitFor(async () => { const t = await page.textContent(".piece-status"); return backend.drafts.length && t && !t.includes("…") ? t : null; }, 5000);
     check(`${tag}: a saved draft reads «Guardado aquí, sin enviar», never just «Guardado»`, saved === "Guardado aquí, sin enviar", String(saved));
     await sendButton(frame).click();
