@@ -801,25 +801,25 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       homeButton: shown(home), ninben: document.body.innerText.includes("ninben") };
   });
   // Where the piece's content starts, in the portal page's coordinates: every visible top-level block of the
-  // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .column,
-  // .flows-panel, .walk) must start on the brand's edge; plus the «Ver todos los flujos» link, the width of the
-  // flows' column and the questions' reading text (the first paragraph of the sheet's body, .flow > p).
+  // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .view, .layout, .main-col)
+  // must start on the brand's edge; plus the «Ver todos los flujos» link, the questions' reading text (the first
+  // paragraph of the sheet's body, .flow > p) and the flows' one (the paragraph of the title band, .heading > p).
   const contentOf = async (page, frame) => {
     const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f.getBoundingClientRect().left + f.clientLeft; });
     const inner = await frame.evaluate(() => {
       const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(el).visibility !== "hidden"; };
-      const containers = [...document.querySelectorAll("main, main #app, main #view, main .frame, main .column, main .flows-panel, main .walk")].filter(shown);
+      const containers = [...document.querySelectorAll("main, main #app, main #view, main .frame, main .view, main .layout, main .main-col")].filter(shown);
       const blocks = [...new Set(containers.flatMap((c) => [...c.children]))].filter((el) => shown(el) && el.tagName !== "NOSCRIPT");
       const name = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.classList.length ? "." + [...el.classList].join(".") : ""}`;
-      const column = document.querySelector("main .column");
       const reading = [...document.querySelectorAll("main .flow > p")].find(shown);
+      const flowReading = [...document.querySelectorAll("main .view .heading > p")].find(shown);
       const home = document.getElementById("homeBtn");
       return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left })),
-        home: home && shown(home) ? home.getBoundingClientRect().left : null, column: column ? column.getBoundingClientRect().width : null,
+        home: home && shown(home) ? home.getBoundingClientRect().left : null, flowReading: flowReading ? flowReading.getBoundingClientRect().width : null,
         reading: reading ? reading.getBoundingClientRect().width : null };
     });
     const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset }));
-    return { blocks, home: inner.home === null ? null : inner.home + offset, column: inner.column, reading: inner.reading };
+    return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, reading: inner.reading };
   };
   // Every top-level block on the brand's edge (±1 px); the detail names the ones that are not.
   const onEdge = (tag, what, content, brand) => {
@@ -893,7 +893,9 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       check(`${tag}: the list of flows shows no brand bar`, atList && atList.host === "portal" && !atList.bar && !atList.ninben, JSON.stringify(atList));
       const list = frame && await contentOf(page, frame);
       onEdge(tag, "list of flows", list, brand);
-      check(`${tag}: the flows keep their reading measure (680 px at most)`, list && list.column <= 680, JSON.stringify(list && list.column));
+      // A missing reading text fails: a null width is not a measure.
+      check(`${tag}: the flows keep their reading measure (680 px at most)`, list && typeof list.flowReading === "number" && list.flowReading <= 680,
+        JSON.stringify(list && list.flowReading));
       if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-start-${width}.png`) });
       await quietOpen(tag, page, backend);
       if (frame) await frame.evaluate(() => openFlow(IDS[0]));
@@ -919,7 +921,7 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       check(`${tag}: «Ver todos los flujos» goes back to the list`, back, JSON.stringify(back));
       // Every flow reviewed: the final screen (the notes per flow before sending), then the sent screen.
       if (frame) await frame.evaluate(() => { usarRevisor("Ana Pérez"); for (const id of IDS) { const st = fs(id); st.veredicto = "ok"; st.estado = "ok"; } save(); home(); });
-      const final = frame && await frame.evaluate(() => Boolean(document.querySelector(".frame.final")));
+      const final = frame && await frame.evaluate(() => Boolean(document.querySelector('[data-view="summary"]')));
       check(`${tag}: the final screen opens`, final);
       onEdge(tag, "final screen", frame && await contentOf(page, frame), brand);
       if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-final-${width}.png`) });
