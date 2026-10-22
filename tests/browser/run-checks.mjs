@@ -765,7 +765,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await emptyPage.waitForSelector(".empty", { timeout: 10000 }).catch(() => {});
   const empty = await emptyPage.evaluate(() => ({
     title: document.querySelector(".empty h2")?.textContent,
-    action: document.querySelector(".empty .button--primary")?.textContent,
+    action: document.querySelector(".empty [data-rol=accion-principal]")?.textContent,
   }));
   check("app: empty state explains and offers another email", empty.title === "Aquí verás lo que te compartan" && empty.action === "Entrar con otro correo", JSON.stringify(empty));
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));

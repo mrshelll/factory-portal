@@ -482,13 +482,13 @@ async function showHome(viewId) {
   if ([...state.savers.values()].some((s) => s.hasUnsaved())) showNotice(layout.notices, { tone: "warning", text: t("unsavedElsewhere") });
 
   if (!items.length) {
-    layout.body.append(h("section", { class: "section empty", "aria-labelledby": "empty-title" },
+    // An empty state (EST-01): its message, then its direct way out, the view's primary action, at the end of the block
+    // (MAR-06).
+    layout.body.append(h("section", { class: "section empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
       h("h2", { id: "empty-title" }, t("emptyTitle")),
       h("p", {}, t("emptyBody", { email: user.email })),
-      // Its way out keeps no data-rol="accion-principal" until MAR-06 says where a centred empty state's action goes:
-      // the measure only accepts the title band or the end of a form (pending, Ruling 21).
       h("div", { class: "actions" },
-        h("button", { type: "button", class: "button button--primary", onclick: () => signOut(layout.notices) }, t("emptyAction")),
+        h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
         h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))));
     return;
   }

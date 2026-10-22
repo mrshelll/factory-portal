@@ -160,9 +160,9 @@ The sign-in screens follow the visual manual's `formulario` pattern and home fol
 base's on every screen: the page margin on both sides (16 px, 24 px from 672 px) and no cap before 1440 px, where it
 stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
-after the form). The empty home is an empty state centred in the frame (its title, its message at the reading measure
-and its way out); its «Entrar con otro correo» carries no `accion-principal` for now: the measure of MAR-06 only takes
-a primary action in the title band or at the end of a form, and where a centred empty state's action goes is pending.
+after the form). The empty home is an empty state centred in the frame (`data-rol="vacio"`: its title, its message at the reading
+measure and, at the end, its way out «Entrar con otro correo», the view's `accion-principal`, as MAR-06 asks of an
+empty state).
 
 ## Database migrations
 
