@@ -16,12 +16,16 @@
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
 // design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and
 // 1440 px, light and dark, and every run is one check. The JSON of each run is in <out>/screens/.
+// With --factory, the portal's own frame is also measured with the factory's geometria.mjs (see
+// portalGeometryChecks): every screen at 320, 672, 1056 and 1440, light and dark, and the piece screen's
+// iframe against the factory's piece-host.mjs.
 
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -761,7 +765,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await emptyPage.waitForSelector(".empty", { timeout: 10000 }).catch(() => {});
   const empty = await emptyPage.evaluate(() => ({
     title: document.querySelector(".empty h2")?.textContent,
-    action: document.querySelector(".empty [data-rol=accion-principal]")?.textContent,
+    action: document.querySelector(".empty .button--primary")?.textContent,
   }));
   check("app: empty state explains and offers another email", empty.title === "Aquí verás lo que te compartan" && empty.action === "Entrar con otro correo", JSON.stringify(empty));
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
@@ -775,8 +779,8 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
 // (keeping its reading measure); the piece hides its own brand bar inside the portal (the bridge marks
 // its <html> before it is parsed), and shows it when opened on its own. Opening a piece says nothing
 // about saving until the person changes something. Checked at the review widths (320, 768, 1440, light
-// and dark) and at the portal's verification widths (672, where its margin changes, and 1008, its frame
-// at its cap).
+// and dark; at 1440 the frame is at its cap) and at the verification widths 672 (where the margin changes)
+// and 1056 (where the pieces add their side column).
 async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   const layoutOf = (page) => page.evaluate(() => {
     const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; };
@@ -784,9 +788,11 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     const marks = [...document.querySelectorAll("[data-rol=marca-producto]")].filter(visible);
     const frame = document.querySelector("[data-rol=marco]");
     const back = document.querySelector(".back-link");
+    // The frame's right edge (its content box): where a piece's side column ends.
+    const frameRight = frame ? frame.getBoundingClientRect().right - parseFloat(getComputedStyle(frame).paddingRight) : null;
     return {
       marks: marks.length, name: marks[0] && marks[0].textContent, logo: Boolean(marks[0] && marks[0].querySelector("svg")),
-      brand: box(marks[0]), back: box(back), title: box(document.querySelector("h1.piece-title")),
+      brand: marks[0] ? { ...box(marks[0]), frameRight } : null, back: box(back), title: box(document.querySelector("h1.piece-title")),
       sameFrame: Boolean(frame && marks[0] && back && frame.contains(marks[0]) && frame.contains(back)),
       scroll: document.documentElement.scrollWidth <= window.innerWidth,
     };
@@ -802,7 +808,8 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   });
   // Where the piece's content starts, in the portal page's coordinates: every visible top-level block of the
   // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .view, .layout, .main-col)
-  // must start on the brand's edge; plus the «Ver todos los flujos» link and the width of three texts the person reads:
+  // must start on the brand's edge, but a side column (the .layout's <aside>, from 1056), which starts on its own
+  // column's edge (MAR-10) and ends on the frame's right edge (MAR-13); plus the «Ver todos los flujos» link and the width of three texts the person reads:
   // the questions' (the first paragraph of the sheet's body, .flow > p), the sentence in the flows' title band
   // (.heading > p: how many flows, steps and minutes, or what is left) and the text of a step (.step-intro > p).
   const contentOf = async (page, frame) => {
@@ -816,19 +823,23 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const flowReading = [...document.querySelectorAll("main .view .heading > p")].find(shown);
       const stepReading = [...document.querySelectorAll("main .step-intro > p")].find(shown);
       const home = document.getElementById("homeBtn");
-      return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left })),
+      return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right,
+          side: el.matches(".layout > aside") })),
         home: home && shown(home) ? home.getBoundingClientRect().left : null, flowReading: flowReading ? flowReading.getBoundingClientRect().width : null,
         stepReading: stepReading ? stepReading.getBoundingClientRect().width : null,
         reading: reading ? reading.getBoundingClientRect().width : null };
     });
-    const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset }));
+    const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset, right: b.right + offset }));
     return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, stepReading: inner.stepReading, reading: inner.reading };
   };
-  // Every top-level block on the brand's edge (±1 px); the detail names the ones that are not.
+  // Every top-level block on the brand's edge (±1 px), and a side column ending on the frame's right edge; the
+  // detail names the ones that are not.
   const onEdge = (tag, what, content, brand) => {
-    const off = content ? content.blocks.filter((b) => Math.abs(b.left - brand.left) > 1) : [];
-    check(`${tag}: ${what}: every top-level block starts on the brand's left edge`, content && content.blocks.length > 0 && off.length === 0,
-      JSON.stringify({ brand: brand.left, blocks: content ? content.blocks.length : 0, off: off.slice(0, 4) }));
+    const off = content ? content.blocks.filter((b) => (b.side ? Math.abs(b.right - brand.frameRight) > 1 : Math.abs(b.left - brand.left) > 1)) : [];
+    const sides = content ? content.blocks.filter((b) => b.side).length : 0;
+    check(`${tag}: ${what}: every top-level block starts on the brand's left edge${sides ? " and the side column ends on the frame's right edge" : ""}`,
+      content && content.blocks.some((b) => !b.side) && off.length === 0,
+      JSON.stringify({ brand: brand.left, frameRight: brand.frameRight, blocks: content ? content.blocks.length : 0, sides, off: off.slice(0, 4) }));
   };
   const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
   // Opened and left alone: no «Guardando…» (nor any save line) and nothing sent to save_draft.
@@ -849,7 +860,7 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     const frame = await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(ready).catch(() => false)) ? f : null; }, 10000);
     return { backend, context, page, frame, errors };
   }
-  const runs = [[320, "light"], [320, "dark"], [672, "light"], [768, "light"], [768, "dark"], [1008, "light"], [1440, "light"], [1440, "dark"]];
+  const runs = [[320, "light"], [320, "dark"], [672, "light"], [768, "light"], [768, "dark"], [1056, "light"], [1440, "light"], [1440, "dark"]];
 
   for (const [width, scheme] of runs) {
     const tag = `piece view ${width}px ${scheme}`;
@@ -1277,6 +1288,113 @@ async function sessionReturnsChecks(browser, base, html) {
   await context.close();
 }
 
+// ---- the portal's own frame, measured with the factory's geometry ----------------------------------------
+// The visual manual's frame rules (marco.md: one frame, one page margin on both sides from 672 px and the frame not
+// cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
+// FUN-43; and the rest that geometria.mjs measures on the factory's pieces), on every portal screen at the factory's
+// verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
+// - the four screen snapshots (sign-in email and code steps, home with pieces and empty) through the factory's
+//   design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the four
+//   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
+// - the piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
+//   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
+//   its pieces at the width the person sees them; also at 1600, past the frame's cap.
+const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
+const GRID_CUTS = [320, 672, 1056, 1312, 1584];
+// FUN-43 admits an exception with a reason for a screen whose main view is an empty state with a short message.
+const GEOMETRY_EXCEPTIONS = {
+  "home-empty": { "FUN-43": "vacío de la lista: solo un mensaje angosto y su salida; no hay con qué repartir el ancho sin inventar contenido" },
+};
+function serveDir(dir) {
+  const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
+  const server = createServer((req, res) => {
+    const path = normalize(join(dir, decodeURIComponent(new URL(req.url, "http://x").pathname)));
+    if (!path.startsWith(dir + sep) || !existsSync(path) || statSync(path).isDirectory()) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { "content-type": types[extname(path)] || "application/octet-stream" });
+    res.end(readFileSync(path));
+  });
+  return new Promise((done) => server.listen(0, "127.0.0.1", () => done(server)));
+}
+async function portalGeometryChecks(browser, base, html, factory) {
+  const assets = join(resolve(factory), "design-system", "assets");
+  const { MEDIR_GEOMETRIA, evaluaAncho, evaluaConjunto, revisaMedia } = await import(pathToFileURL(join(assets, "geometria.mjs")).href);
+  const { widthInPortal } = await import(pathToFileURL(join(assets, "piece-host.mjs")).href);
+  const passes = (r) => r.ok || Boolean(r.exceptuada);
+  const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
+  const names = ["sign-in-email", "sign-in-code", "home-pieces", "home-empty"];
+  check("geometry: the four screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+  const server = await serveDir(screensDir);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const frames = {}; // `${width}-${scheme}` -> the frame's content box on home (the other screens' reference)
+  try {
+    for (const scheme of ["light", "dark"]) {
+      const records = [], byScreen = new Map();
+      for (const name of names.filter((n) => screens.has(n))) for (const width of GEOMETRY_WIDTHS) {
+        const page = await browser.newPage({ viewport: { width, height: width < 672 ? 640 : 900 }, colorScheme: scheme });
+        await page.goto(`${origin}/${name}.html`, { waitUntil: "networkidle" });
+        await page.evaluate(() => document.fonts.ready);
+        const m = await page.evaluate(MEDIR_GEOMETRIA, {});
+        await page.close();
+        records.push({ pantalla: name, recorrido: "portal", paso: 0, w: width, m });
+        if (name === "home-pieces" && m.contenedor) frames[`${width}-${scheme}`] = m.contenedor;
+        byScreen.set(`${name}|${width}`, evaluaAncho(m, { patron: screens.get(name), angosto: false, admiteCompleto: false, marca: null,
+          excepciones: GEOMETRY_EXCEPTIONS[name] || {} }));
+      }
+      const between = evaluaConjunto(records, { grupoDe: () => "portal", modelos: { portal: "home-pieces" }, patronDe: (n) => screens.get(n),
+        excepcionesDe: (n) => GEOMETRY_EXCEPTIONS[n] || {} });
+      for (const r of between) byScreen.get(`${r.pantalla}|${r.w}`).push(r);
+      for (const [key, rules] of byScreen) {
+        const [name, width] = key.split("|");
+        const failing = rules.filter((r) => !passes(r));
+        const excepted = rules.filter((r) => !r.ok && r.exceptuada).map((r) => `${r.regla} exceptuada: ${r.exceptuada}`);
+        check(`geometry: ${name} (${screens.get(name)}) ${width}px ${scheme}: the frame rules pass (${rules.length - failing.length}/${rules.length})`,
+          failing.length === 0, [...failing.map(named), ...excepted].join(" | "));
+      }
+    }
+  } finally { server.close(); }
+  const css = Object.fromEntries(["css/portal.css", "brand/ninben-components.css"].map((f) => [f, readFileSync(join(root, f), "utf8")]));
+  const media = revisaMedia(css, GRID_CUTS);
+  const offGrid = media.filter((x) => !x.ok);
+  check(`geometry: every @media of the portal's CSS is a cut of the grid (${GRID_CUTS.join(", ")})`, media.length > 0 && offGrid.length === 0,
+    offGrid.map((x) => `${x.archivo}: @media ${x.condicion} — ${x.detalle}`).join("; "));
+
+  // The piece screen: its frame (the brand's edge) where every other screen has it, at the page margin from both sides
+  // from 672 (MAR-02, MAR-11); and the piece's iframe over the frame's box, margins included, as wide as widthInPortal.
+  const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+  for (const scheme of ["light", "dark"]) for (const width of [...GEOMETRY_WIDTHS, 1600]) {
+    const tag = `geometry: piece screen ${width}px ${scheme}`;
+    const backend = newBackend(html);
+    const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.setViewportSize({ width, height: width < 672 ? 640 : 900 });
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+    await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function").catch(() => false)); }, 10000);
+    const box = await page.evaluate(() => {
+      const frame = document.querySelector(".piece-layout > .frame"), iframe = document.querySelector("iframe.piece-frame");
+      if (!frame || !iframe) return null;
+      const f = frame.getBoundingClientRect(), cs = getComputedStyle(frame), i = iframe.getBoundingClientRect();
+      return { vw: document.documentElement.clientWidth, margin: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--margin-page")),
+        outer: { x: Math.round(f.left), der: Math.round(f.right) },
+        content: { x: Math.round(f.left + parseFloat(cs.paddingLeft)), der: Math.round(f.right - parseFloat(cs.paddingRight)) },
+        iframe: { x: Math.round(i.left), der: Math.round(i.right), width: iframe.clientWidth } };
+    });
+    await context.close();
+    const expected = widthInPortal(width);
+    check(`${tag}: the piece's iframe covers the frame's box, margins included, and is ${expected} px wide (piece-host.mjs widthInPortal)`,
+      box && near(box.iframe.x, box.outer.x) && near(box.iframe.der, box.outer.der) && box.iframe.width === expected, JSON.stringify(box && { ...box.iframe, frame: box.outer }));
+    if (width === 1600) {
+      check(`${tag}: past its cap the frame is centred`, box && near(box.outer.x, box.vw - box.outer.der), JSON.stringify(box && box.outer));
+      continue;
+    }
+    const home = frames[`${width}-${scheme}`];
+    check(`${tag}: the frame is the other screens' (MAR-02)`, box && home && near(box.content.x, home.x) && near(box.content.der, home.der),
+      JSON.stringify({ piece: box && box.content, home }));
+    if (width >= 672) check(`${tag}: the same page margin on both sides (MAR-11)`, box && near(box.content.x, box.margin) && near(box.vw - box.content.der, box.margin),
+      JSON.stringify(box && { left: box.content.x, right: box.vw - box.content.der, margin: box.margin }));
+  }
+}
+
 const { chromium } = loadPlaywright();
 const { child, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
@@ -1294,6 +1412,7 @@ try {
   if (args.questions) await sentLineChecks(browser, base, read(args.questions));
   if (args.questions && args.demo) await demoAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
+  if (args.questions && args.factory) await portalGeometryChecks(browser, base, read(args.questions), args.factory);
 } finally {
   await browser.close();
   child.kill();

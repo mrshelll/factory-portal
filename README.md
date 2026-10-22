@@ -45,7 +45,7 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
    screen, then «Volver» and the piece's title with its save line («Guardando…», «Guardado»), all on
    the brand's left edge. The iframe takes the frame's box (margins included, so as wide as the window
-   up to 1008 px), and the factory's pieces, inside the portal, start their content at the frame's
+   up to 1440 px, and centred above it), and the factory's pieces, inside the portal, start their content at the frame's
    margin (16 px, 24 px from 672 px), on the brand's edge, keeping their reading measure. The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
    which the piece shows on its own sent screen, and says nothing until the person changes something.
@@ -156,7 +156,12 @@ head, the sign-in form and its code field, the list rows' link and the piece vie
 
 The sign-in screens follow the visual manual's `formulario` pattern and home follows `lista`; their
 `data-rol` marks (`marco`, `cabecera`, `avisos`, `cuerpo`, `accion-principal`, `marca-producto`,
-`data-medida="formulario"`) are what the factory's verifier measures (see [Tests](#tests)).
+`data-medida="formulario"`) are what the factory's verifier measures (see [Tests](#tests)). The frame is the
+base's on every screen: the page margin on both sides (16 px, 24 px from 672 px) and no cap before 1440 px, where it
+stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
+notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
+after the form); the empty home's «Entrar con otro correo» is the empty state's way out, not the list's primary
+action, so it carries no `accion-principal`.
 
 ## Database migrations
 
@@ -205,7 +210,7 @@ change was saved, a session that comes back while the piece hands over its draft
 to keep). With `--demo` as well: the demo sheet sends through the app (a failure shows its error and
 never «Tu revisión llegó»; the retry arrives once), and a replaced version opened from an old email shows its
 fixed notice, links to the newer version and still sends. The piece screen is checked at 320, 768 and
-1440 px, light and dark, and at 672 and 1008 px: one brand on screen (the portal's), above «Volver» and
+1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above «Volver» and
 the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
 the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),
 and «Ver todos los flujos» in a flow, on that same edge, with the reading measure kept; no second
@@ -260,6 +265,17 @@ re-run one by hand:
 node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/home-pieces.html \
   --patron lista --ancho 768 --color-scheme dark
 ```
+
+**The portal's frame.** With `--factory`, the same four screens also go through the factory's
+`design-system/assets/geometria.mjs`, the frame measure the factory's pieces are held to, at 320, 672, 1056 and
+1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
+parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the four screens (MAR-02), and
+every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
+names what fails. The empty home is excepted from FUN-43 with its reason (an empty state: a short message and its way
+out, nothing to spread over the width without inventing content). The piece screen is checked at the same widths and
+at 1600: its frame on the other screens' edges with the page margin on both sides, and its iframe over the frame's
+box, as wide as the factory's `design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the
+factory measures its pieces inside the portal at the width a person sees them.
 
 ## Files
 

@@ -76,18 +76,20 @@ function masthead(headerActions = [], tag = "header") {
 }
 
 // One frame for every screen: masthead, then inside <main> the title band, the notice zone and
-// the body.
+// the body. The frame's box is the .frame (the masthead's too); inside <main>, its data-rol="marco" holds
+// the title band, the notices and the body, as the visual manual's anatomy puts them (marco.md).
 function frameLayout({ title, meta = [], headerActions = [] }) {
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const body = h("div", { class: "body", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
-  replaceChildren(root, h("div", { class: "frame", "data-rol": "marco" },
+  replaceChildren(root, h("div", { class: "frame" },
     masthead(headerActions),
     h("main", { id: "main" },
-      h("div", { class: "page-head", "data-rol": "cabecera" },
-        h("h1", {}, title),
-        meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
-      notices, body, live)));
+      h("div", { "data-rol": "marco" },
+        h("div", { class: "page-head", "data-rol": "cabecera" },
+          h("h1", {}, title),
+          meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
+        notices, body, live))));
   return { notices, body, live };
 }
 
@@ -155,12 +157,15 @@ async function requestCode(email) {
 function stepsSection() {
   return h("section", { class: "section", "aria-labelledby": "steps-title" },
     h("h2", { id: "steps-title" }, t("stepsTitle")),
-    h("ol", { class: "steps" }, h("li", {}, t("step1")), h("li", {}, t("step2", { length: EMAIL_OTP_LENGTH })), h("li", {}, t("step3"))));
+    h("ol", { class: "steps" }, [t("step1"), t("step2", { length: EMAIL_OTP_LENGTH }), t("step3")].map((text, i) =>
+      // The number is text, so each step starts on the section's edge with it (MAR-10).
+      h("li", {}, h("span", { class: "step-number" }, `${i + 1}. `), text))));
 }
 
-// The sign-in screens keep the same composition: the form, then how it works.
-function signInBody(body, form) {
-  body.append(h("div", { class: "split" }, h("div", { class: "section" }, form), stepsSection()));
+// The sign-in screens keep the same composition: the form (its primary action last, MAR-06) and what goes
+// after it, then how it works.
+function signInBody(body, form, after = null) {
+  body.append(h("div", { class: "split" }, h("div", { class: "section" }, form, after), stepsSection()));
 }
 
 function showSignIn({ notice } = {}) {
@@ -317,10 +322,10 @@ function showCodeStep(pending, { notice } = {}) {
     showEmailStep(pending.email);
   });
 
-  signInBody(body, h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: verify },
+  const form = h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: verify },
     h("div", { class: "field" }, h("label", { for: "code" }, t("codeLabel", { length: EMAIL_OTP_LENGTH })), input, error),
-    button,
-    h("div", { class: "secondary-actions" }, resendStatus, resendButton, otherEmail)));
+    button);
+  signInBody(body, form, h("div", { class: "secondary-actions" }, resendStatus, resendButton, otherEmail));
   input.focus();
 }
 
@@ -480,8 +485,10 @@ async function showHome(viewId) {
     layout.body.append(h("section", { class: "section empty", "aria-labelledby": "empty-title" },
       h("h2", { id: "empty-title" }, t("emptyTitle")),
       h("p", {}, t("emptyBody", { email: user.email })),
+      // The empty state's direct way out (EST-01), not the list's primary action, which goes in the title band
+      // when there is one (lista.md, anatomy 1 and 4): no data-rol="accion-principal" here.
       h("div", { class: "actions" },
-        h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
+        h("button", { type: "button", class: "button button--primary", onclick: () => signOut(layout.notices) }, t("emptyAction")),
         h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))));
     return;
   }

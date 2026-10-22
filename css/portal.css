@@ -3,11 +3,8 @@
    from the factory by scripts/sync-brand.mjs: brand/ninben.css (colours, light and dark; the radius;
    the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based spacing scale, the frame
    and the shared components: notices, fields, buttons, actions, rows and status, and the brand mark). Nothing
-   here sets a token but the frame's cap, or uses a loose value (FUN-35). */
-
-/* El portal conserva su marco de 960; el manual (MAR-11) pide no recortarlo antes de 1440 — pendiente de decisión
-   del responsable. */
-:root { --frame-page: 960px; }
+   here sets a token or uses a loose value (FUN-35). The frame is the base's: the page margin on both sides at every
+   width, and not cut before 1440 (MAR-11). */
 
 html { -webkit-text-size-adjust: 100%; }
 p, h1, h2, ol, ul { margin: 0; }
@@ -56,10 +53,12 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* The code is figures: JetBrains Mono (brand spec §2.2). */
 .code-input { font-family: var(--font-mono); font-size: var(--text-title); letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
 .form .button--primary { width: 100%; }
+/* What follows a form (sending the code again, another email) goes after it, so its primary action is the form's
+   last control (MAR-06); same gap and measure as inside it. */
+.form + .secondary-actions { margin-top: var(--space-4); max-width: var(--measure-form); }
 
-.steps { list-style: none; padding: 0; display: grid; gap: var(--space-2); counter-reset: step; }
-.steps li { counter-increment: step; }
-.steps li::before { content: counter(step) ". "; font-weight: 600; font-variant-numeric: tabular-nums; }
+.steps { list-style: none; padding: 0; display: grid; gap: var(--space-2); }
+.step-number { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* ---- home ------------------------------------------------------------------------------- */
 
@@ -115,7 +114,7 @@ main { padding-block: var(--space-6) var(--space-7); }
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: calc(var(--frame-page) + 2 * var(--margin-page));
+  max-width: var(--marco-pagina);
   margin-inline: auto;
   padding: 0;
 }
