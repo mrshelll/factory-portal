@@ -1301,12 +1301,9 @@ async function sessionReturnsChecks(browser, base, html) {
 //   its pieces at the width the person sees them; also at 1600, past the frame's cap.
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
-// FUN-43 admits an exception with a reason, in its own words: «Una pantalla cuya vista principal es un vacío centrado con
-// un mensaje angosto puede no llegar al 60 %: va con excepción con motivo.» The empty home is that (centred in
-// css/portal.css, .empty).
-const GEOMETRY_EXCEPTIONS = {
-  "home-empty": { "FUN-43": "la vista principal es un vacío centrado con un mensaje angosto (FUN-43): nada compartido todavía, el mensaje y su salida" },
-};
+// A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the centred empty home
+// passes FUN-43 on its own.
+const GEOMETRY_EXCEPTIONS = {};
 function serveDir(dir) {
   const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
   const server = createServer((req, res) => {

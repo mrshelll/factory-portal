@@ -272,11 +272,10 @@ node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/h
 1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
 parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the four screens (MAR-02), and
 every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
-names what fails. The empty home carries FUN-43's own exception, in the rule's words: its main view is a centred empty
-state with a short message («un vacío centrado con un mensaje angosto»). The piece screen is checked at the same widths and
-at 1600: its frame on the other screens' edges with the page margin on both sides, and its iframe over the frame's
-box, as wide as the factory's `design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the
-factory measures its pieces inside the portal at the width a person sees them.
+names what fails. The piece screen is checked at the same widths and at 1600: its frame on the other screens' edges
+with the page margin on both sides, and its iframe over the frame's box, as wide as the factory's
+`design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the factory measures its pieces inside the
+portal at the width a person sees them.
 
 ## Files
 
