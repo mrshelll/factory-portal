@@ -861,6 +861,10 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     return { backend, context, page, frame, errors };
   }
   const runs = [[320, "light"], [320, "dark"], [672, "light"], [768, "light"], [768, "dark"], [1056, "light"], [1440, "light"], [1440, "dark"]];
+  // The piece's start view inside the real portal (the portal's bar, «← Volver», the title band and the piece's top
+  // edge), at the review widths in light: the input of the factory's `marco-del-anfitrion` judge (docs/releasing.md).
+  const hostShot = (page, piece, width, scheme) => (scheme === "light" && [320, 768, 1440].includes(width)
+    ? page.screenshot({ path: join(outDir, `host-${piece}-w${width}-light.png`) }) : null);
 
   for (const [width, scheme] of runs) {
     const tag = `piece view ${width}px ${scheme}`;
@@ -880,6 +884,7 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     check(`${tag}: the questions keep their reading measure (680 px at most)`, content && typeof content.reading === "number" && content.reading <= 680,
       JSON.stringify(content && content.reading));
     if (width === 320 || width === 1440) await page.screenshot({ path: join(outDir, `piece-view-${width}-${scheme}.png`) });
+    await hostShot(page, "questions", width, scheme);
     await quietOpen(tag, page, backend);
     // The first change the person makes is saved, with what the piece wrote while it opened.
     await frame.evaluate(() => responder("q-001", "si"));
@@ -911,6 +916,7 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       check(`${tag}: the sentence of the flows' title band keeps its reading measure (680 px at most)`,
         list && typeof list.flowReading === "number" && list.flowReading <= 680, JSON.stringify(list && list.flowReading));
       if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-start-${width}.png`) });
+      await hostShot(page, "flow", width, scheme);
       await quietOpen(tag, page, backend);
       if (frame) await frame.evaluate(() => openFlow(IDS[0]));
       const inFlow = frame && await pieceBar(frame);
@@ -969,6 +975,7 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       });
       check(`${tag}: the sheet's opening text keeps its reading measure (680 px at most)`, typeof opening === "number" && opening <= 680, JSON.stringify(opening));
       if (width === 1440) await page.screenshot({ path: join(outDir, `piece-view-demo-1440-${scheme}.png`) });
+      await hostShot(page, "demo", width, scheme);
       await quietOpen(tag, page, backend);
       if (frame) await sendButton(frame).click();
       const demoSent = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(DEMO_SENT)), 8000);
