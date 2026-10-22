@@ -182,7 +182,8 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 
 /* ---- pieces ------------------------------------------------------------------------------ */
 
-/* A button that cannot act yet (nothing to send) looks off, never like the signal. */
+/* A button that does not apply at all (while sending) looks off, never like the signal. One that is missing something
+   keeps its normal look and, when touched, takes the focus to what is missing (COM-14). */
 .button[disabled] { background: var(--line); border-color: var(--line); color: var(--muted); cursor: not-allowed; }
 
 /* What the factory's HTML sheets (the questions, the flow review, the demo sheet) share and the portal does not:
@@ -197,6 +198,9 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 :where(.piece) main { padding-block: var(--space-6) var(--space-7); }
 /* The title band: the h1 with what goes right before or after it (a step count, a saved state, a date). */
 :where(.piece) .heading { display: grid; gap: var(--space-2); }
+/* «Guardado» (EST-08) is not a verdict: its word alone, in the secondary text colour, with no dot and no verdict colour
+   (FUN-40), like the portal's own line (.piece-status). */
+:where(.piece) .saved-state { color: var(--muted); font-size: var(--text-small); white-space: nowrap; }
 /* A sheet opened on its own brings its bar: the brand and which sheet this is, on the frame's edge (the markup,
    <header class="bar"><div class="frame bar-inner">…, is each sheet's). Inside the portal the rule above hides it. */
 :where(.piece) .bar { border-bottom: 1px solid var(--line); background: var(--sheet); }
