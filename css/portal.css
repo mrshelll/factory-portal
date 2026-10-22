@@ -2,8 +2,12 @@
    grid's first tier). Everything else comes from the ninben brand, loaded before this file and copied
    from the factory by scripts/sync-brand.mjs: brand/ninben.css (colours, light and dark; the radius;
    the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based spacing scale, the frame
-   and the shared components: notices, fields, buttons, actions, rows and status). Nothing here sets a
-   token or uses a loose value (FUN-35). */
+   and the shared components: notices, fields, buttons, actions, rows and status, and the brand mark). Nothing
+   here sets a token but the frame's cap, or uses a loose value (FUN-35). */
+
+/* El portal conserva su marco de 960; el manual (MAR-11) pide no recortarlo antes de 1440 — pendiente de decisión
+   del responsable. */
+:root { --frame-page: 960px; }
 
 html { -webkit-text-size-adjust: 100%; }
 p, h1, h2, ol, ul { margin: 0; }
@@ -19,18 +23,6 @@ p, h1, h2, ol, ul { margin: 0; }
   padding-block: var(--space-2);
   border-bottom: 1px solid var(--line);
 }
-/* The ninben logo: the 亻 stroke in signal, left of «ninben» in Inter 600, lowercase (brand spec §2.3).
-   Tight tracking and line-height 1 keep it apart from the headings. */
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-body);
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.02em;
-}
-.brand svg { flex: none; }
 .masthead-actions { display: flex; gap: var(--space-2); }
 
 main { padding-block: var(--space-6) var(--space-7); }
