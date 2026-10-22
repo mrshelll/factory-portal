@@ -27,6 +27,22 @@
   --radius-pill: 999px;
   --target-min: 48px;
   --mark: 4px; /* the accent stripe of a notice */
+
+  /* The frame contract every design system of the factory exposes (design-md-spec, adaptador-claude-design;
+     MAR-08, MAR-09, MAR-11, FUN-05, FUN-37): the geometry measure reads these names. They only point at the
+     tokens above, which stay the source of truth. */
+  --marco-pagina: calc(var(--frame-page) + 2 * var(--margin-page));
+  --marco-margen-sm: var(--space-4);
+  --marco-margen-pagina: var(--margin-page);
+  --medida-formulario: var(--measure-form);
+  --espacio-entre-bloques: var(--space-between-blocks);
+  --espacio-1: var(--space-1);
+  --espacio-2: var(--space-2);
+  --espacio-3: var(--space-3);
+  --espacio-4: var(--space-4);
+  --espacio-5: var(--space-5);
+  --espacio-6: var(--space-6);
+  --espacio-7: var(--space-7);
 }
 
 @media (min-width: 672px) {
@@ -56,7 +72,7 @@ a { color: var(--signal); text-underline-offset: 3px; }
 
 .frame {
   width: 100%;
-  max-width: calc(var(--frame-page) + 2 * var(--margin-page));
+  max-width: var(--marco-pagina);
   margin-inline: auto;
   padding-inline: var(--margin-page);
 }
