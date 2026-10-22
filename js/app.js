@@ -425,6 +425,8 @@ async function sessionEnded() {
 // ---- home -----------------------------------------------------------------------------------
 
 const STATUS_KEYS = { pending: "statusPending", in_progress: "statusInProgress", submitted: "statusSubmitted" };
+// The base's status modifiers (brand/ninben-components.css): pending is the plain hollow dot.
+const STATUS_CLASSES = { pending: "status", in_progress: "status status--active", submitted: "status status--done" };
 const KIND_KEYS = { questions: "kindQuestions", flow_review: "kindFlowReview", demo_review: "kindDemoReview" };
 
 function pieceRow({ piece, assignment }) {
@@ -438,7 +440,7 @@ function pieceRow({ piece, assignment }) {
       h("span", { class: "row-main" },
         h("span", { class: "row-title" }, piece.title || t("untitled")),
         h("span", { class: "row-meta" }, date ? `${kind} · ${t(dateKey, { date })}` : kind)),
-      h("span", { class: `status status--${status}` },
+      h("span", { class: STATUS_CLASSES[status] },
         h("span", { class: "status-dot", "aria-hidden": "true" }), t(STATUS_KEYS[status]))));
 }
 

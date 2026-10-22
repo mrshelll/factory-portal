@@ -1,0 +1,151 @@
+/* ninben components: single source (spec 2026-10-21 piezas al nivel del portal §2 O1 y §7). Edit here, then run
+   python3 design-system/assets/brand/sync-brand.py --write <template>… to copy it into each piece, and
+   node scripts/sync-brand.mjs in the portal to copy it into its brand/. It goes after ninben.css (colours,
+   radius, fonts) and holds the scale tokens, the frame and the shared components, with the values of the
+   portal's stylesheet. Mobile first; one breakpoint at 672px (the factory grid's first tier). Nothing uses a
+   loose value (FUN-35), and nothing here may ask the network for anything: no imports, no external files. */
+
+:root {
+  --text-small: 14px;
+  --text-body: 16px;
+  --text-title: 24px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-between-blocks: var(--space-6);
+
+  --margin-page: 16px;
+  --frame-page: 960px;
+  --measure-form: 440px;
+  --measure-text: 40rem;
+
+  --radius-pill: 999px;
+  --target-min: 48px;
+  --mark: 4px; /* the accent stripe of a notice */
+}
+
+@media (min-width: 672px) {
+  :root { --margin-page: 24px; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 var(--text-body)/1.5 var(--font-sans);
+  overflow-wrap: break-word;
+}
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Loose links: the signal means «you can touch this». */
+a { color: var(--signal); text-underline-offset: 3px; }
+
+/* ---- frame ------------------------------------------------------------------------------ */
+
+.frame {
+  width: 100%;
+  max-width: calc(var(--frame-page) + 2 * var(--margin-page));
+  margin-inline: auto;
+  padding-inline: var(--margin-page);
+}
+/* Inside the portal the host brings the frame (MAR-13): a piece's own bar goes away. */
+html[data-factory-host="portal"] .bar { display: none; }
+
+/* ---- notices ---------------------------------------------------------------------------- */
+
+/* A notice is a sheet with a stripe: grey for information, ink for a warning, the error colour for an
+   error. Never the signal, which means «you can touch this». */
+.notice {
+  --notice-accent: var(--muted);
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-inline-start: var(--mark) solid var(--notice-accent);
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+.notice--warning { --notice-accent: var(--ink); }
+.notice--error { --notice-accent: var(--error); }
+.notice p { max-width: var(--measure-text); }
+.notice-actions { display: flex; flex-wrap: wrap; column-gap: var(--space-5); }
+
+/* ---- fields ----------------------------------------------------------------------------- */
+
+.field { display: grid; gap: var(--space-2); }
+label { font-weight: 600; }
+.hint { color: var(--muted); font-size: var(--text-small); }
+input, textarea, select {
+  width: 100%;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--muted);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-body); /* 16px or more keeps iOS from zooming in */
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="true"] {
+  border-color: var(--error);
+  box-shadow: inset 0 0 0 1px var(--error);
+}
+.field-error { color: var(--error); font-size: var(--text-small); font-weight: 600; }
+
+/* ---- buttons and actions ---------------------------------------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target-min);
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.button--primary { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
+.button--secondary { background: transparent; color: var(--ink); border-color: var(--muted); }
+
+.link-button {
+  appearance: none;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--signal);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.secondary-actions { display: grid; justify-items: start; gap: var(--space-1); }
+/* A row of actions: the first one is the primary and goes at the start; the rest follow it. */
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+
+/* ---- rows and status -------------------------------------------------------------------- */
+
+.rows { list-style: none; padding: 0; border-top: 1px solid var(--line); }
+.row { border-bottom: 1px solid var(--line); }
+
+.status { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-small); white-space: nowrap; }
+/* The state is said in words; the dot only repeats it: hollow grey to start, ink while active, ok once done. */
+.status-dot { width: 10px; height: 10px; border: 2px solid var(--dot, var(--muted)); border-radius: var(--radius-pill); background: var(--dot-fill, transparent); }
+.status--active .status-dot { --dot: var(--ink); --dot-fill: var(--ink); }
+.status--done .status-dot { --dot: var(--ok); --dot-fill: var(--ok); }

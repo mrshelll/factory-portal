@@ -1,62 +1,14 @@
-/* Portal styles. Mobile first; one breakpoint at 672px (the factory grid's first tier).
-   Colours, the radius and the fonts come from the ninben brand (brand/ninben.css, loaded first and
-   copied from the factory by scripts/sync-brand.mjs; light and dark). Below are only the portal's own
-   tokens: three text sizes and the 4/8-based spacing scale. Nothing uses a loose value (FUN-35). */
+/* Portal styles: only what is the portal's own. Mobile first; one breakpoint at 672px (the factory
+   grid's first tier). Everything else comes from the ninben brand, loaded before this file and copied
+   from the factory by scripts/sync-brand.mjs: brand/ninben.css (colours, light and dark; the radius;
+   the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based spacing scale, the frame
+   and the shared components: notices, fields, buttons, actions, rows and status). Nothing here sets a
+   token or uses a loose value (FUN-35). */
 
-:root {
-  --text-small: 14px;
-  --text-body: 16px;
-  --text-title: 24px;
-
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-  --space-between-blocks: var(--space-6);
-
-  --margin-page: 16px;
-  --frame-page: 960px;
-  --measure-form: 440px;
-  --measure-text: 40rem;
-
-  --radius-pill: 999px;
-  --target-min: 48px;
-  --mark: 4px; /* the accent stripe of a notice */
-}
-
-@media (min-width: 672px) {
-  :root { --margin-page: 24px; }
-}
-
-*, *::before, *::after { box-sizing: border-box; }
-[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font: 400 var(--text-body)/1.5 var(--font-sans);
-  overflow-wrap: break-word;
-}
 p, h1, h2, ol, ul { margin: 0; }
-:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-.visually-hidden {
-  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
-  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-}
-
-/* ---- frame ------------------------------------------------------------------------------ */
-
-.frame {
-  width: 100%;
-  max-width: calc(var(--frame-page) + 2 * var(--margin-page));
-  margin-inline: auto;
-  padding-inline: var(--margin-page);
-}
+/* ---- masthead and page ------------------------------------------------------------------ */
 
 .masthead {
   display: flex;
@@ -106,79 +58,12 @@ main { padding-block: var(--space-6) var(--space-7); }
   .split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* ---- notices ---------------------------------------------------------------------------- */
-
-/* A notice is a sheet with a stripe: grey for information, ink for a warning, the error colour for an
-   error. Never the signal, which means «you can touch this». */
-.notice {
-  --notice-accent: var(--muted);
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
-  border-inline-start: var(--mark) solid var(--notice-accent);
-  border-radius: var(--radius);
-  background: var(--sheet);
-}
-.notice--warning { --notice-accent: var(--ink); }
-.notice--error { --notice-accent: var(--error); }
-.notice p { max-width: var(--measure-text); }
-.notice-actions { display: flex; flex-wrap: wrap; column-gap: var(--space-5); }
-
-/* ---- forms and buttons ------------------------------------------------------------------ */
+/* ---- sign-in ---------------------------------------------------------------------------- */
 
 .form { display: grid; gap: var(--space-4); max-width: var(--measure-form); }
-.field { display: grid; gap: var(--space-2); }
-label { font-weight: 600; }
-.hint { color: var(--muted); font-size: var(--text-small); }
-input {
-  width: 100%;
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--muted);
-  border-radius: var(--radius);
-  background: var(--sheet);
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--text-body); /* 16px or more keeps iOS from zooming in */
-}
-input[aria-invalid="true"] { border-color: var(--error); box-shadow: inset 0 0 0 1px var(--error); }
 /* The code is figures: JetBrains Mono (brand spec §2.2). */
 .code-input { font-family: var(--font-mono); font-size: var(--text-title); letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
-.field-error { color: var(--error); font-size: var(--text-small); font-weight: 600; }
-
-.button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: var(--target-min);
-  padding: var(--space-2) var(--space-5);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  font: inherit;
-  font-weight: 600;
-  line-height: 1.2;
-  cursor: pointer;
-}
-.button--primary { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
-.button--secondary { background: transparent; color: var(--ink); border-color: var(--muted); }
 .form .button--primary { width: 100%; }
-
-.link-button {
-  appearance: none;
-  min-height: 44px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--signal);
-  font: inherit;
-  text-align: start;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.secondary-actions { display: grid; justify-items: start; gap: var(--space-1); }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
 
 .steps { list-style: none; padding: 0; display: grid; gap: var(--space-2); counter-reset: step; }
 .steps li { counter-increment: step; }
@@ -189,8 +74,7 @@ input[aria-invalid="true"] { border-color: var(--error); box-shadow: inset 0 0 0
 .loading { color: var(--muted); }
 .empty p { margin-bottom: var(--space-4); overflow-wrap: anywhere; }
 
-.rows { list-style: none; padding: 0; border-top: 1px solid var(--line); }
-.row { border-bottom: 1px solid var(--line); }
+/* A row of the list (.rows, .row and .status come from the base): the whole row is the link. */
 .row-link {
   display: flex;
   flex-direction: column;
@@ -209,12 +93,6 @@ input[aria-invalid="true"] { border-color: var(--error); box-shadow: inset 0 0 0
 @media (min-width: 672px) {
   .row-link { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
 }
-
-.status { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-small); white-space: nowrap; }
-/* The state is said in words; the dot only repeats it: hollow to start, ink in progress, ok once sent. */
-.status-dot { width: 10px; height: 10px; border: 2px solid var(--dot, var(--muted)); border-radius: var(--radius-pill); background: var(--dot-fill, transparent); }
-.status--in_progress .status-dot { --dot: var(--ink); --dot-fill: var(--ink); }
-.status--submitted .status-dot { --dot: var(--ok); --dot-fill: var(--ok); }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 

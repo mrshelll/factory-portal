@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Copies the ninben brand from the software factory repo into brand/ (next to this script's folder).
 // The factory keeps the single source in design-system/assets/brand/: ninben.css (tokens and
-// @font-face with url("fonts/<file>")), logo.svg and fonts/* (the woff2 files and their licences).
+// @font-face with url("fonts/<file>")), ninben-components.css (the scale tokens, the frame and the
+// shared components; self-contained: no @import, no url()), logo.svg and fonts/* (the woff2 files and
+// their licences).
 // brand/ is generated: never edit it by hand, run --write again.
 //
 //   node scripts/sync-brand.mjs --from <factory repo> --write   copy what differs, remove stale files
@@ -59,25 +61,35 @@ function listFiles(dir, prefix = "") {
   return out;
 }
 
-// The brand files, read into memory: ninben.css, logo.svg and fonts/*. Throws UsageError if broken.
+// The brand files, read into memory: ninben.css, ninben-components.css, logo.svg and fonts/*. Throws
+// UsageError if broken.
 function readSource(from) {
   const source = join(resolve(from), "design-system", "assets", "brand");
   const need = (path, what) => {
     if (!existsSync(path)) throw new UsageError(`${what} not found: ${path}`);
   };
   need(join(source, "ninben.css"), "ninben.css");
+  need(join(source, "ninben-components.css"), "ninben-components.css");
   need(join(source, "logo.svg"), "logo.svg");
   need(join(source, "fonts"), "fonts folder");
   if (!statSync(join(source, "fonts")).isDirectory()) throw new UsageError(`not a folder: ${join(source, "fonts")}`);
 
   const files = new Map();
   files.set("ninben.css", readFileSync(join(source, "ninben.css")));
+  files.set("ninben-components.css", readFileSync(join(source, "ninben-components.css")));
   files.set("logo.svg", readFileSync(join(source, "logo.svg")));
   for (const rel of listFiles(join(source, "fonts"))) files.set(`fonts/${rel}`, readFileSync(join(source, "fonts", ...rel.split("/"))));
 
   const css = files.get("ninben.css").toString("utf8");
   for (const [, font] of css.matchAll(FONT_URL)) {
     if (!files.has(`fonts/${font}`)) throw new UsageError(`ninben.css names fonts/${font}, which is not in ${join(source, "fonts")}`);
+  }
+  // The components must not ask the network (or a sibling file) for anything, as in the factory's sync-brand.py.
+  const components = files.get("ninben-components.css").toString("utf8");
+  const where = join(source, "ninben-components.css");
+  if (!components.trim()) throw new UsageError(`${where}: the components source is empty`);
+  for (const [pattern, what] of [[/@import/i, "@import"], [/url\(/i, "url()"]]) {
+    if (pattern.test(components)) throw new UsageError(`${where}: ${what} is not allowed (the components must be self-contained)`);
   }
   const svg = files.get("logo.svg").toString("utf8").trim();
   if (!svg.startsWith("<svg") || !svg.endsWith("</svg>")) throw new UsageError(`${join(source, "logo.svg")}: expected a single <svg>…</svg> element`);

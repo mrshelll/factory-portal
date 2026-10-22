@@ -130,9 +130,10 @@ with scope `local`, supabase-js removes the local session even when the network 
 ## Brand
 
 The portal wears the ninben brand: its colours (light and dark), the 4 px radius, Inter and JetBrains
-Mono, and the logo in the masthead. The single source lives in the software factory repo, in
-`design-system/assets/brand/` (`ninben.css`, `logo.svg`, `fonts/`). `brand/` here is a generated copy;
-never edit it by hand:
+Mono, the logo in the masthead, and the components it shares with the factory's pieces. The single
+source lives in the software factory repo, in `design-system/assets/brand/` (`ninben.css`,
+`ninben-components.css`, `logo.svg`, `fonts/`). `brand/` here is a generated copy; never edit it by
+hand:
 
 ```sh
 node scripts/sync-brand.mjs --from <path to the software factory repo> --check   # 0 equal, 1 differs
@@ -141,12 +142,17 @@ node scripts/sync-brand.mjs --from <path to the software factory repo> --write  
 
 `--write` copies only what changed, removes files that are no longer in the source, writes each file
 atomically and is safe to run twice; `--check` names every file that differs. Both exit 2 on bad
-usage or a broken source (for example, a font that `ninben.css` names is missing), before writing
-anything. `index.html` loads `brand/ninben.css` before `css/portal.css`; the fonts are referenced as
+usage or a broken source (for example, a font that `ninben.css` names is missing, or a
+`ninben-components.css` that is missing, empty or has an `@import` or a `url(`), before writing
+anything. `index.html` loads `brand/ninben.css`, then `brand/ninben-components.css`, then
+`css/portal.css`; the fonts are referenced as
 `url("fonts/…")` relative to that CSS, so GitHub Pages serves them from `brand/fonts/` (their SIL Open
 Font License texts travel with them). The logo is read once from `brand/logo.svg` and placed inline,
-so its stroke follows the brand's signal colour in light and dark. `css/portal.css` only adds its
-three text sizes and the spacing scale on top of the brand tokens.
+so its stroke follows the brand's signal colour in light and dark. `brand/ninben-components.css` is the
+base the portal and the three pieces share: the three text sizes, the 4/8 spacing scale, the frame, and
+the notices, fields, buttons, actions, rows and status (`.status--active` while a piece is in progress,
+`.status--done` once it is sent). `css/portal.css` keeps only the portal's own: the masthead, the page
+head, the sign-in form and its code field, the list rows' link and the piece view.
 
 The sign-in screens follow the visual manual's `formulario` pattern and home follows `lista`; their
 `data-rol` marks (`marco`, `cabecera`, `avisos`, `cuerpo`, `accion-principal`, `marca-producto`,
@@ -259,8 +265,8 @@ node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/h
 
 | Path | Purpose |
 |---|---|
-| `index.html`, `css/portal.css` | Page shell and styles (on top of the brand tokens) |
-| `brand/` | Generated copy of the ninben brand (`ninben.css`, `logo.svg`, `fonts/`) |
+| `index.html`, `css/portal.css` | Page shell and the portal's own styles (on top of the brand and its components) |
+| `brand/` | Generated copy of the ninben brand (`ninben.css`, `ninben-components.css`, `logo.svg`, `fonts/`) |
 | `scripts/sync-brand.mjs` | Copies the brand from the software factory repo, or checks the copy |
 | `supabase/migrations/` | Schema: the baseline recovery snapshot and the factory connection |
 | `.github/workflows/keep-alive.yml` | Calls `keep_alive()` every 3 days so Supabase does not pause |
