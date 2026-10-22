@@ -485,8 +485,8 @@ async function showHome(viewId) {
     layout.body.append(h("section", { class: "section empty", "aria-labelledby": "empty-title" },
       h("h2", { id: "empty-title" }, t("emptyTitle")),
       h("p", {}, t("emptyBody", { email: user.email })),
-      // The empty state's direct way out (EST-01), not the list's primary action, which goes in the title band
-      // when there is one (lista.md, anatomy 1 and 4): no data-rol="accion-principal" here.
+      // Its way out keeps no data-rol="accion-principal" until MAR-06 says where a centred empty state's action goes:
+      // the measure only accepts the title band or the end of a form (pending, Ruling 21).
       h("div", { class: "actions" },
         h("button", { type: "button", class: "button button--primary", onclick: () => signOut(layout.notices) }, t("emptyAction")),
         h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))));

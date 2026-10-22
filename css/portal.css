@@ -63,7 +63,13 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* ---- home ------------------------------------------------------------------------------- */
 
 .loading { color: var(--muted); }
-.empty p { margin-bottom: var(--space-4); overflow-wrap: anywhere; }
+/* Nothing shared yet: the whole view is an empty state, centred in the frame at every width: its title, its message
+   (still at the reading measure) and its way out. A centred empty state is the one the manual lets fall short of the
+   width (FUN-43: «Una pantalla cuya vista principal es un vacío centrado con un mensaje angosto puede no llegar al
+   60 %»), and whose rows are not held to the body's edge (MAR-10: «los estados vacíos centrados no se miden»). */
+.empty { text-align: center; }
+.empty p { margin-inline: auto; margin-bottom: var(--space-4); overflow-wrap: anywhere; }
+.empty .actions { justify-content: center; }
 
 /* A row of the list (.rows, .row and .status come from the base): the whole row is the link. */
 .row-link {

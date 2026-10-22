@@ -21,7 +21,7 @@
 
   --margin-page: 16px;
   /* The frame reaches the widest review width (1440) with the page margin (24) on each side, and centres above it
-     (MAR-11). The portal keeps its own 960 in its stylesheet. */
+     (MAR-11). The portal uses this same frame. */
   --frame-page: 1392px;
   --measure-form: 440px;
   --measure-text: 40rem;

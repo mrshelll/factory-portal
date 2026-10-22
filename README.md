@@ -160,8 +160,9 @@ The sign-in screens follow the visual manual's `formulario` pattern and home fol
 base's on every screen: the page margin on both sides (16 px, 24 px from 672 px) and no cap before 1440 px, where it
 stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
-after the form); the empty home's «Entrar con otro correo» is the empty state's way out, not the list's primary
-action, so it carries no `accion-principal`.
+after the form). The empty home is an empty state centred in the frame (its title, its message at the reading measure
+and its way out); its «Entrar con otro correo» carries no `accion-principal` for now: the measure of MAR-06 only takes
+a primary action in the title band or at the end of a form, and where a centred empty state's action goes is pending.
 
 ## Database migrations
 
@@ -271,8 +272,8 @@ node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/h
 1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
 parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the four screens (MAR-02), and
 every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
-names what fails. The empty home is excepted from FUN-43 with its reason (an empty state: a short message and its way
-out, nothing to spread over the width without inventing content). The piece screen is checked at the same widths and
+names what fails. The empty home carries FUN-43's own exception, in the rule's words: its main view is a centred empty
+state with a short message («un vacío centrado con un mensaje angosto»). The piece screen is checked at the same widths and
 at 1600: its frame on the other screens' edges with the page margin on both sides, and its iframe over the frame's
 box, as wide as the factory's `design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the
 factory measures its pieces inside the portal at the width a person sees them.
