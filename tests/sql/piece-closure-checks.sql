@@ -19,6 +19,7 @@ declare
   v_beto constant text := 'pc-check-beto@example.invalid';
   v_carla constant text := 'pc-check-carla@example.invalid';
   v_dora constant text := 'pc-check-dora@example.invalid';
+  v_eva constant text := 'pc-check-eva@example.invalid';
   v_draft constant jsonb := '{"pc-check:answers": {"q1": "draft answer"}}';
   v_draft2 constant jsonb := '{"pc-check:answers": {"q1": "draft after the close"}}';
   v_payload1 constant jsonb := '{"pc-check:answers": {"q1": "sent answer"}}';
@@ -31,7 +32,9 @@ declare
   v_late_storage constant jsonb := '{"pc-check:storage": {"q1": "sent after the close"}}';
   v_payload_q1b constant jsonb := '{"pc-check:answers": {"q1": "round 1b"}}';
   v_payload_q1b_late constant jsonb := '{"pc-check:answers": {"q1": "round 1b after the new version"}}';
+  v_carla_draft constant jsonb := '{"pc-check:answers": {"q1": "carla draft"}}';
   v_payload_carla constant jsonb := '{"pc-check:answers": {"q1": "carla on the old version"}}';
+  v_payload_eva constant jsonb := '{"pc-check:answers": {"q1": "eva on the old version"}}';
   v_payload_dora constant jsonb := '{"pc-check:answers": {"q1": "dora"}}';
   v_checks integer := 0;
   v_role text;
@@ -47,6 +50,7 @@ declare
   v_beto_id uuid;
   v_carla_id uuid;
   v_dora_id uuid;
+  v_eva_id uuid;
   v_q1 uuid;
   v_q1b uuid;
   v_q2 uuid;
@@ -58,6 +62,8 @@ declare
   v_rb uuid;
   v_rq1b uuid;
   v_rc uuid;
+  v_re uuid;
+  v_carla_partial uuid;
   v_ro uuid;
   v_cr1 uuid;
   v_late1 uuid;
@@ -69,18 +75,20 @@ begin
       v_slug, v_other_slug;
   end if;
 
-  -- Setup. Q1 goes to Ana and Carla. Ana starts Q1, so publishing Q1b to her keeps Q1 in progress
+  -- Setup. Q1 goes to Ana, Carla and Eva. Ana starts Q1, so publishing Q1b to her keeps Q1 in progress
   -- (two questions pieces of the same person are open at once). D1 (demo) goes to Ana, F1 (flow) to
   -- Beto.
   perform set_config('role', 'service_role', true);
   v_res := public.factory_publish(v_slug, 'PC Check Project', 'questions', 'Questions round 1', '1',
     '<p>q1</p>', jsonb_build_array(jsonb_build_object('display_name', 'Ana', 'email', v_ana),
-                                   jsonb_build_object('display_name', 'Carla', 'email', v_carla)),
+                                   jsonb_build_object('display_name', 'Carla', 'email', v_carla),
+                                   jsonb_build_object('display_name', 'Eva', 'email', v_eva)),
     '{}'::text[]);
   perform set_config('role', v_admin, true);
   v_q1 := (v_res ->> 'piece_id')::uuid;
   v_ana_id := (v_res -> 'people' -> 0 ->> 'member_id')::uuid;
   v_carla_id := (v_res -> 'people' -> 1 ->> 'member_id')::uuid;
+  v_eva_id := (v_res -> 'people' -> 2 ->> 'member_id')::uuid;
 
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
@@ -335,13 +343,22 @@ begin
   v_checks := v_checks + 1;
 
   -- (8) a new version replaces the person's submitted and received pieces of the same kind, without
-  --     collecting drafts; a send on a replaced version that had a response is a late change
-  --     request; a send on a replaced version that never had one is a normal response.
+  --     collecting their drafts. A send on a replaced version with a sent (non-partial) response is
+  --     a late change request (Ana, Q1b). A send on a replaced version with only a partial response
+  --     (Carla: her draft was collected) or with nothing (Eva) is a normal response, and the status
+  --     stays replaced.
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_carla)::text, true);
+  perform public.save_draft(v_q1, v_carla_draft);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+
   perform set_config('role', 'service_role', true);
   v_res := public.factory_publish(v_slug, 'PC Check Project', 'questions', 'Questions round 2', '2',
     '<p>q2</p>', jsonb_build_array(jsonb_build_object('display_name', 'Ana', 'email', v_ana),
-                                   jsonb_build_object('display_name', 'Carla', 'email', v_carla)),
-    array[v_ana]);
+                                   jsonb_build_object('display_name', 'Carla', 'email', v_carla),
+                                   jsonb_build_object('display_name', 'Eva', 'email', v_eva)),
+    array[v_ana, v_carla]);
   perform set_config('role', v_admin, true);
   v_q2 := (v_res ->> 'piece_id')::uuid;
   v_person := v_res -> 'people' -> 0;
@@ -353,18 +370,29 @@ begin
   end if;
   v_person := v_res -> 'people' -> 1;
   if v_person -> 'replaced' is distinct from jsonb_build_array(v_q1)
-     or v_person -> 'partials' is distinct from '[]'::jsonb
+     or jsonb_array_length(v_person -> 'partials') <> 1
      or v_person -> 'kept_in_progress' is distinct from '[]'::jsonb then
     raise exception 'piece-closure (8): Carla''s publish result is %', v_person;
+  end if;
+  v_carla_partial := (v_person -> 'partials' ->> 0)::uuid;
+  if not exists (select 1 from public.piece_responses
+                 where id = v_carla_partial and piece_id = v_q1 and member_id = v_carla_id and partial) then
+    raise exception 'piece-closure (8): Carla''s draft was not collected as a partial response';
+  end if;
+  v_person := v_res -> 'people' -> 2;
+  if v_person -> 'replaced' is distinct from jsonb_build_array(v_q1)
+     or v_person -> 'partials' is distinct from '[]'::jsonb
+     or v_person -> 'kept_in_progress' is distinct from '[]'::jsonb then
+    raise exception 'piece-closure (8): Eva''s publish result is %', v_person;
   end if;
   if (select count(*) from public.piece_assignments
       where status = 'replaced'
         and ((piece_id in (v_q1, v_q1b) and member_id = v_ana_id)
-          or (piece_id = v_q1 and member_id = v_carla_id))) <> 3 then
+          or (piece_id = v_q1 and member_id in (v_carla_id, v_eva_id)))) <> 4 then
     raise exception 'piece-closure (8): the old versions were not all replaced';
   end if;
-  if (select count(*) from public.piece_assignments where piece_id = v_q2 and status = 'pending') <> 2 then
-    raise exception 'piece-closure (8): the new version is not pending for both people';
+  if (select count(*) from public.piece_assignments where piece_id = v_q2 and status = 'pending') <> 3 then
+    raise exception 'piece-closure (8): the new version is not pending for the three people';
   end if;
   select status into v_status from public.piece_assignments where piece_id = v_d1 and member_id = v_ana_id;
   if v_status is distinct from 'received' then
@@ -380,6 +408,8 @@ begin
   v_late2 := public.submit_response(v_q1b, v_payload_q1b_late);
   perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_carla)::text, true);
   v_rc := public.submit_response(v_q1, v_payload_carla);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_eva)::text, true);
+  v_re := public.submit_response(v_q1, v_payload_eva);
   perform set_config('role', v_admin, true);
   perform set_config('request.jwt.claims', '', true);
 
@@ -398,12 +428,24 @@ begin
     select 1 from public.piece_responses
     where id = v_rc and piece_id = v_q1 and member_id = v_carla_id and payload = v_payload_carla
       and not partial and fetched_at is null
-  ) or exists (select 1 from public.piece_change_requests where member_id = v_carla_id) then
-    raise exception 'piece-closure (8): a send on a replaced, never sent version is not a normal response';
+  ) or (select count(*) from public.piece_responses where piece_id = v_q1 and member_id = v_carla_id) <> 2
+    or exists (select 1 from public.piece_change_requests where member_id = v_carla_id) then
+    raise exception 'piece-closure (8): a send on a replaced version with only a partial is not a normal response';
   end if;
   select status into v_status from public.piece_assignments where piece_id = v_q1 and member_id = v_carla_id;
   if v_status is distinct from 'replaced' then
     raise exception 'piece-closure (8): Carla''s Q1 is %, expected replaced', v_status;
+  end if;
+  if not exists (
+    select 1 from public.piece_responses
+    where id = v_re and piece_id = v_q1 and member_id = v_eva_id and payload = v_payload_eva
+      and not partial and fetched_at is null
+  ) or exists (select 1 from public.piece_change_requests where member_id = v_eva_id) then
+    raise exception 'piece-closure (8): a send on a replaced, never sent version is not a normal response';
+  end if;
+  select status into v_status from public.piece_assignments where piece_id = v_q1 and member_id = v_eva_id;
+  if v_status is distinct from 'replaced' then
+    raise exception 'piece-closure (8): Eva''s Q1 is %, expected replaced', v_status;
   end if;
   v_checks := v_checks + 1;
 

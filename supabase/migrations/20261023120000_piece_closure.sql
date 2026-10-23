@@ -67,8 +67,9 @@ grant references, trigger, truncate on table public.piece_change_requests to ser
 
 -- ---------------------------------------------------------------------------------------------
 -- assignment_closed: a person's assignment is closed when the factory received it, or when a newer
--- version replaced it after something was sent or collected (a partial response counts). A missing
--- assignment is not closed. Never raises.
+-- version replaced it after the person sent a response (partial = false). A partial response (a
+-- draft collected by factory_publish) does not close it: drafts are never applied, so nothing was
+-- used yet. A missing assignment is not closed. Never raises.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function private.assignment_closed(p_piece_id uuid, p_member_id uuid)
@@ -87,7 +88,7 @@ as $function$
            or (a.status = 'replaced'
                and exists (
                  select 1 from public.piece_responses r
-                 where r.piece_id = a.piece_id and r.member_id = a.member_id)))
+                 where r.piece_id = a.piece_id and r.member_id = a.member_id and not r.partial)))
   );
 $function$;
 
