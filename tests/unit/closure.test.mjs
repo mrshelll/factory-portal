@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { closedState, seedFor, hasUnsentChanges, validRequestText, UNSENT_GRACE_MS, REQUEST_TEXT_MAX } from "../../js/closure.js";
+import { closedState, seedFor, hasUnsentChanges, unsentReference, validRequestText, UNSENT_GRACE_MS, REQUEST_TEXT_MAX } from "../../js/closure.js";
 
 test("closedState: received is closed; replaced only with a sent (non-partial) response", () => {
   assert.equal(closedState({ status: "received" }, false), "received");
@@ -63,4 +63,21 @@ test("validRequestText: trimmed, 1 to 4000 characters", () => {
   // Characters, as the database counts them: 4000 emoji are 8000 UTF-16 units but 4000 characters.
   assert.equal(validRequestText("😀".repeat(4000)), true);
   assert.equal(validRequestText("😀".repeat(4001)), false);
+});
+
+test("unsentReference: the newest of the last send and the change requests (which already carried the draft)", () => {
+  const sent = "2026-10-17T15:00:00.000Z";
+  assert.equal(unsentReference(sent, []), sent);
+  assert.equal(unsentReference(sent, undefined), sent);
+  assert.equal(unsentReference(null, []), null);
+  assert.equal(unsentReference(sent, [{ created_at: "2026-10-16T00:00:00.000Z" }]), sent);
+  assert.equal(unsentReference(sent, [{ created_at: "2026-10-20T12:00:00.000Z" }, { created_at: "2026-10-19T12:00:00.000Z" }]), "2026-10-20T12:00:00.000Z");
+  assert.equal(unsentReference(null, [{ created_at: "2026-10-19T12:00:00.000Z" }]), "2026-10-19T12:00:00.000Z");
+  // Unreadable dates do not count; an unreadable send gives way to a readable request.
+  assert.equal(unsentReference(sent, [{ created_at: "ayer" }, null, {}]), sent);
+  assert.equal(unsentReference("ayer", [{ created_at: "2026-10-19T12:00:00.000Z" }]), "2026-10-19T12:00:00.000Z");
+  // A late send (a change request made after the draft was saved): the draft is no longer unsent.
+  const draft = "2026-10-23T10:00:00.000Z";
+  assert.equal(hasUnsentChanges(draft, unsentReference(sent, [{ created_at: "2026-10-23T10:00:02.000Z" }])), false);
+  assert.equal(hasUnsentChanges(draft, unsentReference(sent, [])), true);
 });

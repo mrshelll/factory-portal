@@ -34,6 +34,17 @@ export function hasUnsentChanges(draftUpdatedAt, lastSubmittedAt) {
   return saved - sent > UNSENT_GRACE_MS;
 }
 
+// What a draft must be newer than to hold unsent changes: the last send, or a later change request (one made after
+// the draft was saved already carried it, a late send included). The newest readable of them, or null.
+export function unsentReference(lastSubmittedAt, changeRequests) {
+  let best = Number.isFinite(Date.parse(lastSubmittedAt)) ? lastSubmittedAt : null;
+  for (const request of Array.isArray(changeRequests) ? changeRequests : []) {
+    const at = request && request.created_at;
+    if (Number.isFinite(Date.parse(at)) && (best === null || Date.parse(at) > Date.parse(best))) best = at;
+  }
+  return best;
+}
+
 // 1 to REQUEST_TEXT_MAX characters once trimmed (characters as the database counts them, not UTF-16 units).
 export function validRequestText(text) {
   if (typeof text !== "string") return false;

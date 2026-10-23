@@ -1376,7 +1376,10 @@ async function sessionReturnsChecks(browser, base, html) {
 // 1440, light and dark, with screenshots <name>-<width>-<scheme>.png in <out>.
 const CLOSURE = {
   received: (date) => `La recibimos el ${date} y ya la estamos usando, así que aquí no se puede cambiar. Si necesitas cambiar algo, pide un cambio.`,
-  replaced: "Hay una versión más nueva de esto. Lo que marques aquí se guarda solo en esta página y no le llega a nadie hasta que lo envíes. Lo mejor es responder la versión nueva; si ya terminaste esta, envíala y también le llega a quien te la compartió.",
+  // A replaced version the person sent (closed), and today's notice for one never sent (open).
+  replaced: "Hay una versión más nueva de esto. Lo que enviaste en esta ya le llegó a quien te la compartió, así que aquí no se puede cambiar. Si necesitas cambiar algo, pide un cambio o responde la versión nueva.",
+  replacedOpen: "Hay una versión más nueva de esto. Lo que marques aquí se guarda solo en esta página y no le llega a nadie hasta que lo envíes. Lo mejor es responder la versión nueva; si ya terminaste esta, envíala y también le llega a quien te la compartió.",
+  cancel: "Cancelar",
   late: "Ya la habíamos recibido cuando la enviaste, así que tu envío llegó como pedido de cambio. Quien lleva el proyecto lo revisa.",
   action: "Pedir un cambio",
   label: "Qué quieres cambiar y por qué",
@@ -1483,7 +1486,9 @@ async function closureChecks(browser, base, html) {
     await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
     return { context, page, errors };
   }
-  const shot = (page, name, width, scheme) => page.screenshot({ path: join(outDir, `${name}-${width}-${scheme}.png`), fullPage: true });
+  // The piece screens as the viewport shows them: a full-page capture stretches the viewport, so the piece's 60dvh
+  // floor grows with it and the iframe is captured blank. The list is captured whole.
+  const shot = (page, name, width, scheme, fullPage = false) => page.screenshot({ path: join(outDir, `${name}-${width}-${scheme}.png`), fullPage });
   const runs = [[320, "light"], [320, "dark"], [768, "light"], [768, "dark"], [1440, "light"], [1440, "dark"]];
 
   for (const [width, scheme] of runs) {
@@ -1515,7 +1520,7 @@ async function closureChecks(browser, base, html) {
       check(`${tag}: list: a replaced version with only a collected draft stays out`, !row("Recorrido de flujos v1") && rows.length === 4, JSON.stringify(rows.map((r) => r.text)));
       check(`${tag}: list: «por responder» leaves out the sent and the received pieces`, meta.includes("1 por responder"), JSON.stringify(meta));
       check(`${tag}: list: no horizontal scroll`, await noHorizontalScroll(page));
-      await shot(page, "list-received", width, scheme);
+      await shot(page, "list-received", width, scheme, true);
       if (first) await snapshot(page, "home-received", "lista");
       check(`${tag}: list: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
@@ -1568,6 +1573,22 @@ async function closureChecks(browser, base, html) {
       }
       check(`${tag}: request: no horizontal scroll with the form open`, await noHorizontalScroll(page));
       await shot(page, "request-empty-error", width, scheme);
+      // «Cancelar» closes the form, keeps what was typed and gives the focus back to «Pedir un cambio».
+      const cancel = page.getByRole("button", { name: CLOSURE.cancel, exact: true });
+      const cancelInfo = await page.evaluate(([label]) => {
+        const button = [...document.querySelectorAll("[data-rol=aviso-fijo] button")].find((b) => b.textContent === label);
+        const primaries = document.querySelectorAll("[data-rol=aviso-fijo] .button--primary").length;
+        return button ? { primary: button.classList.contains("button--primary"), primaries } : null;
+      }, [CLOSURE.cancel]);
+      check(`${tag}: request: the form has a secondary «${CLOSURE.cancel}» and «${CLOSURE.send}» stays the only primary`, cancelInfo && !cancelInfo.primary && cancelInfo.primaries === 1, JSON.stringify(cancelInfo));
+      await typeRequest(page, "Lo pienso mejor");
+      await tap(cancel);
+      const closedForm = await page.evaluate(([label]) => ({ open: Boolean(document.getElementById("change-request-text")),
+        focus: document.activeElement && document.activeElement.textContent === label }), [CLOSURE.action]);
+      check(`${tag}: request: «${CLOSURE.cancel}» closes the form and the focus goes back to «${CLOSURE.action}»`, !closedForm.open && closedForm.focus && requestCallCount(backend) === 0, JSON.stringify(closedForm));
+      await tap(requestButton(page));
+      const reopenedForm = await waitFor(() => requestForm(page), 3000);
+      check(`${tag}: request: opening it again brings back what was typed`, reopenedForm && reopenedForm.value === "Lo pienso mejor", JSON.stringify(reopenedForm && reopenedForm.value));
 
       // A failure keeps the form, the text and an error in the page.
       await typeRequest(page, "  Quiero cambiar la fecha de entrega.  ");
@@ -1625,7 +1646,11 @@ async function closureChecks(browser, base, html) {
       const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
       const frame = await appPiece(page);
       const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
-      check(`${tag}: replaced: the pinned notice is today's, with the link to the newer version and «${CLOSURE.action}»`, notices.length === 1 &&
+      const actionTops = await page.evaluate(() => [...document.querySelectorAll("[data-rol=aviso-fijo] .notice-actions > *")].map((el) => {
+        const range = document.createRange(); range.selectNodeContents(el); return Math.round(range.getBoundingClientRect().top); }));
+      check(`${tag}: replaced: the link and «${CLOSURE.action}» in the notice share a line when side by side`, actionTops.length === 2 &&
+        (Math.abs(actionTops[0] - actionTops[1]) <= 1 || Math.abs(actionTops[0] - actionTops[1]) >= 30), JSON.stringify(actionTops));
+      check(`${tag}: replaced: the pinned notice says what was sent already arrived, with the link to the newer version and «${CLOSURE.action}»`, notices.length === 1 &&
         notices[0].text === CLOSURE.replaced && notices[0].links.length === 1 && notices[0].links[0].href === `#/piece/${IDS.questionsNew}` &&
         notices[0].links[0].label === "Abrir la versión nueva" && notices[0].buttons.includes(CLOSURE.action) && !notices[0].buttons.includes("Cerrar aviso"), JSON.stringify(notices));
       const host = frame && await pieceHost(frame);
@@ -1693,6 +1718,17 @@ async function closureChecks(browser, base, html) {
       const host = reopened && await pieceHost(reopened);
       check(`${tag}: late: the re-opened piece is closed and shows what was sent`, host && host.closed === "received" && !host.answers.includes("q-004"), JSON.stringify(host && { closed: host.closed, answers: host.answers }));
       await shot(page, "late-send", width, scheme);
+      // The late send already carried the draft: the form does not offer it again.
+      await tap(requestButton(page));
+      const lateForm = await waitFor(() => requestForm(page), 3000);
+      check(`${tag}: late: the form does not say «${CLOSURE.unsent}» (the late send carried the draft)`, lateForm && !lateForm.text.includes(CLOSURE.unsent) &&
+        !lateForm.described.includes(CLOSURE.unsent), JSON.stringify(lateForm && lateForm.described));
+      await typeRequest(page, "Y una cosa más");
+      await tap(sendRequestButton(page));
+      await waitFor(async () => (backend.requestCalls.length && (await pinnedText(page)).includes(CLOSURE.sentPrefix) ? true : null), 8000);
+      const lateCall = backend.requestCalls[0];
+      check(`${tag}: late: a request after it goes without p_storage`, lateCall && lateCall.p_storage === null,
+        JSON.stringify(lateCall ? Object.keys(lateCall) : { rpc: backend.requests.filter((r) => r.includes("rpc/")), form: await requestForm(page), pinned: await pinnedText(page) }));
       if (first) {
         await page.click(".back-link");
         await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
@@ -1702,6 +1738,45 @@ async function closureChecks(browser, base, html) {
         check(`${tag}: late: the notice about the late send shows once`, again.length === 1 && again[0].text === receivedText, JSON.stringify(again));
       }
       check(`${tag}: late: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // A short phone (320 x 640) with the late notice, the received notice and the form open: the piece keeps at least
+    // 60 % of the screen and the page scrolls instead. Then the piece is reopened by the factory while the person writes:
+    // request_change answers 55000 and the portal opens the piece again (open), never the network error.
+    if (first) {
+      const backend = closedBackend(html, storage);
+      backend.changeRequests.push(earlierRequest(IDS.questions));
+      const context = await mockedContext(browser, { backend, width: 320, locale: "es-CO" });
+      const page = await context.newPage();
+      await page.setViewportSize({ width: 320, height: 640 });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+      await appPiece(page);
+      await tap(requestButton(page));
+      await waitFor(() => requestForm(page), 3000);
+      const sizes = await page.evaluate(() => ({ iframe: document.querySelector("iframe.piece-frame").getBoundingClientRect().height,
+        vh: window.innerHeight, scroll: document.documentElement.scrollHeight }));
+      check(`${tag}: short phone: with the form open the piece stays at least 60 % of the screen high, and the page scrolls`,
+        sizes.iframe >= Math.floor(0.6 * sizes.vh) - 1 && sizes.scroll > sizes.vh, JSON.stringify(sizes));
+      await shot(page, "request-short-phone", 320, "light");
+      // A full-page capture does not paint the iframe below the fold: the piece, scrolled into view.
+      await page.evaluate(() => document.querySelector("iframe.piece-frame").scrollIntoView());
+      await page.screenshot({ path: join(outDir, "request-short-phone-320-light-scrolled.png") });
+      await typeRequest(page, "Quiero cambiar algo");
+      backend.patch[IDS.questions] = { status: "submitted", updated_at: new Date().toISOString() };
+      await tap(sendRequestButton(page));
+      const reopened = await waitFor(async () => {
+        const f = pieceFrame(page);
+        const host = f && await f.evaluate(() => (typeof factoryHost === "object" ? factoryHost.closed : "none")).catch(() => "none");
+        return host === null && !(await page.$("#change-request-text")) ? true : null;
+      }, 8000);
+      const pinnedNow = await pinnedText(page);
+      check(`${tag}: reopened meanwhile: request_change answers 55000 and the piece opens again, open, without the network error`,
+        reopened && !pinnedNow.includes(CLOSURE.failed) && !(await page.evaluate(() => document.body.innerText)).includes(CLOSURE.failed) &&
+        backend.requestCalls.length === 1 && backend.changeRequests.filter((r) => r.text === "Quiero cambiar algo").length === 0, JSON.stringify({ reopened, pinnedNow }));
+      check(`${tag}: short phone: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
     }
 
@@ -1716,7 +1791,7 @@ async function closureChecks(browser, base, html) {
       const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
       const host = frame && await pieceHost(frame);
       check(`${tag}: partial only: a replaced version whose only response is a collected draft opens as today, without «${CLOSURE.action}»`,
-        notices.length === 1 && notices[0].text === CLOSURE.replaced && !notices[0].buttons.includes(CLOSURE.action) && host && host.closed === null,
+        notices.length === 1 && notices[0].text === CLOSURE.replacedOpen && !notices[0].buttons.includes(CLOSURE.action) && host && host.closed === null,
         JSON.stringify({ notices, closed: host && host.closed }));
       check(`${tag}: partial only: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();

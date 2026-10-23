@@ -132,10 +132,13 @@ factory collected stays open, as before). The list says «Recibida» for both (a
 una versión más nueva»), «Pediste un cambio el …» when there is a change request, and leaves them out
 of «por responder». A closed piece opens with the storage of the newest response sent (the draft only
 when that response has none), `closed` and `sentAt` set, and a pinned notice that says why it cannot
-change here (or, replaced, today's notice with its link) with «Pedir un cambio»: a form with a required
-text of up to 4000 characters that calls `request_change`. When the server draft is newer than that
-response by more than 5 s, the form says the unsent changes go with the request and sends that draft
-as `p_storage`. Every send passes the piece's storage to `submit_response`; when the id it returns is
+change here (replaced: that what was sent already arrived, with the newer version's link) with «Pedir un
+cambio»: a form with a required text of up to 4000 characters that calls `request_change`, and «Cancelar»,
+which closes it keeping the text. When the server draft is newer by more than 5 s than both that response
+and the newest change request (a late send already carried the draft), the form says the unsent changes
+go with the request and sends that draft as `p_storage`, once. If `request_change` answers 55000 (the
+factory reopened the piece meanwhile), the piece opens again as it is now. The piece keeps at least 60 %
+of the screen's height under the frame; on a short phone with the form open the page scrolls. Every send passes the piece's storage to `submit_response`; when the id it returns is
 a change request (the piece closed meanwhile), the piece hears ok and opens again, closed, saying once
 that the send arrived as a change request. The rules are in `js/closure.js`.
 
@@ -245,9 +248,11 @@ fixed notice, links to the newer version and still sends. With `--questions`, th
 320, 768 and 1440 px, light and dark: the list with a received piece, a replaced version that was sent
 and a change request (`list-received-<width>-<scheme>.png`); a received piece read only with its notice
 (`closed-received-…`); the request form sent empty (`request-empty-error-…`), failing (network, and a
-rejection) and arriving (`request-sent-…`); a replaced version that was sent (`closed-replaced-…`); a
+rejection) and arriving (`request-sent-…`), closed with «Cancelar»; a replaced version that was sent (`closed-replaced-…`); a
 draft with unsent changes going with the request (`request-with-unsent-…`); and a send from a tab left
-open after the close (`late-send-…`). The piece screen is checked at 320, 768 and
+open after the close (`late-send-…`). At 320 × 640: the piece stays at least 60 % high with the form open
+(`request-short-phone-320-light.png`, `…-scrolled.png`), and a piece reopened while the person writes
+opens again on 55000. The piece screen is checked at 320, 768 and
 1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above «Volver» and
 the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
 the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),

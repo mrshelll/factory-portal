@@ -6,7 +6,7 @@ import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
 import { loadSharedWithMe, loadPiece, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
-import { seedFor, hasUnsentChanges, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
+import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
 
@@ -569,7 +569,7 @@ function pieceLayout(titleText) {
 // newer version's link when there is one and «Pedir un cambio» (COM-15, EST-05); the earlier requests; and the
 // request form, opened below them on demand. The person's request text is a third party's: it only ever goes
 // through text nodes. unsentStorage: the draft with changes left unsent (it goes with the request), or null.
-function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late, unsentStorage }) {
+function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late, unsentStorage: unsentAtOpen }) {
   const userKey = `${state.session.user.id}|${pieceId}`;
   const requestLine = (iso) => h("p", { class: "hint" }, t("requestedChangeLine", { date: formatDate(state.lang, iso) }));
   const lines = h("div", { class: "change-request-lines" },
@@ -578,6 +578,13 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
   let form = null;          // the open form's textarea, or null
   let confirmedAt = null;   // when the last request arrived, while its line is shown where the form was
   let actionButton = null;
+  let unsentStorage = unsentAtOpen; // once a request carried it, the next one does not carry it again
+
+  function closeForm() {
+    replaceChildren(slot);
+    form = null;
+    if (actionButton) actionButton.focus();
+  }
 
   function openForm() {
     if (form) { form.focus(); return; }
@@ -591,6 +598,8 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
     const error = fieldError("change-request-error");
     const failure = h("div", { hidden: true });
     const button = h("button", { type: "submit", class: "button button--primary", "data-rol": "accion-principal" }, t("sendChangeRequest"));
+    // Closing the form keeps the text (state.requestTexts) for when it opens again.
+    const cancel = h("button", { type: "button", class: "link-button", onclick: () => { if (!busy) closeForm(); } }, t("cancel"));
     let busy = false;
     input.addEventListener("input", () => {
       state.requestTexts.set(userKey, input.value);
@@ -615,6 +624,8 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
         button.disabled = false;
         button.textContent = t("sendChangeRequest");
         if (viewId !== state.viewId) return;
+        // The factory reopened the piece meanwhile (55000: not closed): open it again as it is now; the text stays.
+        if (err && err.code === "55000") { route(); return; }
         if (isAuthExpired(err)) {
           showNotice(notices, { tone: "error", text: t("sessionExpired"), actions: [{ label: t("signInAgain"), onClick: sessionEnded }] });
           return;
@@ -623,6 +634,7 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
         return;
       }
       if (state.requestTexts.get(userKey) === input.value) state.requestTexts.delete(userKey);
+      unsentStorage = null;
       if (viewId !== state.viewId) return;
       // The confirmation is the change (COM-16): the form becomes the line that says the request arrived, announced
       // without reading it twice; the focus goes back to «Pedir un cambio», next to it.
@@ -636,20 +648,21 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
       if (actionButton) actionButton.focus();
     }
 
+    // The form's primary action is its last control; «Cancelar» goes after it, as on the sign-in screens (MAR-06, FUN-08).
     replaceChildren(slot, h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
       h("div", { class: "field" },
         h("label", { for: "change-request-text" }, t("changeRequestLabel")),
         h("p", { class: "hint", id: "change-request-hint" }, t("changeRequestHint")),
         unsentStorage ? h("p", { class: "hint", id: "change-request-unsent" }, t("changeRequestUnsent")) : null,
         input, error),
-      failure, button));
+      failure, button), h("div", { class: "secondary-actions" }, cancel));
     form = input;
     input.focus();
   }
 
   const why = context.closed === "received"
     ? t("receivedNotice", { date: formatDate(state.lang, context.assignment.updated_at || (context.lastResponse && context.lastResponse.submitted_at)) })
-    : t("replacedNotice");
+    : t("closedReplacedNotice");
   const links = context.closed === "replaced"
     ? [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: "#/" }]
     : [];
@@ -725,7 +738,8 @@ async function showPiece(pieceId, viewId) {
   const late = state.lateSend && state.lateSend.pieceId === pieceId && state.lateSend.userId === user.id ? state.lateSend : null;
   if (late) state.lateSend = null;
   if (closed) {
-    const unsent = hasUnsentChanges(context.draftUpdatedAt, context.lastSubmittedAt);
+    // A change request made after the draft was saved (a late send too) already carried it.
+    const unsent = hasUnsentChanges(context.draftUpdatedAt, unsentReference(context.lastSubmittedAt, context.changeRequests));
     showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late,
       unsentStorage: unsent ? draftSeed : null });
   }

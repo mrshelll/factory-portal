@@ -93,7 +93,9 @@ main { padding-block: var(--space-6) var(--space-7); }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 
-.piece-layout { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+/* The piece fills the screen under the frame; when the frame is tall (a closed piece with the request form open on a
+   short phone) the piece keeps at least 60 % of the screen and the page scrolls instead. */
+.piece-layout { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 .piece-layout > .frame { flex: none; }
 /* Under the masthead, at every width: «Volver», then the title band (the piece's title and its save
    line). Both start on the brand's left edge, the frame's. */
@@ -115,6 +117,9 @@ main { padding-block: var(--space-6) var(--space-7); }
 .change-request-lines { display: grid; gap: var(--space-1); }
 .change-request-lines:empty, .change-request-slot:empty { display: none; }
 .change-request-lines p, .change-request-sent { max-width: var(--measure-text); }
+/* A notice can hold a link and a button side by side (a replaced version: its newer one and «Pedir un cambio»): both
+   centre their text in the 44 px target, so they share a baseline. */
+.notice-actions a.link-button { display: inline-flex; align-items: center; }
 /* The piece takes the frame's box, its margins included, and starts its content at the frame's margin
    itself (the factory's pieces do so inside the portal, with the same 16/24 px margin and the same 672 px
    tier, measured on the iframe, which is as wide as the window up to the frame's cap). So its content
@@ -122,7 +127,8 @@ main { padding-block: var(--space-6) var(--space-7); }
    it spans the frame's content, like the masthead's. */
 .piece-main {
   flex: 1;
-  min-height: 0;
+  min-height: 60vh;
+  min-height: 60dvh;
   display: flex;
   flex-direction: column;
   width: 100%;
