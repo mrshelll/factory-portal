@@ -532,7 +532,10 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         return json(draft ? [{ storage: draft, updated_at: backend.draftUpdatedAt || new Date().toISOString() }] : []);
       }
       case "piece_responses": return json(queryRows(backend.responseRows(), url));
-      case "piece_change_requests": return json(queryRows(backend.changeRequests, url));
+      case "piece_change_requests":
+        // The read that tells a late send apart (by id, right after submit_response) can be made to fail.
+        if (backend.lateReadFails && url.searchParams.has("id")) return route.abort("internetdisconnected");
+        return json(queryRows(backend.changeRequests, url));
       case "rpc/save_draft": {
         if (backend.authExpired) { backend.expiredSaves += 1; return json(EXPIRED, 401); }
         if (backend.saveFails) return route.abort("internetdisconnected");
@@ -1394,6 +1397,9 @@ const CLOSURE = {
   listReceived: "Recibida",
   listNewer: "Hay una versión más nueva",
   listRequested: (date) => `Pediste un cambio el ${date}`,
+  signOutUnsent: "Escribiste un pedido de cambio que todavía no enviaste. Si sales, se perderá.",
+  signOutLose: "Salir y perder el pedido",
+  stay: "Quedarme",
 };
 const SENT_AT = "2026-10-17T15:00:00.000Z";
 const RECEIVED_AT = "2026-10-18T15:00:00.000Z";
@@ -1811,6 +1817,77 @@ async function closureChecks(browser, base, html) {
         reopened && !pinnedNow.includes(CLOSURE.failed) && !(await page.evaluate(() => document.body.innerText)).includes(CLOSURE.failed) &&
         backend.requestCalls.length === 1 && backend.changeRequests.filter((r) => r.text === "Quiero cambiar algo").length === 0, JSON.stringify({ reopened, pinnedNow }));
       check(`${tag}: short phone: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // The read that tells a late send apart fails (M-3): the piece hears ok, since the server stored the send, and it
+    // opens again as the server has it — closed after a late send, open after a normal one — never as a guess.
+    if (first) {
+      for (const lateOnServer of [true, false]) {
+        const what = lateOnServer ? "a late send" : "a normal send";
+        const backend = closedBackend(html, storage, "submitted");
+        const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+        const frame = await appPiece(page);
+        await frame.evaluate(() => { if (isSent()) editar(); responder("q-004", "si"); });
+        await waitFor(() => backend.drafts.length > 0, 5000);
+        const closedAt = new Date().toISOString();
+        if (lateOnServer) backend.patch[IDS.questions] = { status: "received", updated_at: closedAt };
+        backend.lateReadFails = true;
+        const mounts = () => backend.requests.filter((r) => r.startsWith("GET /rest/v1/pieces") && r.includes("html")).length;
+        const before = mounts();
+        await sendQuestions(frame);
+        const stored = await waitFor(() => (lateOnServer ? backend.lateSubmits.length : backend.submits.length) > 0 || null, 8000);
+        const failedRead = backend.requests.some((r) => r.startsWith("GET /rest/v1/piece_change_requests") && r.includes("id=eq."));
+        const reopened = await waitFor(async () => (mounts() > before && await appPiece(page, 2000) ? true : null), 8000);
+        const host = reopened && await pieceHost(await appPiece(page));
+        const notices = await pinnedNotices(page);
+        const bodyText = await page.evaluate(() => document.body.innerText);
+        const receivedText = CLOSURE.received(await formatIn(page, closedAt));
+        check(`${tag}: late read fails, ${what}: stored once and the piece opens again as the server has it`,
+          stored && failedRead && reopened && host && (lateOnServer
+            ? host.closed === "received" && notices.length === 1 && notices[0].text === receivedText && backend.submits.length === 0
+            : host.closed === null && notices.length === 0 && backend.lateSubmits.length === 0),
+          JSON.stringify({ stored, failedRead, reopened, closed: host && host.closed, notices }));
+        check(`${tag}: late read fails, ${what}: no error in the page`, !bodyText.includes(CLOSURE.failed) &&
+          !bodyText.includes("No se pudo enviar") && !bodyText.includes("No hay conexión"), bodyText.slice(0, 300));
+        check(`${tag}: late read fails, ${what}: no page errors`, errors.length === 0, errors.join(" | "));
+        await context.close();
+      }
+    }
+
+    // Signing out with a change request written and not sent (M-5): the portal asks in the page, as with unsaved
+    // drafts; staying keeps the text; confirming signs out.
+    if (first) {
+      const backend = closedBackend(html, storage);
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      await appPiece(page);
+      await tap(requestButton(page));
+      await waitFor(() => requestForm(page), 3000);
+      await typeRequest(page, "Quiero cambiar la fecha");
+      await page.click(".back-link", { timeout: 5000 }).catch(() => {});
+      await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 }).catch(() => {});
+      await page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
+      const asked = await waitFor(async () => page.evaluate((text) => {
+        const n = document.querySelector("[data-rol=avisos] .notice");
+        return n && n.textContent.includes(text) ? { buttons: [...n.querySelectorAll("button")].map((b) => b.textContent) } : null;
+      }, CLOSURE.signOutUnsent), 8000);
+      const stillIn = await page.evaluate((k) => Boolean(localStorage.getItem(k)), STORAGE_KEY) && !(await page.$("#email"));
+      check(`${tag}: sign-out with an unsent request asks «${CLOSURE.signOutUnsent}» and signs nothing out yet`,
+        asked && asked.buttons.includes(CLOSURE.signOutLose) && asked.buttons.includes(CLOSURE.stay) && stillIn, JSON.stringify({ asked, stillIn }));
+      await page.click(`text=${CLOSURE.stay}`, { timeout: 3000 }).catch(() => {});
+      await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 }).catch(() => {});
+      await page.click(`a[href="#/piece/${IDS.questions}"]`, { timeout: 3000 }).catch(() => {});
+      await appPiece(page);
+      await tap(requestButton(page));
+      const kept = await waitFor(() => requestForm(page), 3000);
+      check(`${tag}: staying keeps the request text`, kept && kept.value === "Quiero cambiar la fecha", JSON.stringify(kept && kept.value));
+      await page.click(".back-link", { timeout: 5000 }).catch(() => {});
+      await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 }).catch(() => {});
+      await page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
+      await page.click(`text=${CLOSURE.signOutLose}`, { timeout: 8000 }).catch(() => {});
+      const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k) } : null), STORAGE_KEY), 10000);
+      check(`${tag}: confirming signs out to a clean sign-in`, out && !out.session, JSON.stringify(out));
+      check(`${tag}: sign-out with a request: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
     }
 

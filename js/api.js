@@ -141,9 +141,10 @@ export async function saveDraft(client, pieceId, storage) {
   unwrap(await client.rpc("save_draft", { p_piece_id: pieceId, p_storage: storage }));
 }
 
-// Sends the response with the piece's storage (null when it is not a plain object). -> { id, late }: late when the
-// piece was already closed, so the server kept the send as a change request (the id is one of piece_change_requests).
-// The send is stored either way: when that check cannot be read, it counts as not late.
+// Sends the response with the piece's storage (null when it is not a plain object). -> { id, late }: late is true when
+// the piece was already closed, so the server kept the send as a change request (the id is one of
+// piece_change_requests), false when it is a response, and null when that check could not be read. The send is stored
+// either way; with null the caller does not know which, so it opens the piece again as the server has it.
 export async function submitResponse(client, pieceId, payload, storage) {
   const id = unwrap(await client.rpc("submit_response", {
     p_piece_id: pieceId, p_payload: payload, p_storage: isPlainObject(storage) ? storage : null,
@@ -154,7 +155,7 @@ export async function submitResponse(client, pieceId, payload, storage) {
       const rows = unwrap(await client.from("piece_change_requests").select("id").eq("id", id).limit(1));
       late = Array.isArray(rows) && rows.some((row) => row && row.id === id);
     } catch {
-      late = false;
+      late = null;
     }
   }
   return { id, late };

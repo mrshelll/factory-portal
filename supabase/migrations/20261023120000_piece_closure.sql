@@ -96,6 +96,8 @@ $function$;
 -- submit_response: now takes the piece's storage too (optional, so an old piece that sends only the
 -- payload keeps working). On a closed assignment the send is kept as a late change request with the
 -- full payload and the assignment is not touched; otherwise it is a response, as before.
+-- The storage is only a copy for reopening the piece read-only: when it is over 1 MB it is stored as
+-- null, so the send itself (the payload) is never refused because of it.
 -- The assignment row is locked first, so a send that races with factory_mark_received or
 -- factory_publish waits for it and then sees the final status.
 -- ---------------------------------------------------------------------------------------------
@@ -110,6 +112,7 @@ set search_path = ''
 as $function$
 declare
   v_member_id uuid := private.assigned_member_id(p_piece_id);
+  v_storage jsonb := case when octet_length(p_storage::text) <= 1048576 then p_storage end;
   v_id uuid;
 begin
   perform 1
@@ -119,11 +122,11 @@ begin
 
   if private.assignment_closed(p_piece_id, v_member_id) then
     insert into public.piece_change_requests (piece_id, member_id, text, payload, storage, late)
-    values (p_piece_id, v_member_id, null, p_payload, p_storage, true)
+    values (p_piece_id, v_member_id, null, p_payload, v_storage, true)
     returning id into v_id;
   else
     insert into public.piece_responses (piece_id, member_id, payload, storage)
-    values (p_piece_id, v_member_id, p_payload, p_storage)
+    values (p_piece_id, v_member_id, p_payload, v_storage)
     returning id into v_id;
 
     update public.piece_assignments
@@ -523,3 +526,6 @@ grant execute on function public.factory_mark_received(uuid[]) to service_role;
 grant execute on function public.factory_reopen(uuid) to service_role;
 grant execute on function public.factory_fetch_change_requests(text) to service_role;
 grant execute on function public.factory_mark_change_requests_fetched(uuid[]) to service_role;
+
+-- PostgREST reads the schema once: reload it so the new functions and signatures are callable at once.
+notify pgrst, 'reload schema';

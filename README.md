@@ -206,7 +206,8 @@ empty state).
 - `20261023120000_piece_closure.sql` is the piece closure: the `received` status (the factory collected
   a complete response, so the piece closes), `storage` on responses, the `piece_change_requests` table
   (each person reads only their own), `submit_response` with an optional storage (a send on a closed
-  piece is kept as a late change request), `request_change` for the person, `factory_publish` also
+  piece is kept as a late change request; a storage copy over 1 MB is stored as null, so the send never fails
+  because of it), `request_change` for the person, `factory_publish` also
   replacing `submitted` and `received` pieces, and the factory-only functions `factory_mark_received`,
   `factory_reopen`, `factory_fetch_change_requests` and `factory_mark_change_requests_fetched` (execute
   for `service_role` only). Not applied to `factory` yet. It is idempotent.
@@ -253,7 +254,9 @@ draft with unsent changes going with the request (`request-with-unsent-…`); an
 open after the close (`late-send-…`). At 320 × 640: the piece stays at least 60 % high with the form open
 (`request-short-phone-320-light.png`), and scrolled into view the piece shows painted, its «Lo que enviaste» inside the
 screen (`…-scrolled.png`); and a piece reopened while the person writes
-opens again on 55000. The piece screen is checked at 320, 768 and
+opens again on 55000; a send whose late check cannot be read still answers ok and opens the piece again as the
+server has it (closed after a late send, open after a normal one); and signing out with a change request written and
+not sent asks first («Quedarme» keeps the text). The piece screen is checked at 320, 768 and
 1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above «Volver» and
 the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
 the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),

@@ -2,7 +2,7 @@
 --
 -- Run as ONE request against the `factory` database (Supabase MCP execute_sql, or psql as postgres).
 -- Everything happens inside `begin; ... rollback;`: no data is left behind. Every failure raises an
--- exception; success prints NOTICE "piece-closure: ok 12 checks" and returns one row with the same
+-- exception; success prints NOTICE "piece-closure: ok 14 checks" and returns one row with the same
 -- text. People are simulated with JWT claims that carry an email and no `sub`, so auth.uid() is null
 -- and submit_response never writes a user_id. All names start with pc-check so nothing collides with
 -- real data. Inside one transaction now() does not move, so where the order of two rows matters the
@@ -36,6 +36,10 @@ declare
   v_payload_carla constant jsonb := '{"pc-check:answers": {"q1": "carla on the old version"}}';
   v_payload_eva constant jsonb := '{"pc-check:answers": {"q1": "eva on the old version"}}';
   v_payload_dora constant jsonb := '{"pc-check:answers": {"q1": "dora"}}';
+  v_payload_q2 constant jsonb := '{"pc-check:answers": {"q1": "round 2 with a big copy"}}';
+  v_payload_q1_big constant jsonb := '{"pc-check:answers": {"q1": "late with a big copy"}}';
+  v_payload_eva_q2 constant jsonb := '{"pc-check:answers": {"q1": "eva round 2"}}';
+  v_big_storage jsonb := jsonb_build_object('pc-check:storage', repeat('x', 1048577));
   v_checks integer := 0;
   v_role text;
   v_fn text;
@@ -69,6 +73,10 @@ declare
   v_late1 uuid;
   v_late2 uuid;
   v_cr_other uuid;
+  v_rq2 uuid;
+  v_late3 uuid;
+  v_re2 uuid;
+  v_ep uuid;
 begin
   if exists (select 1 from public.projects where slug in (v_slug, v_other_slug)) then
     raise exception 'piece-closure: project % or % already exists; the checks need them absent',
@@ -730,13 +738,94 @@ begin
   end if;
   v_checks := v_checks + 1;
 
-  if v_checks <> 12 then
-    raise exception 'piece-closure: only % of 12 checks ran', v_checks;
+  -- (13) a storage copy over 1 MB never makes the send fail: it is stored as null, both as a response
+  --      (Ana's Q2 is open) and as a late change request (Ana's Q1 is closed: replaced after her send).
+  if octet_length(v_big_storage::text) <= 1048576 then
+    raise exception 'piece-closure (13): the big storage is not over 1 MB';
+  end if;
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
+  v_rq2 := public.submit_response(v_q2, v_payload_q2, v_big_storage);
+  v_late3 := public.submit_response(v_q1, v_payload_q1_big, v_big_storage);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if not exists (select 1 from public.piece_responses
+                 where id = v_rq2 and piece_id = v_q2 and member_id = v_ana_id and payload = v_payload_q2
+                   and storage is null and not partial) then
+    raise exception 'piece-closure (13): the send with a big copy is not a response with storage null';
+  end if;
+  select status into v_status from public.piece_assignments where piece_id = v_q2 and member_id = v_ana_id;
+  if v_status is distinct from 'submitted' then
+    raise exception 'piece-closure (13): with a big copy, Q2 is %, expected submitted', v_status;
+  end if;
+  if not exists (select 1 from public.piece_change_requests
+                 where id = v_late3 and piece_id = v_q1 and member_id = v_ana_id and late
+                   and payload = v_payload_q1_big and storage is null) then
+    raise exception 'piece-closure (13): the late send with a big copy is not a late request with storage null';
+  end if;
+  v_checks := v_checks + 1;
+
+  -- (14) factory_mark_received closes nothing for a fetched response whose assignment is not
+  --      submitted (in progress, replaced) nor for a partial response; with those out of the way
+  --      the same response closes (so each case fails only for its own reason).
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_eva)::text, true);
+  v_re2 := public.submit_response(v_q2, v_payload_eva_q2);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  perform set_config('role', 'service_role', true);
+  v_count := public.factory_mark_fetched(array[v_re2, v_re]);
+  perform set_config('role', v_admin, true);
+  if v_count <> 2 then
+    raise exception 'piece-closure (14): marked % fetched, expected 2', v_count;
+  end if;
+
+  update public.piece_assignments set status = 'in_progress' where piece_id = v_q2 and member_id = v_eva_id;
+  perform set_config('role', 'service_role', true);
+  v_res := public.factory_mark_received(array[v_re2]);
+  perform set_config('role', v_admin, true);
+  select status into v_status from public.piece_assignments where piece_id = v_q2 and member_id = v_eva_id;
+  if v_res is distinct from '[]'::jsonb or v_status is distinct from 'in_progress' then
+    raise exception 'piece-closure (14): an in-progress assignment closed % (status %)', v_res, v_status;
+  end if;
+  update public.piece_assignments set status = 'submitted' where piece_id = v_q2 and member_id = v_eva_id;
+
+  perform set_config('role', 'service_role', true);
+  v_res := public.factory_mark_received(array[v_re]);
+  perform set_config('role', v_admin, true);
+  select status into v_status from public.piece_assignments where piece_id = v_q1 and member_id = v_eva_id;
+  if v_res is distinct from '[]'::jsonb or v_status is distinct from 'replaced' then
+    raise exception 'piece-closure (14): a replaced assignment closed % (status %)', v_res, v_status;
+  end if;
+
+  insert into public.piece_responses (piece_id, member_id, payload, partial, submitted_at, fetched_at)
+  values (v_q2, v_eva_id, v_payload_eva_q2, true, now() + interval '1 minute', now())
+  returning id into v_ep;
+  perform set_config('role', 'service_role', true);
+  v_res := public.factory_mark_received(array[v_ep]);
+  perform set_config('role', v_admin, true);
+  select status into v_status from public.piece_assignments where piece_id = v_q2 and member_id = v_eva_id;
+  if v_res is distinct from '[]'::jsonb or v_status is distinct from 'submitted' then
+    raise exception 'piece-closure (14): a partial response closed % (status %)', v_res, v_status;
+  end if;
+
+  delete from public.piece_responses where id = v_ep;
+  perform set_config('role', 'service_role', true);
+  v_res := public.factory_mark_received(array[v_re2]);
+  perform set_config('role', v_admin, true);
+  if v_res is distinct from jsonb_build_array(v_re2) then
+    raise exception 'piece-closure (14): the submitted, fetched, newest response did not close: %', v_res;
+  end if;
+  v_checks := v_checks + 1;
+
+  if v_checks <> 14 then
+    raise exception 'piece-closure: only % of 14 checks ran', v_checks;
   end if;
   raise notice 'piece-closure: ok % checks', v_checks;
 end
 $check$;
 
-select 'piece-closure: ok 12 checks' as result;
+select 'piece-closure: ok 14 checks' as result;
 
 rollback;

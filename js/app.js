@@ -382,18 +382,24 @@ function adoptSession() {
 const hasUnsavedDrafts = () => [state.savers, ...[...state.setAside.values()].map((b) => b.savers)]
   .some((savers) => [...savers.values()].some((s) => s.hasUnsaved()));
 
-// Signing out never drops unsaved drafts silently: it first tries to save them, and if that is not
-// possible (offline) it asks in the page before discarding them.
+// A change request written and not sent yet (signing out clears them all, so any account's counts).
+const hasUnsentRequest = () => [...state.requestTexts.values()].some((text) => typeof text === "string" && /\S/.test(text));
+
+// Signing out never drops unsaved drafts nor an unsent change request silently: it first tries to save
+// the drafts, and if that is not possible (offline), or a request is still unsent, it asks in the page
+// before discarding them.
 async function signOut(notices) {
   if (state.signingOut) return;
   state.signingOut = true;
   const saved = await trySaveAll(state.savers.values(), SIGN_OUT_SAVE_MS);
   state.signingOut = false;
-  if (!saved) {
+  const unsent = hasUnsentRequest();
+  if (!saved || unsent) {
+    const text = !saved && unsent ? t("unsavedAndRequestSignOut") : saved ? t("unsentRequestSignOut") : t("unsavedSignOut");
     showNotice(notices, {
-      tone: "warning", text: t("unsavedSignOut"), dismissible: false,
+      tone: "warning", text, dismissible: false,
       actions: [
-        { label: t("signOutAnyway"), onClick: finishSignOut },
+        { label: saved ? t("signOutLoseRequest") : t("signOutAnyway"), onClick: finishSignOut },
         { label: t("stay"), onClick: () => clearNotice(notices) },
       ],
     });
@@ -791,12 +797,16 @@ async function showPiece(pieceId, viewId) {
     await Promise.race([saver.idle(), sleep(SUBMIT_SAVE_WAIT_MS)]);
     let result;
     let lateSend = null;
+    let reopen = false;
     try {
       const sent = await submitResponse(supabase, pieceId, payload, localDrafts.get(pieceId) || seed);
       result = { ok: true };
       // The piece was closed meanwhile: the server kept the send as a change request. The piece hears ok (nothing
       // was lost), and the piece opens again, closed, saying so.
       if (sent.late) lateSend = { userId: user.id, pieceId, requestId: sent.id };
+      // The server stored it, but whether as a response or as a late request could not be read: the piece hears ok
+      // and opens again as the server has it (closed or not), without guessing.
+      reopen = Boolean(lateSend) || sent.late === null;
       // The piece moves focus to its own sent screen, which says it; the portal does not announce it again.
       lastSubmittedAt = new Date().toISOString();
       sendUnshown = false;
@@ -811,10 +821,8 @@ async function showPiece(pieceId, viewId) {
     }
     render();
     if (answeringFrame) answeringFrame.respond(requestId, result);
-    if (lateSend) {
-      state.lateSend = lateSend;
-      if (viewId === state.viewId) route();
-    }
+    if (lateSend) state.lateSend = lateSend;
+    if (reopen && viewId === state.viewId) route();
   }
 
   frame = mountPiece({
