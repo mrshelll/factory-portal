@@ -15,7 +15,8 @@ export function randomNonce() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// host: { reviewerName } for globalThis.factoryHost inside the piece. onSubmit({ requestId, payload })
+// host: { reviewerName, closed, sentAt } for globalThis.factoryHost inside the piece (closed: "received" |
+// "replaced" | null; sentAt: an ISO string or null; with closed set the piece posts no draft nor dirty). onSubmit({ requestId, payload })
 // must end with respond(requestId, { ok: true } | { ok: false, error }). onNavigatedAway: the iframe
 // loaded a second document (the piece navigated or reloaded); the frame is already destroyed when it
 // is called. onSaveFailed(reason): the piece tried to keep a change that does not fit ("too-large");

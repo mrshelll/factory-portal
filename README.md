@@ -109,6 +109,15 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   edge, from the first paint. The flow review keeps
   «Ver todos los flujos» inside a flow, without the logo, and its bar is then not a banner landmark
   (`role="none"`), so the portal's masthead is the only one. Opened on its own, a piece shows its bar.
+- **Closed pieces.** `factoryHost` also carries `closed` and `sentAt`. `closed` is `"received"` (the
+  factory collected the response and is using it) or `"replaced"` (a newer version replaced it) when
+  the piece opens read-only, and `null` otherwise; anything else the portal passes becomes `null`.
+  `sentAt` is when the person sent it, an ISO string, or `null` (also when `Date.parse` rejects it).
+  The portal sanitizes both before injecting them. With `closed` set the bridge posts no
+  `factory:draft`, `factory:dirty` nor `factory:save-failed`: the piece may still write the shim (in
+  memory), but nothing leaves the iframe, so the server draft keeps the person's unsent changes.
+  `factory:flush` still answers `factory:flushed`, and `factorySubmit` still sends (the server turns a
+  send after the close into a late change request). Old pieces ignore both fields.
 - **Messages.** Each mounted piece gets a random nonce (`crypto.getRandomValues`) inside its
   injected config. The portal only accepts messages whose `event.source` is the piece iframe and that
   carry that nonce, with a known type (`factory:ready`, `factory:dirty`, `factory:draft`,

@@ -37,8 +37,15 @@
 //    "session-expired", "rejected"). A second call while one is in flight returns the same
 //    promise. Downloads are not touched, so the piece's own "Download a copy" works as usual.
 //
-// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName }`.
-//    `persistence` is "server" when the localStorage shim took, "none" otherwise. It also sets
+// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName, closed, sentAt }`.
+//    `persistence` is "server" when the localStorage shim took, "none" otherwise. `closed` is
+//    "received" or "replaced" when the piece is closed (read-only: the factory already collected it,
+//    or a newer version replaced it), null otherwise; `sentAt` is when the person sent it (an ISO
+//    string) or null. With `closed` set the bridge posts no factory:draft, factory:dirty nor
+//    factory:save-failed: the piece may still write the shim (in memory), but nothing leaves the
+//    iframe, so the server draft keeps the person's unsent changes. factory:flush still answers
+//    factory:flushed and factorySubmit still sends (the server turns it into a late change
+//    request). Both fields are sanitized in the parent before injection. It also sets
 //    `data-factory-host="portal"` on the piece's <html> before any of the piece is parsed, so the
 //    piece's CSS can drop its own brand bar inside the portal without a flash.
 //
@@ -63,6 +70,7 @@ function bridgeRuntime(cfg) {
   var nonce = cfg.nonce;
   var debounceMs = cfg.debounceMs;
   var quota = cfg.quotaChars;
+  var closed = cfg.closed; // "received" | "replaced" | null: a closed piece saves no drafts
 
   // The bridge runs first in <head>, before the piece's styles and body are parsed, so the piece's CSS
   // can hide what the portal already shows (its own brand bar) from the first paint.
@@ -155,7 +163,7 @@ function bridgeRuntime(cfg) {
   var opening = true;
   function onLocalChange() {
     refused = false;
-    if (opening) return;
+    if (opening || closed) return;
     // Tell the parent right away (without the content) so it knows there is unsaved work
     // during the debounce, e.g. for its beforeunload warning.
     if (!dirty) post({ type: "factory:dirty" });
@@ -164,7 +172,7 @@ function bridgeRuntime(cfg) {
     timer = setTimeout(sendDraft, debounceMs);
   }
   var local = makeStorage(cfg.storage, onLocalChange, function () {
-    if (refused) return;
+    if (refused || closed) return;
     refused = true;
     sendDraft(); // what fit before the refusal goes first
     post({ type: "factory:save-failed", reason: "too-large" });
@@ -175,7 +183,7 @@ function bridgeRuntime(cfg) {
 
   function sendDraft() {
     if (timer) { clearTimeout(timer); timer = null; }
-    if (!dirty) return;
+    if (!dirty || closed) return;
     dirty = false;
     post({ type: "factory:draft", storage: local.snapshot() });
   }
@@ -242,6 +250,8 @@ function bridgeRuntime(cfg) {
   define("factoryHost", Object.freeze({
     persistence: persistence ? "server" : "none",
     reviewerName: cfg.reviewerName,
+    closed: closed,
+    sentAt: cfg.sentAt,
   }));
 
   // ---- messages from the parent ------------------------------------------------------------
@@ -286,9 +296,21 @@ function cleanReviewerName(host) {
   return name || null;
 }
 
+const CLOSED_STATES = ["received", "replaced"];
+
+function cleanClosed(host) {
+  return host && CLOSED_STATES.includes(host.closed) ? host.closed : null;
+}
+
+// Any string Date.parse accepts (the portal passes the response's submitted_at); anything else is null.
+function cleanSentAt(host) {
+  const value = host && typeof host.sentAt === "string" ? host.sentAt.trim() : "";
+  return value && !Number.isNaN(Date.parse(value)) ? value : null;
+}
+
 const positiveOr = (value, fallback) => (Number.isFinite(value) && value > 0 ? value : fallback);
 
-// host: { reviewerName } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
+// host: { reviewerName, closed, sentAt } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
 export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, submitTimeoutMs = SUBMIT_TIMEOUT_MS, quotaChars = STORAGE_QUOTA_CHARS }) {
   if (typeof nonce !== "string" || !nonce) throw new Error("buildBridgeScript needs a nonce");
   const cfg = {
@@ -302,6 +324,8 @@ export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, su
     submitMaxBytes: SUBMIT_MAX_BYTES,
     submitTimeoutMs: positiveOr(submitTimeoutMs, SUBMIT_TIMEOUT_MS),
     reviewerName: cleanReviewerName(host),
+    closed: cleanClosed(host),
+    sentAt: cleanSentAt(host),
   };
   return `<script>(${bridgeRuntime.toString()})(${serializeForScript(cfg)});</script>`;
 }

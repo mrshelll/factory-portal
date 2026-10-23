@@ -334,3 +334,64 @@ test("factory:ready comes once the opening is over, and the first change after i
   win.dispatchPagehide();
   assert.deepEqual(await plain(of("factory:draft").at(-1).storage), { opened: "t0", answer: "yes" });
 });
+
+// ---- a closed piece (received or replaced): read-only, no drafts ------------------------------
+
+test("factoryHost carries closed and sentAt", () => {
+  const { win } = runBridge({ host: { reviewerName: "Ana", closed: "received", sentAt: "2026-10-22T15:00:00Z" } });
+  assert.ok(Object.isFrozen(win.factoryHost));
+  assert.equal(win.factoryHost.closed, "received");
+  assert.equal(win.factoryHost.sentAt, "2026-10-22T15:00:00Z");
+  assert.equal(runBridge({ host: { closed: "replaced", sentAt: "2026-10-22T15:00:00.123456+00:00" } }).win.factoryHost.closed, "replaced");
+  const open = runBridge().win.factoryHost;
+  assert.equal(open.closed, null, "an open piece has closed null");
+  assert.equal(open.sentAt, null);
+  assert.deepEqual(Object.keys(open).sort(), ["closed", "persistence", "reviewerName", "sentAt"]);
+});
+
+test("closed accepts only received or replaced", () => {
+  for (const closed of [undefined, null, "", "submitted", "pending", "RECEIVED", " received", true, 1, {}, ["received"]]) {
+    assert.equal(runBridge({ host: { closed } }).win.factoryHost.closed, null, String(JSON.stringify(closed)));
+  }
+  for (const host of [undefined, null, "received"]) {
+    assert.equal(runBridge({ host }).win.factoryHost.closed, null, String(JSON.stringify(host)));
+  }
+  const script = buildBridgeScript({ ...config, host: { closed: "</script><!--" } });
+  assert.equal(script.match(/<\/script/gi).length, 1, "only the final closing tag");
+});
+
+test("invalid sentAt becomes null", () => {
+  for (const sentAt of [undefined, null, "", "   ", "ayer", "2026-13-45T99:00:00Z", 1761145200000, {}, "</script>"]) {
+    assert.equal(runBridge({ host: { closed: "received", sentAt } }).win.factoryHost.sentAt, null, String(JSON.stringify(sentAt)));
+  }
+});
+
+test("closed bridge posts no draft nor dirty", async () => {
+  const { win, posted, of, fromParent } = runBridge({ host: { closed: "received", sentAt: "2026-10-22T15:00:00Z" }, storage: { k: "sent" }, quotaChars: 100 });
+  win.localStorage.setItem("k", "changed");
+  win.localStorage.other = "x";
+  win.localStorage.removeItem("other");
+  assert.equal(win.localStorage.getItem("k"), "changed", "writes still work in memory");
+  assert.throws(() => win.localStorage.setItem("big", "x".repeat(200)), (e) => e.name === "QuotaExceededError");
+  win.dispatchPagehide();
+  fromParent({ type: "factory:flush", nonce: "n-1" });
+  await new Promise((r) => setTimeout(r, 900)); // past the draft debounce
+  assert.equal(of("factory:draft").length, 0);
+  assert.equal(of("factory:dirty").length, 0);
+  assert.equal(of("factory:save-failed").length, 0, "nothing is saved, so nothing fails to save");
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:flushed"]);
+});
+
+test("closed bridge still answers flush and submit", async () => {
+  const { win, of, fromParent } = runBridge({ host: { closed: "replaced", sentAt: null } });
+  win.localStorage.setItem("k", "v");
+  fromParent({ type: "factory:flush", nonce: "n-1" });
+  assert.equal(of("factory:flushed").length, 1);
+  const result = win.factorySubmit(questions());
+  const [submit] = of("factory:submit");
+  assert.deepEqual(submit.payload, questions());
+  assert.equal(submit.nonce, "n-1");
+  assert.equal(of("factory:draft").length, 0, "submit does not flush a draft either");
+  fromParent({ type: "factory:submit-result", nonce: "n-1", requestId: submit.requestId, ok: true });
+  assert.deepEqual(await plain(result), { ok: true });
+});

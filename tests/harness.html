@@ -31,7 +31,7 @@ let frame = null;
 
 const harness = {
   events: [],
-  // options: { host: { reviewerName }, submitTimeoutMs, quotaChars, autoRespond }. Without autoRespond, a send
+  // options: { host: { reviewerName, closed, sentAt }, submitTimeoutMs, quotaChars, autoRespond }. Without autoRespond, a send
   // waits until the test calls harness.respond(requestId, result).
   mount(html, kind, storage = {}, options = {}) {
     if (frame) frame.destroy();
