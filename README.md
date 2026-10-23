@@ -178,8 +178,17 @@ empty state).
   functions (`factory_preview`, `factory_publish`, `factory_fetch`, `factory_mark_fetched`, execute
   for `service_role` only) and `keep_alive()`. Its name carries the version Supabase registered. It is
   idempotent.
+- `20261023120000_piece_closure.sql` is the piece closure: the `received` status (the factory collected
+  a complete response, so the piece closes), `storage` on responses, the `piece_change_requests` table
+  (each person reads only their own), `submit_response` with an optional storage (a send on a closed
+  piece is kept as a late change request), `request_change` for the person, `factory_publish` also
+  replacing `submitted` and `received` pieces, and the factory-only functions `factory_mark_received`,
+  `factory_reopen`, `factory_fetch_change_requests` and `factory_mark_change_requests_fetched` (execute
+  for `service_role` only). Not applied to `factory` yet. It is idempotent.
 
-`tests/sql/factory-connection-checks.sql` checks that migration against the database (see its header).
+`tests/sql/factory-connection-checks.sql` checks the factory connection migration and
+`tests/sql/piece-closure-checks.sql` checks the piece closure, both against the database (see their
+headers).
 
 ## Keeping Supabase awake
 
@@ -284,7 +293,7 @@ portal at the width a person sees them.
 | `index.html`, `css/portal.css` | Page shell and the portal's own styles (on top of the brand and its components) |
 | `brand/` | Generated copy of the ninben brand (`ninben.css`, `ninben-components.css`, `logo.svg`, `fonts/`) |
 | `scripts/sync-brand.mjs` | Copies the brand from the software factory repo, or checks the copy |
-| `supabase/migrations/` | Schema: the baseline recovery snapshot and the factory connection |
+| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection and the piece closure |
 | `.github/workflows/keep-alive.yml` | Calls `keep_alive()` every 3 days so Supabase does not pause |
 | `config.js` | Public Supabase configuration |
 | `js/app.js` | Router and screens: sign in, home, piece |
