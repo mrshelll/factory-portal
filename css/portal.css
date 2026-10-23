@@ -109,6 +109,12 @@ main { padding-block: var(--space-6) var(--space-7); }
 .piece-title { font-size: var(--text-body); font-weight: 600; line-height: 1.3; }
 .piece-status { color: var(--muted); font-size: var(--text-small); }
 .piece-layout .notices { margin: 0 0 var(--space-3); }
+/* A closed piece (received, or a replaced version that was sent): its notices, the earlier change requests and the
+   request form, one under the other in the pinned zone; their texts keep the reading measure. */
+.closure { display: grid; gap: var(--space-3); }
+.change-request-lines { display: grid; gap: var(--space-1); }
+.change-request-lines:empty, .change-request-slot:empty { display: none; }
+.change-request-lines p, .change-request-sent { max-width: var(--measure-text); }
 /* The piece takes the frame's box, its margins included, and starts its content at the frame's margin
    itself (the factory's pieces do so inside the portal, with the same 16/24 px margin and the same 672 px
    tier, measured on the iframe, which is as wide as the window up to the frame's cap). So its content

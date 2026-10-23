@@ -11,6 +11,10 @@
 // With --demo, the demo sheet also sends through the app (error, then success: one row), and a replaced
 // version opened from an old email shows its fixed notice with a link to the newer one and still sends.
 //
+// With --questions, the piece closure too (closureChecks): a received piece and a replaced version that was sent, in
+// the list and opened read only with «Pedir un cambio»; the change request form; and a send that arrived after the
+// close. Screenshots <name>-<width>-<scheme>.png at 320, 768 and 1440, light and dark.
+//
 // Screen snapshots: the sign-in screens (email step, code step) and home (with pieces, empty) are
 // saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
@@ -23,6 +27,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -447,6 +452,8 @@ const IDS = {
   flow: "55555555-5555-4555-8555-555555555555",
   demo: "77777777-7777-4777-8777-777777777777",
   replaced: "88888888-8888-4888-8888-888888888888",
+  questionsNew: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  replacedDraft: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 };
 const EXPIRED = { code: "PGRST303", message: "JWT expired", details: null, hint: null };
 
@@ -456,6 +463,32 @@ function fakeSession(user = USER) {
   const jwt = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: user.id, email: user.email, exp: now + 3600, role: "authenticated", aud: "authenticated" })}.sig`;
   return { access_token: jwt, token_type: "bearer", expires_in: 3600, expires_at: now + 3600, refresh_token: "fake-refresh",
     user: { id: user.id, email: user.email, aud: "authenticated", role: "authenticated" } };
+}
+
+// The PostgREST filters the stand-in understands on piece_responses and piece_change_requests: eq, neq and in.(…) on
+// any column, then order (column.asc|desc, comma-separated) and limit.
+function queryRows(rows, url) {
+  let out = rows.filter((row) => [...url.searchParams].every(([key, value]) => {
+    if (["select", "order", "limit", "offset"].includes(key)) return true;
+    const cell = String(row[key]);
+    if (value.startsWith("eq.")) return cell === value.slice(3);
+    if (value.startsWith("neq.")) return cell !== value.slice(4);
+    if (value.startsWith("in.(")) return value.slice(4, -1).split(",").includes(cell);
+    return true;
+  }));
+  const order = url.searchParams.get("order");
+  if (order) {
+    const keys = order.split(",").map((part) => part.split("."));
+    out = [...out].sort((a, b) => {
+      for (const [key, dir] of keys) {
+        const c = String(a[key] ?? "").localeCompare(String(b[key] ?? ""));
+        if (c) return dir === "desc" ? -c : c;
+      }
+      return 0;
+    });
+  }
+  const limit = Number(url.searchParams.get("limit"));
+  return limit > 0 ? out.slice(0, limit) : out;
 }
 
 function tokenSubject(request) {
@@ -498,11 +531,8 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         const draft = sub && sub !== USER.id ? backend.draftBy[sub] : backend.draft;
         return json(draft ? [{ storage: draft, updated_at: backend.draftUpdatedAt || new Date().toISOString() }] : []);
       }
-      case "piece_responses": {
-        const eq = url.searchParams.get("piece_id");
-        const sent = backend.submits.filter((b) => !eq || `eq.${b.p_piece_id}` === eq);
-        return json(sent.length ? [{ id: "r1", submitted_at: backend.submittedAt }] : []);
-      }
+      case "piece_responses": return json(queryRows(backend.responseRows(), url));
+      case "piece_change_requests": return json(queryRows(backend.changeRequests, url));
       case "rpc/save_draft": {
         if (backend.authExpired) { backend.expiredSaves += 1; return json(EXPIRED, 401); }
         if (backend.saveFails) return route.abort("internetdisconnected");
@@ -511,15 +541,41 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         if (backend.saveDelayMs) await sleep(backend.saveDelayMs);
         // The server copy changes only when the save completes, and it is the caller's own.
         if (sub && sub !== USER.id) backend.draftBy[sub] = body.p_storage;
-        else backend.draft = body.p_storage;
+        else { backend.draft = body.p_storage; backend.draftUpdatedAt = new Date().toISOString(); }
         return route.fulfill({ status: 204 });
       }
       case "rpc/submit_response":
         if (backend.authExpired) return json(EXPIRED, 401);
         if (backend.submitMode === "network") return route.abort("internetdisconnected");
         if (backend.submitMode === "rejected") return json({ code: "P0001", message: "boom", details: null, hint: null }, 400);
-        backend.submits.push(request.postDataJSON()); backend.submittedAt = new Date().toISOString();
+        {
+          const body = request.postDataJSON();
+          // On a closed assignment the server keeps the send as a late change request (piece closure migration).
+          if (backend.closedOnServer(body.p_piece_id)) {
+            const id = randomUUID();
+            backend.lateSubmits.push(body);
+            backend.changeRequests.push({ id, piece_id: body.p_piece_id, member_id: IDS.member, text: null, payload: body.p_payload,
+              storage: body.p_storage ?? null, late: true, created_at: new Date().toISOString() });
+            return json(id);
+          }
+          backend.submittedAt = new Date().toISOString();
+          backend.submits.push({ ...body, submitted_at: backend.submittedAt });
+        }
         return json("66666666-6666-4666-8666-666666666666");
+      case "rpc/request_change": {
+        if (backend.authExpired) return json(EXPIRED, 401);
+        if (backend.requestMode === "network") return route.abort("internetdisconnected");
+        if (backend.requestMode === "rejected") return json({ code: "23514", message: "new row violates check constraint", details: null, hint: null }, 400);
+        const body = request.postDataJSON();
+        backend.requestCalls.push(body);
+        if (backend.requestDelayMs) await sleep(backend.requestDelayMs);
+        if (!backend.closedOnServer(body.p_piece_id)) return json({ code: "55000", message: "request_change: the piece is not closed", details: null, hint: null }, 400);
+        if (!/[^\s]/.test(body.p_text || "")) return json({ code: "22023", message: "request_change: the text is required", details: null, hint: null }, 400);
+        const id = randomUUID();
+        backend.changeRequests.push({ id, piece_id: body.p_piece_id, member_id: IDS.member, text: body.p_text.trim(), payload: null,
+          storage: body.p_storage ?? null, late: false, created_at: new Date().toISOString() });
+        return json(id);
+      }
       default: return json({ message: `unexpected ${table}` }, 404);
     }
   });
@@ -529,6 +585,9 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
 function newBackend(html, flowHtml, demoHtml) {
   const backend = {
     requests: [], drafts: [], submits: [], draft: null, submittedAt: null, submitMode: "ok", authExpired: false,
+    // The piece closure: responses stored before the run (with storage and partial), assignment fields set by hand
+    // (patch: pieceId -> { status, updated_at }), more assignments, change requests, and the calls that made them.
+    responses: [], patch: {}, extraAssignments: [], changeRequests: [], requestCalls: [], lateSubmits: [], requestMode: "ok", requestDelayMs: 0,
     readsExpired: false, expiredSaves: 0, draftBy: {}, saveFails: false, saveDelayMs: 0, logoutFails: false, draftUpdatedAt: null,
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
@@ -539,7 +598,21 @@ function newBackend(html, flowHtml, demoHtml) {
       { id: IDS.replaced, project_id: IDS.project, kind: "demo_review", title: "Demo v1", revision: 1, language: "es", created_at: "2026-10-01T15:00:00Z" },
     ],
     html: { [IDS.questions]: html, [IDS.flow]: flowHtml || "<!doctype html><title>x</title>", [IDS.demo]: demoHtml || "<!doctype html><title>x</title>" },
+    // Every response row: the ones stored before the run, then one per send of this run (newest send time last).
+    responseRows() {
+      return [...backend.responses, ...backend.submits.map((s, i) => ({ id: `r${i + 1}`, piece_id: s.p_piece_id, member_id: IDS.member,
+        submitted_at: s.submitted_at || backend.submittedAt, storage: s.p_storage ?? null, partial: false }))];
+    },
+    // As private.assignment_closed: received, or replaced after a response that is not partial.
+    closedOnServer(pieceId) {
+      const row = backend.assignments(USER.id).find((a) => a.piece_id === pieceId);
+      return Boolean(row) && (row.status === "received" ||
+        (row.status === "replaced" && backend.responseRows().some((r) => r.piece_id === pieceId && r.partial === false)));
+    },
     assignments() {
+      return backend.baseAssignments().concat(backend.extraAssignments).map((a) => (backend.patch[a.piece_id] ? { ...a, ...backend.patch[a.piece_id] } : a));
+    },
+    baseAssignments() {
       return [
         { piece_id: IDS.questions, member_id: IDS.member, status: backend.submits.length ? "submitted" : backend.draft ? "in_progress" : "pending", assigned_at: "2026-10-16T15:00:00Z", updated_at: "2026-10-16T15:00:00Z" },
         { piece_id: IDS.flow, member_id: IDS.member, status: "submitted", assigned_at: "2026-10-10T15:00:00Z", updated_at: "2026-10-12T15:00:00Z" },
@@ -1295,6 +1368,362 @@ async function sessionReturnsChecks(browser, base, html) {
   await context.close();
 }
 
+// ---- the piece closure, in the app ----------------------------------------------------------------
+// A received piece (the factory collected it) opens read only with what was sent, a pinned notice that says why it
+// cannot change and «Pedir un cambio»; a replaced version the person had sent, the same with today's notice and its
+// link; the list says «Recibida»; and a send from a tab left open after the close comes back as a change request,
+// which the re-opened piece says above its notice (spec 2026-10-22 cierre de piezas §3.2-§3.4, §3.6). At 320, 768 and
+// 1440, light and dark, with screenshots <name>-<width>-<scheme>.png in <out>.
+const CLOSURE = {
+  received: (date) => `La recibimos el ${date} y ya la estamos usando, así que aquí no se puede cambiar. Si necesitas cambiar algo, pide un cambio.`,
+  replaced: "Hay una versión más nueva de esto. Lo que marques aquí se guarda solo en esta página y no le llega a nadie hasta que lo envíes. Lo mejor es responder la versión nueva; si ya terminaste esta, envíala y también le llega a quien te la compartió.",
+  late: "Ya la habíamos recibido cuando la enviaste, así que tu envío llegó como pedido de cambio. Quien lleva el proyecto lo revisa.",
+  action: "Pedir un cambio",
+  label: "Qué quieres cambiar y por qué",
+  hint: "Quien lleva el proyecto lo lee y decide. Lo que enviaste no cambia.",
+  send: "Enviar el pedido",
+  unsent: "Tenías cambios sin enviar: se guardaron y van con tu pedido.",
+  empty: "Escribe qué quieres cambiar.",
+  sending: "Enviando…",
+  sentPrefix: "Tu pedido de cambio llegó el ",
+  failed: "No se pudo enviar el pedido. Revisa tu conexión y vuelve a intentarlo.",
+  earlier: (date) => `Pediste un cambio el ${date}.`,
+  listReceived: "Recibida",
+  listNewer: "Hay una versión más nueva",
+  listRequested: (date) => `Pediste un cambio el ${date}`,
+};
+const SENT_AT = "2026-10-17T15:00:00.000Z";
+const RECEIVED_AT = "2026-10-18T15:00:00.000Z";
+const REQUESTED_AT = "2026-10-20T12:00:00.000Z";
+const isPlain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const answersIn = (storage) => { try { return JSON.parse(storage[QUESTIONS_KEY]).respuestas || {}; } catch { return {}; } };
+const formatIn = (page, iso, withTime = false) => page.evaluate(async ([value, time]) => (await import("./js/i18n.js")).formatDate("es", value, { withTime: time }), [iso, withTime]);
+const pinnedNotices = (page) => page.evaluate(() => [...document.querySelectorAll("[data-rol=aviso-fijo] .notice")].map((n) => ({
+  text: n.querySelector("p").textContent, tone: [...n.classList].find((c) => c.startsWith("notice--")) || null,
+  links: [...n.querySelectorAll("a")].map((a) => ({ label: a.textContent, href: a.getAttribute("href") })),
+  buttons: [...n.querySelectorAll("button")].map((b) => b.textContent) })));
+const pinnedText = (page) => page.evaluate(() => document.querySelector("[data-rol=aviso-fijo]")?.innerText || "");
+// The change request form, as the person sees it: its label, what describes the field (hint, unsent line, error), the
+// field and its one button.
+const requestForm = (page) => page.evaluate(() => {
+  const area = document.getElementById("change-request-text");
+  if (!area) return null;
+  const form = area.closest("form");
+  const label = document.querySelector('label[for="change-request-text"]');
+  const described = (area.getAttribute("aria-describedby") || "").split(" ").filter(Boolean).map((id) => document.getElementById(id))
+    .filter((el) => el && !el.hidden).map((el) => el.textContent);
+  const button = form && form.querySelector("button[type=submit]");
+  return { label: label && label.textContent, described, maxlength: area.getAttribute("maxlength"), tag: area.tagName, value: area.value,
+    invalid: area.getAttribute("aria-invalid"), focused: document.activeElement === area, text: form ? form.innerText : "",
+    alert: form && form.querySelector("[role=alert]") ? form.querySelector("[role=alert]").textContent : null,
+    button: button && { text: button.textContent, disabled: button.disabled, primary: button.classList.contains("button--primary") },
+    inPinned: Boolean(area.closest("[data-rol=aviso-fijo]")), buttons: form ? form.querySelectorAll("button").length : 0 };
+});
+const pieceHost = (frame) => frame.evaluate(() => ({ closed: factoryHost.closed, sentAt: factoryHost.sentAt,
+  h1: document.querySelector("h1") && document.querySelector("h1").textContent, text: document.body.innerText,
+  answers: Object.keys(ST.respuestas || {}).sort(), quien: ST.respuestas["q-002"] ? ST.respuestas["q-002"].quien || null : null,
+  sendButton: [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Enviar respuestas") }));
+const requestButton = (page) => page.getByRole("button", { name: CLOSURE.action, exact: true });
+const sendRequestButton = (page) => page.locator("#change-request-text").locator("xpath=ancestor::form").locator("button[type=submit]");
+// A control that is not there fails its check, it does not stop the run.
+const tap = (locator) => locator.click({ timeout: 3000 }).catch(() => {});
+const typeRequest = (page, text) => page.fill("#change-request-text", text, { timeout: 3000 }).catch(() => {});
+const requestCallCount = (backend) => backend.requests.filter((r) => r === "POST /rest/v1/rpc/request_change").length;
+
+// What the questions piece stores when the person sends (the storage a response carries): two answers, sent through the
+// app. It also checks that a send passes that storage to submit_response.
+async function sentQuestionsStorage(browser, base, html) {
+  const backend = newBackend(html);
+  const context = await mockedContext(browser, { backend });
+  const page = await context.newPage();
+  await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+  const frame = await appPiece(page);
+  await frame.evaluate(() => { responder("q-001", "si"); responder("q-002", "no_se"); escribir("q-002", "quien", "Luis"); });
+  await sendQuestions(frame);
+  const sent = await settledSend(frame);
+  const body = backend.submits[0];
+  check("closure: a send passes the piece's storage to submit_response as p_storage", sent && sent.sent && body && isPlain(body.p_storage) &&
+    answersIn(body.p_storage)["q-002"]?.quien === "Luis", body ? JSON.stringify(Object.keys(body)) : "no call");
+  await sleep(1200); // the draft with the sent mark has been saved
+  const storage = body && isPlain(body.p_storage) ? body.p_storage : backend.draft;
+  await context.close();
+  return storage;
+}
+
+// A questions piece the factory received: sent on SENT_AT with `storage`, closed on RECEIVED_AT; the server draft is
+// the same, saved a second after the send (within the grace: nothing unsent).
+function closedBackend(html, storage, status = "received") {
+  const backend = newBackend(html);
+  backend.patch[IDS.questions] = { status, updated_at: RECEIVED_AT };
+  backend.responses.push({ id: "r-sent", piece_id: IDS.questions, member_id: IDS.member, submitted_at: SENT_AT, storage, partial: false });
+  backend.draft = storage;
+  backend.draftUpdatedAt = "2026-10-17T15:00:01.000Z";
+  return backend;
+}
+const earlierRequest = (pieceId) => ({ id: randomUUID(), piece_id: pieceId, member_id: IDS.member, text: "Otra cosa", payload: null, storage: null,
+  late: false, created_at: REQUESTED_AT });
+function newerQuestions(backend, html) {
+  backend.pieces.push({ id: IDS.questionsNew, project_id: IDS.project, kind: "questions", title: "Preguntas sobre Biblioteca del barrio, ronda 2",
+    revision: 2, language: "es", created_at: "2026-10-20T15:00:00Z" });
+  backend.extraAssignments.push({ piece_id: IDS.questionsNew, member_id: IDS.member, status: "pending", assigned_at: "2026-10-20T15:00:00Z", updated_at: "2026-10-20T15:00:00Z" });
+  backend.html[IDS.questionsNew] = html;
+}
+
+async function closureChecks(browser, base, html) {
+  const storage = await sentQuestionsStorage(browser, base, html);
+  if (!isPlain(storage) || !answersIn(storage)["q-001"]) { check("closure: the sent storage of the questions piece was captured", false); return; }
+  async function open(backend, width, scheme, hash) {
+    const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: scheme });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    // The failures these checks force (offline, a 400, a 401) log their failed request; anything else is an error.
+    page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(m.text()); });
+    await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+    return { context, page, errors };
+  }
+  const shot = (page, name, width, scheme) => page.screenshot({ path: join(outDir, `${name}-${width}-${scheme}.png`), fullPage: true });
+  const runs = [[320, "light"], [320, "dark"], [768, "light"], [768, "dark"], [1440, "light"], [1440, "dark"]];
+
+  for (const [width, scheme] of runs) {
+    const tag = `closure ${width}px ${scheme}`;
+    const first = width === 320 && scheme === "light";
+
+    // list-received: a received piece, a closed replaced version and a change request, in the list.
+    {
+      const backend = closedBackend(html, storage);
+      backend.changeRequests.push(earlierRequest(IDS.questions));
+      backend.responses.push({ id: "r-v1", piece_id: IDS.replaced, member_id: IDS.member, submitted_at: "2026-10-05T15:00:00.000Z", storage: null, partial: false });
+      backend.pieces.push({ id: IDS.replacedDraft, project_id: IDS.project, kind: "flow_review", title: "Recorrido de flujos v1", revision: 1, language: "es", created_at: "2026-10-02T15:00:00Z" });
+      backend.extraAssignments.push({ piece_id: IDS.replacedDraft, member_id: IDS.member, status: "replaced", assigned_at: "2026-10-02T15:00:00Z", updated_at: "2026-10-10T15:00:00Z" });
+      backend.responses.push({ id: "r-partial", piece_id: IDS.replacedDraft, member_id: IDS.member, submitted_at: "2026-10-10T15:00:00.000Z", storage: null, partial: true });
+      backend.patch[IDS.demo] = { status: "pending" };
+      const { context, page, errors } = await open(backend, width, scheme, "");
+      await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+      const rows = await page.$$eval(".row", (els) => els.map((e) => ({ text: e.textContent, status: e.querySelector(".status")?.className || "" })));
+      const meta = await page.$$eval(".page-meta", (els) => els.map((e) => e.textContent));
+      const row = (title) => rows.find((r) => r.text.includes(title));
+      const received = row("Preguntas sobre Biblioteca del barrio");
+      const requested = CLOSURE.listRequested(await formatIn(page, REQUESTED_AT));
+      check(`${tag}: list: a received piece says «Recibida» with the done style`, received && received.text.includes(CLOSURE.listReceived) &&
+        received.status.includes("status--done") && !received.text.includes("Enviada"), JSON.stringify(received));
+      check(`${tag}: list: the piece with a change request says «${requested}»`, received && received.text.includes(requested), JSON.stringify(received));
+      const old = row("Demo v1");
+      check(`${tag}: list: a replaced version that was sent shows as «Recibida» with «${CLOSURE.listNewer}»`, old && old.text.includes(CLOSURE.listReceived) &&
+        old.text.includes(CLOSURE.listNewer) && old.status.includes("status--done"), JSON.stringify(old));
+      check(`${tag}: list: a replaced version with only a collected draft stays out`, !row("Recorrido de flujos v1") && rows.length === 4, JSON.stringify(rows.map((r) => r.text)));
+      check(`${tag}: list: «por responder» leaves out the sent and the received pieces`, meta.includes("1 por responder"), JSON.stringify(meta));
+      check(`${tag}: list: no horizontal scroll`, await noHorizontalScroll(page));
+      await shot(page, "list-received", width, scheme);
+      if (first) await snapshot(page, "home-received", "lista");
+      check(`${tag}: list: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // closed-received, then request-empty-error and request-sent on the same screen.
+    {
+      const backend = closedBackend(html, storage);
+      // A newer partial response (a draft the factory collected) never counts as what was sent.
+      backend.responses.push({ id: "r-partial", piece_id: IDS.questions, member_id: IDS.member, submitted_at: "2026-10-19T15:00:00.000Z",
+        storage: { [QUESTIONS_KEY]: "{}" }, partial: true });
+      backend.changeRequests.push(earlierRequest(IDS.questions));
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      const frame = await appPiece(page);
+      const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
+      const receivedText = CLOSURE.received(await formatIn(page, RECEIVED_AT));
+      check(`${tag}: closed: one pinned notice says it was received and is in use, with «${CLOSURE.action}» and no «Cerrar aviso»`,
+        notices.length === 1 && notices[0].text === receivedText && notices[0].tone === "notice--info" && notices[0].buttons.includes(CLOSURE.action) &&
+        !notices[0].buttons.includes("Cerrar aviso"), JSON.stringify(notices));
+      const earlier = CLOSURE.earlier(await formatIn(page, REQUESTED_AT));
+      check(`${tag}: closed: an earlier request shows as «${earlier}» under the notice`, (await pinnedText(page)).includes(earlier), await pinnedText(page));
+      const host = frame && await pieceHost(frame);
+      check(`${tag}: closed: the piece is mounted closed ("received") with the send time`, host && host.closed === "received" && host.sentAt === SENT_AT, JSON.stringify(host && { closed: host.closed, sentAt: host.sentAt }));
+      check(`${tag}: closed: the piece shows what was sent, read only («Lo que enviaste», no «Enviar respuestas»)`, host && host.h1 === "Lo que enviaste" &&
+        !host.sendButton && host.quien === "Luis" && host.text.includes("Luis"), JSON.stringify(host && { h1: host.h1, answers: host.answers, quien: host.quien }));
+      check(`${tag}: closed: no request form until the person asks for it`, !(await requestForm(page)));
+      const line = await page.evaluate(() => { const s = document.querySelector(".piece-status"); return s && !s.hidden ? s.textContent : ""; });
+      check(`${tag}: closed: the status line says nothing (the piece says when it was sent)`, line === "", line);
+      check(`${tag}: closed: no horizontal scroll`, await noHorizontalScroll(page));
+      await shot(page, "closed-received", width, scheme);
+
+      await tap(requestButton(page));
+      const form = await waitFor(() => requestForm(page), 3000);
+      check(`${tag}: request: the form opens below the notice with its label, hint, a 4000-character field and «${CLOSURE.send}»`, form && form.inPinned &&
+        form.label === CLOSURE.label && form.described.includes(CLOSURE.hint) && form.tag === "TEXTAREA" && form.maxlength === "4000" &&
+        form.button && form.button.text === CLOSURE.send && form.button.primary && form.buttons === 1, JSON.stringify(form));
+      check(`${tag}: request: without changes left unsent, no line about them`, form && !form.text.includes(CLOSURE.unsent), form && form.text);
+      await tap(sendRequestButton(page));
+      const empty = await waitFor(async () => { const f = await requestForm(page); return f && f.described.includes(CLOSURE.empty) ? f : null; }, 3000);
+      check(`${tag}: request: sent empty, the field says «${CLOSURE.empty}», is marked invalid and takes the focus`, empty && empty.invalid === "true" && empty.focused &&
+        requestCallCount(backend) === 0, JSON.stringify(empty));
+      await typeRequest(page, "   \n ");
+      await tap(sendRequestButton(page));
+      await sleep(200);
+      const blank = await requestForm(page);
+      check(`${tag}: request: only spaces is empty too, and nothing is sent`, blank && blank.described.includes(CLOSURE.empty) && requestCallCount(backend) === 0, JSON.stringify(blank));
+      if (scheme === "light") {
+        const axe = await axeViolations(page);
+        if (axe) check(`${tag}: request: axe on the closed piece with the form has no violations`, axe.length === 0, axe.join(", "));
+      }
+      check(`${tag}: request: no horizontal scroll with the form open`, await noHorizontalScroll(page));
+      await shot(page, "request-empty-error", width, scheme);
+
+      // A failure keeps the form, the text and an error in the page.
+      await typeRequest(page, "  Quiero cambiar la fecha de entrega.  ");
+      backend.requestMode = "network";
+      await tap(sendRequestButton(page));
+      const failed = await waitFor(async () => { const f = await requestForm(page); return f && f.alert === CLOSURE.failed && f.button.text === CLOSURE.send ? f : null; }, 5000);
+      check(`${tag}: request: a network failure says «${CLOSURE.failed}» in the form and keeps the text`, failed && failed.value.includes("Quiero cambiar la fecha") &&
+        !failed.button.disabled && failed.invalid !== "true", JSON.stringify(failed));
+      backend.requestMode = "rejected";
+      const before = requestCallCount(backend);
+      await tap(sendRequestButton(page));
+      const rejected = await waitFor(async () => { const f = await requestForm(page); return requestCallCount(backend) > before && f && f.alert === CLOSURE.failed && f.button.text === CLOSURE.send ? f : null; }, 5000);
+      check(`${tag}: request: a rejection from the server (23514) says the same, and the form stays`, rejected, JSON.stringify(rejected));
+      if (first) {
+        backend.authExpired = true;
+        await tap(sendRequestButton(page));
+        const ask = await waitFor(async () => page.evaluate(() => {
+          const n = document.querySelector("[data-rol=avisos] .notice[role=alert]");
+          return n && n.textContent.includes("Tu sesión terminó") && n.textContent.includes("Entrar de nuevo") ? n.textContent : null;
+        }), 5000);
+        const kept = await requestForm(page);
+        check(`${tag}: request: a session that ended asks to sign in again, as a send does, and keeps the text`, ask && kept && kept.value.includes("Quiero cambiar la fecha"), String(ask));
+        backend.authExpired = false;
+      }
+      backend.requestMode = "ok";
+      backend.requestDelayMs = 800;
+      await tap(sendRequestButton(page));
+      const busy = await waitFor(async () => { const f = await requestForm(page); return f && f.button.disabled && f.button.text === CLOSURE.sending ? f : null; }, 3000);
+      check(`${tag}: request: while sending, the button is off and says «${CLOSURE.sending}»`, busy, JSON.stringify(busy));
+      const done = await waitFor(async () => { const t = await pinnedText(page); return t.includes(CLOSURE.sentPrefix) && !(await requestForm(page)) ? t : null; }, 5000);
+      const call = backend.requestCalls.at(-1);
+      check(`${tag}: request: request_change gets the trimmed text and no storage (nothing unsent)`, call && call.p_piece_id === IDS.questions &&
+        call.p_text === "Quiero cambiar la fecha de entrega." && call.p_storage === null && backend.changeRequests.filter((r) => !r.late).length === 2, JSON.stringify(call));
+      const confirmation = done && done.split("\n").find((l) => l.startsWith(CLOSURE.sentPrefix));
+      check(`${tag}: request: the form is replaced in place by «${CLOSURE.sentPrefix}<fecha y hora>.»`, confirmation && /\d:\d\d/.test(confirmation) && confirmation.endsWith("."), String(confirmation || done));
+      const live = await page.textContent("#main > [role=status]");
+      check(`${tag}: request: the live region announces it`, confirmation && live === confirmation, live);
+      check(`${tag}: request: no error is left in the page`, !(await page.$("[data-rol=aviso-fijo] [role=alert], [data-rol=avisos] .notice")), await page.evaluate(() => document.querySelector("[data-rol=avisos]").innerText));
+      await shot(page, "request-sent", width, scheme);
+      // Another request: the confirmation becomes one more «Pediste un cambio el …» line, and a new empty form opens.
+      await tap(requestButton(page));
+      const again = await waitFor(() => requestForm(page), 3000);
+      const lines = (await pinnedText(page)).split("\n").filter((l) => l.startsWith("Pediste un cambio el "));
+      check(`${tag}: request: asking again keeps the first one as a line and opens an empty form`, again && again.value === "" && lines.length === 2 &&
+        !(await pinnedText(page)).includes(CLOSURE.sentPrefix), JSON.stringify({ lines, value: again && again.value }));
+      check(`${tag}: closed: nothing was saved as a draft`, backend.drafts.length === 0, `${backend.drafts.length} save_draft call(s)`);
+      check(`${tag}: closed: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // closed-replaced: a version the person had sent, replaced by a newer one.
+    {
+      const backend = closedBackend(html, storage, "replaced");
+      newerQuestions(backend, html);
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      const frame = await appPiece(page);
+      const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
+      check(`${tag}: replaced: the pinned notice is today's, with the link to the newer version and «${CLOSURE.action}»`, notices.length === 1 &&
+        notices[0].text === CLOSURE.replaced && notices[0].links.length === 1 && notices[0].links[0].href === `#/piece/${IDS.questionsNew}` &&
+        notices[0].links[0].label === "Abrir la versión nueva" && notices[0].buttons.includes(CLOSURE.action) && !notices[0].buttons.includes("Cerrar aviso"), JSON.stringify(notices));
+      const host = frame && await pieceHost(frame);
+      check(`${tag}: replaced: the piece is mounted closed ("replaced") and shows what was sent`, host && host.closed === "replaced" && host.sentAt === SENT_AT &&
+        host.h1 === "Lo que enviaste" && !host.sendButton && host.quien === "Luis", JSON.stringify(host && { closed: host.closed, h1: host.h1 }));
+      await shot(page, "closed-replaced", width, scheme);
+      await tap(requestButton(page));
+      await waitFor(() => requestForm(page), 3000);
+      await typeRequest(page, "Cambia mi respuesta de la primera pregunta");
+      await tap(sendRequestButton(page));
+      const done = await waitFor(async () => ((await pinnedText(page)).includes(CLOSURE.sentPrefix) ? true : null), 5000);
+      check(`${tag}: replaced: a change request reaches request_change`, done && backend.requestCalls.length === 1 && backend.requestCalls[0].p_piece_id === IDS.questions, JSON.stringify(backend.requestCalls));
+      check(`${tag}: replaced: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // request-with-unsent: the draft is newer than the send by more than the grace.
+    {
+      const backend = closedBackend(html, storage);
+      const state = JSON.parse(storage[QUESTIONS_KEY]);
+      state.respuestas = { ...state.respuestas, "q-004": { ...state.respuestas["q-001"] } };
+      const draft = { ...storage, [QUESTIONS_KEY]: JSON.stringify(state) };
+      backend.draft = draft;
+      backend.draftUpdatedAt = "2026-10-17T15:01:00.000Z";
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      const frame = await appPiece(page);
+      const host = frame && await pieceHost(frame);
+      check(`${tag}: unsent: the piece shows what was sent, not the newer draft`, host && host.closed === "received" && !host.answers.includes("q-004") &&
+        host.answers.includes("q-001"), JSON.stringify(host && host.answers));
+      await tap(requestButton(page));
+      const form = await waitFor(() => requestForm(page), 3000);
+      check(`${tag}: unsent: the form says «${CLOSURE.unsent}»`, form && form.described.includes(CLOSURE.unsent) && form.text.includes(CLOSURE.unsent), JSON.stringify(form));
+      await typeRequest(page, "Me faltó la cuarta pregunta");
+      await shot(page, "request-with-unsent", width, scheme);
+      await tap(sendRequestButton(page));
+      await waitFor(async () => ((await pinnedText(page)).includes(CLOSURE.sentPrefix) ? true : null), 5000);
+      const call = backend.requestCalls[0];
+      check(`${tag}: unsent: the draft goes with the request as p_storage`, call && JSON.stringify(call.p_storage) === JSON.stringify(draft), JSON.stringify(call && Object.keys(call.p_storage || {})));
+      check(`${tag}: unsent: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // late-send: a tab left open on a sent piece; the factory receives it; the person changes something and sends.
+    {
+      const backend = closedBackend(html, storage, "submitted");
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      const frame = await appPiece(page);
+      const hostBefore = frame && await pieceHost(frame);
+      check(`${tag}: late: before the close the piece opens as today (not closed)`, hostBefore && hostBefore.closed === null, JSON.stringify(hostBefore && hostBefore.closed));
+      await frame.evaluate(() => { if (isSent()) editar(); responder("q-004", "si"); });
+      await waitFor(() => backend.drafts.length > 0, 5000);
+      const closedAt = new Date().toISOString();
+      backend.patch[IDS.questions] = { status: "received", updated_at: closedAt };
+      await sendQuestions(frame);
+      await waitFor(() => backend.lateSubmits.length > 0, 8000);
+      const late = backend.lateSubmits[0];
+      check(`${tag}: late: the send on the closed piece reaches submit_response with p_storage`, late && isPlain(late.p_storage) && answersIn(late.p_storage)["q-004"] &&
+        late.p_payload && late.p_payload.formato === "respuestas-fabrica/1" && backend.submits.length === 0, JSON.stringify(late && Object.keys(late)));
+      const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length === 2 ? n : null; }, 8000) || await pinnedNotices(page);
+      const receivedText = CLOSURE.received(await formatIn(page, closedAt));
+      check(`${tag}: late: the re-opened piece says the send arrived as a change request, pinned above the received notice`, notices.length === 2 &&
+        notices[0].text === CLOSURE.late && !notices[0].buttons.includes(CLOSURE.action) && notices[1].text === receivedText &&
+        notices[1].buttons.includes(CLOSURE.action), JSON.stringify(notices));
+      const reopened = await appPiece(page);
+      const host = reopened && await pieceHost(reopened);
+      check(`${tag}: late: the re-opened piece is closed and shows what was sent`, host && host.closed === "received" && !host.answers.includes("q-004"), JSON.stringify(host && { closed: host.closed, answers: host.answers }));
+      await shot(page, "late-send", width, scheme);
+      if (first) {
+        await page.click(".back-link");
+        await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+        await page.click(`a[href="#/piece/${IDS.questions}"]`);
+        await appPiece(page);
+        const again = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
+        check(`${tag}: late: the notice about the late send shows once`, again.length === 1 && again[0].text === receivedText, JSON.stringify(again));
+      }
+      check(`${tag}: late: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // A replaced version with only a collected draft (partial) is not closed: it opens as today (R3).
+    if (first) {
+      const backend = newBackend(html);
+      backend.patch[IDS.questions] = { status: "replaced" };
+      backend.responses.push({ id: "r-partial", piece_id: IDS.questions, member_id: IDS.member, submitted_at: SENT_AT, storage: storage, partial: true });
+      newerQuestions(backend, html);
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      const frame = await appPiece(page);
+      const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
+      const host = frame && await pieceHost(frame);
+      check(`${tag}: partial only: a replaced version whose only response is a collected draft opens as today, without «${CLOSURE.action}»`,
+        notices.length === 1 && notices[0].text === CLOSURE.replaced && !notices[0].buttons.includes(CLOSURE.action) && host && host.closed === null,
+        JSON.stringify({ notices, closed: host && host.closed }));
+      check(`${tag}: partial only: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+  }
+}
+
 // ---- the portal's own frame, measured with the factory's geometry ----------------------------------------
 // The visual manual's frame rules (marco.md: one frame, one page margin on both sides from 672 px and the frame not
 // cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
@@ -1418,6 +1847,7 @@ try {
   if (args.questions) await sentLineChecks(browser, base, read(args.questions));
   if (args.questions && args.demo) await demoAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
+  if (args.questions) await closureChecks(browser, base, read(args.questions));
   if (args.questions && args.factory) await portalGeometryChecks(browser, base, read(args.questions), args.factory);
 } finally {
   await browser.close();

@@ -126,6 +126,19 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   parent, from the portal's origin, with the nonce. If the iframe loads a
   second document (the piece navigated away or reloaded), the portal removes it and offers to reopen.
 
+**Closed pieces in the portal.** A piece is closed when its assignment is `received`, or `replaced`
+after the person sent it (a response with `partial = false`; a replaced version with only a draft the
+factory collected stays open, as before). The list says «Recibida» for both (a replaced one adds «Hay
+una versión más nueva»), «Pediste un cambio el …» when there is a change request, and leaves them out
+of «por responder». A closed piece opens with the storage of the newest response sent (the draft only
+when that response has none), `closed` and `sentAt` set, and a pinned notice that says why it cannot
+change here (or, replaced, today's notice with its link) with «Pedir un cambio»: a form with a required
+text of up to 4000 characters that calls `request_change`. When the server draft is newer than that
+response by more than 5 s, the form says the unsent changes go with the request and sends that draft
+as `p_storage`. Every send passes the piece's storage to `submit_response`; when the id it returns is
+a change request (the piece closed meanwhile), the piece hears ok and opens again, closed, saying once
+that the send arrived as a change request. The rules are in `js/closure.js`.
+
 Reopening a piece waits briefly for a save still in flight and always starts from the newest copy
 seen in the tab. When the session ends (it expired, or it was closed elsewhere), the open piece
 hands over its last change first, and every draft the server has not confirmed stays in the tab: it
@@ -228,7 +241,13 @@ against a mocked Supabase (home, autosave, send, errors, empty state, a session 
 change was saved, a session that comes back while the piece hands over its draft, a change too long
 to keep). With `--demo` as well: the demo sheet sends through the app (a failure shows its error and
 never «Tu revisión llegó»; the retry arrives once), and a replaced version opened from an old email shows its
-fixed notice, links to the newer version and still sends. The piece screen is checked at 320, 768 and
+fixed notice, links to the newer version and still sends. With `--questions`, the piece closure, at
+320, 768 and 1440 px, light and dark: the list with a received piece, a replaced version that was sent
+and a change request (`list-received-<width>-<scheme>.png`); a received piece read only with its notice
+(`closed-received-…`); the request form sent empty (`request-empty-error-…`), failing (network, and a
+rejection) and arriving (`request-sent-…`); a replaced version that was sent (`closed-replaced-…`); a
+draft with unsent changes going with the request (`request-with-unsent-…`); and a send from a tab left
+open after the close (`late-send-…`). The piece screen is checked at 320, 768 and
 1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above «Volver» and
 the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
 the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),
@@ -274,7 +293,8 @@ options so the timeout and the storage quota can be lowered for a check. `tests/
 
 **Visual manual.** Each run saves four screens to `<out>/screens/`: `sign-in-email.html`,
 `sign-in-code.html` (pattern `formulario`), `home-pieces.html` and `home-empty.html` (pattern
-`lista`). Each one is the rendered DOM without scripts, next to a copy of `css/` and `brand/`, so it
+`lista`); with `--questions`, also `home-received.html` (`lista`, the list with closed pieces), which goes
+through `verifica-pantalla.mjs` only. Each one is the rendered DOM without scripts, next to a copy of `css/` and `brand/`, so it
 looks exactly as in the app. With `--factory`, every screen goes through the factory's
 `design-system/assets/verifica-pantalla.mjs` (the visual manual's checks and axe) at 320, 768 and
 1440 px, in light and dark, and each run is one check (its JSON is saved next to the screen). To

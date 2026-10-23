@@ -5,7 +5,8 @@ import { EMAIL_OTP_LENGTH } from "../config.js";
 import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
-import { loadSharedWithMe, loadPiece, saveDraft, submitResponse, isAuthExpired } from "./api.js";
+import { loadSharedWithMe, loadPiece, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
+import { seedFor, hasUnsentChanges, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
 
@@ -37,6 +38,8 @@ const state = {
   resumeSaves: false,         // the session ended with unsaved drafts: save them after signing in again
   setAside: new Map(),        // user id -> { savers, localDrafts } kept unsaved while another account is in
   statusListeners: new Map(), // pieceId -> save status callback of the open piece screen
+  lateSend: null,             // { userId, pieceId, requestId }: a send that arrived after the close, said once on reopening
+  requestTexts: new Map(),    // `${userId}|${pieceId}` -> a change request being written (kept if the session ends)
 };
 
 const t = (key, params) => translate(state.lang, key, params);
@@ -93,8 +96,8 @@ function frameLayout({ title, meta = [], headerActions = [] }) {
   return { notices, body, live };
 }
 
-// One notice at a time, in the page, until dismissed or the screen changes (no floating toasts).
-function showNotice(container, { tone = "info", text, actions = [], dismissible = true }) {
+// A notice, in the page, until dismissed or the screen changes (no floating toasts).
+function noticeElement({ tone = "info", text, actions = [], dismissible = true }) {
   const notice = h("div", { class: `notice notice--${tone}`, role: tone === "error" ? "alert" : "status" },
     h("p", {}, text));
   // An action with `href` is a link (it goes somewhere); one with `onClick`, a button.
@@ -102,7 +105,11 @@ function showNotice(container, { tone = "info", text, actions = [], dismissible 
     : h("button", { type: "button", class: "link-button", onclick: a.onClick }, a.label)));
   if (dismissible) buttons.push(h("button", { type: "button", class: "link-button", onclick: () => notice.remove() }, t("dismiss")));
   if (buttons.length) notice.append(h("div", { class: "notice-actions" }, buttons));
-  replaceChildren(container, notice);
+  return notice;
+}
+// One notice at a time in a zone.
+function showNotice(container, options) {
+  replaceChildren(container, noticeElement(options));
 }
 const clearNotice = (container) => replaceChildren(container);
 
@@ -406,6 +413,8 @@ async function finishSignOut() {
   state.session = null;
   disposeSavers();
   state.draftOwner = null;
+  state.requestTexts.clear(); // a change request being written is the account's, not the next person's on this device
+  state.lateSend = null;
   clearPendingSignIn();
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   state.viewId += 1;
@@ -429,27 +438,37 @@ async function sessionEnded() {
 
 // ---- home -----------------------------------------------------------------------------------
 
-const STATUS_KEYS = { pending: "statusPending", in_progress: "statusInProgress", submitted: "statusSubmitted" };
+const STATUS_KEYS = { pending: "statusPending", in_progress: "statusInProgress", submitted: "statusSubmitted", received: "statusReceived" };
 // The base's status modifiers (brand/ninben-components.css): pending is the plain hollow dot.
-const STATUS_CLASSES = { pending: "status", in_progress: "status status--active", submitted: "status status--done" };
+const STATUS_CLASSES = { pending: "status", in_progress: "status status--active", submitted: "status status--done", received: "status status--done" };
 const KIND_KEYS = { questions: "kindQuestions", flow_review: "kindFlowReview", demo_review: "kindDemoReview" };
+// Nothing left to answer: sent, received, or a replaced version (the list only keeps the ones the person had sent).
+const DONE = new Set(["submitted", "received", "replaced"]);
 
-function pieceRow({ piece, assignment }) {
-  const status = STATUS_KEYS[assignment.status] ? assignment.status : "pending";
-  const dateKey = status === "submitted" ? "sentOn" : status === "in_progress" ? "changedOn" : "sharedOn";
-  const iso = status === "pending" ? assignment.assigned_at : assignment.updated_at || assignment.assigned_at;
-  const date = formatDate(state.lang, iso);
-  const kind = t(KIND_KEYS[piece.kind] || "kindQuestions");
+function pieceRow({ piece, assignment, lastRequestAt }) {
+  // A replaced version in the list was sent and is closed: it reads as received, with a newer version.
+  const replaced = assignment.status === "replaced";
+  const status = replaced ? "received" : STATUS_KEYS[assignment.status] ? assignment.status : "pending";
+  const meta = [t(KIND_KEYS[piece.kind] || "kindQuestions")];
+  if (status !== "received") {
+    const dateKey = status === "submitted" ? "sentOn" : status === "in_progress" ? "changedOn" : "sharedOn";
+    const date = formatDate(state.lang, status === "pending" ? assignment.assigned_at : assignment.updated_at || assignment.assigned_at);
+    if (date) meta.push(t(dateKey, { date }));
+  }
+  if (replaced) meta.push(t("newerVersionExists"));
+  const requested = formatDate(state.lang, lastRequestAt);
+  if (requested) meta.push(t("requestedChangeOn", { date: requested }));
   return h("li", { class: "row" },
     h("a", { class: "row-link", href: `#/piece/${piece.id}` },
       h("span", { class: "row-main" },
         h("span", { class: "row-title" }, piece.title || t("untitled")),
-        h("span", { class: "row-meta" }, date ? `${kind} · ${t(dateKey, { date })}` : kind)),
+        h("span", { class: "row-meta" }, meta.join(" · "))),
       h("span", { class: STATUS_CLASSES[status] },
         h("span", { class: "status-dot", "aria-hidden": "true" }), t(STATUS_KEYS[status]))));
 }
 
 const sortTime = (item) => Date.parse(item.assignment.updated_at || item.assignment.assigned_at) || 0;
+const isDone = (item) => DONE.has(item.assignment.status);
 
 async function showHome(viewId) {
   state.view = "home";
@@ -476,7 +495,7 @@ async function showHome(viewId) {
   setLanguage(languages.length === 1 ? languages[0] : browserLanguage);
   setTitle(t("homePageTitle"));
   const items = groups.flatMap((g) => g.items);
-  const toAnswer = items.filter((i) => i.assignment.status !== "submitted").length;
+  const toAnswer = items.filter((i) => !isDone(i)).length;
   const count = !items.length ? null : toAnswer === 0 ? t("countAllSent") : toAnswer === 1 ? t("countOneToAnswer") : t("countToAnswer", { count: toAnswer });
   layout = frameLayout({ title: t("homeTitle"), meta: [count, t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
   if ([...state.savers.values()].some((s) => s.hasUnsaved())) showNotice(layout.notices, { tone: "warning", text: t("unsavedElsewhere") });
@@ -494,7 +513,7 @@ async function showHome(viewId) {
   }
   for (const { project, items: projectItems } of groups) {
     const sorted = [...projectItems].sort((a, b) =>
-      (a.assignment.status === "submitted") - (b.assignment.status === "submitted") || sortTime(b) - sortTime(a));
+      isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     const headingId = `project-${project.id}`;
     layout.body.append(h("section", { class: "section", "aria-labelledby": headingId },
       h("h2", { id: headingId }, project.name || project.slug),
@@ -543,6 +562,103 @@ function pieceLayout(titleText) {
       pinned, notices),
     main));
   return { pinned, notices, title, status, main, live };
+}
+
+// A closed piece (received, or a replaced version the person had sent) shows what was sent, read only. In its pinned
+// zone: a send that arrived after the close (said once), the notice that says why it cannot change here, with the
+// newer version's link when there is one and «Pedir un cambio» (COM-15, EST-05); the earlier requests; and the
+// request form, opened below them on demand. The person's request text is a third party's: it only ever goes
+// through text nodes. unsentStorage: the draft with changes left unsent (it goes with the request), or null.
+function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late, unsentStorage }) {
+  const userKey = `${state.session.user.id}|${pieceId}`;
+  const requestLine = (iso) => h("p", { class: "hint" }, t("requestedChangeLine", { date: formatDate(state.lang, iso) }));
+  const lines = h("div", { class: "change-request-lines" },
+    context.changeRequests.filter((r) => !late || r.id !== late.requestId).map((r) => requestLine(r.created_at)));
+  const slot = h("div", { class: "change-request-slot" });
+  let form = null;          // the open form's textarea, or null
+  let confirmedAt = null;   // when the last request arrived, while its line is shown where the form was
+  let actionButton = null;
+
+  function openForm() {
+    if (form) { form.focus(); return; }
+    // Asking again: the request that arrived becomes one more line, and a new form opens in its place.
+    if (confirmedAt) { lines.append(requestLine(confirmedAt)); confirmedAt = null; }
+    const input = h("textarea", {
+      id: "change-request-text", name: "change-request", rows: "4", maxlength: String(REQUEST_TEXT_MAX),
+      "aria-describedby": ["change-request-hint", unsentStorage ? "change-request-unsent" : null, "change-request-error"].filter(Boolean).join(" "),
+    });
+    input.value = state.requestTexts.get(userKey) || "";
+    const error = fieldError("change-request-error");
+    const failure = h("div", { hidden: true });
+    const button = h("button", { type: "submit", class: "button button--primary", "data-rol": "accion-principal" }, t("sendChangeRequest"));
+    let busy = false;
+    input.addEventListener("input", () => {
+      state.requestTexts.set(userKey, input.value);
+      if (!error.hidden) setFieldError(input, error, "");
+    });
+    const showFailure = (text) => { failure.hidden = !text; if (text) showNotice(failure, { tone: "error", text, dismissible: false }); else clearNotice(failure); };
+
+    async function onSubmit(event) {
+      event.preventDefault();
+      if (busy) return;
+      const text = input.value;
+      if (!validRequestText(text)) return setFieldError(input, error, text.trim() ? t("changeRequestTooLong", { max: REQUEST_TEXT_MAX }) : t("changeRequestEmpty"));
+      setFieldError(input, error, "");
+      showFailure("");
+      busy = true;
+      button.disabled = true;
+      button.textContent = t("sending");
+      try {
+        await requestChange(supabase, pieceId, text.trim(), unsentStorage);
+      } catch (err) {
+        busy = false;
+        button.disabled = false;
+        button.textContent = t("sendChangeRequest");
+        if (viewId !== state.viewId) return;
+        if (isAuthExpired(err)) {
+          showNotice(notices, { tone: "error", text: t("sessionExpired"), actions: [{ label: t("signInAgain"), onClick: sessionEnded }] });
+          return;
+        }
+        showFailure(t("changeRequestFailed"));
+        return;
+      }
+      if (state.requestTexts.get(userKey) === input.value) state.requestTexts.delete(userKey);
+      if (viewId !== state.viewId) return;
+      // The confirmation is the change (COM-16): the form becomes the line that says the request arrived, announced
+      // without reading it twice; the focus goes back to «Pedir un cambio», next to it.
+      const at = new Date().toISOString();
+      const said = t("changeRequestSent", { date: formatDate(state.lang, at, { withTime: true }) });
+      replaceChildren(slot, h("p", { class: "change-request-sent" }, said));
+      form = null;
+      confirmedAt = at;
+      clearNotice(notices);
+      live.textContent = said;
+      if (actionButton) actionButton.focus();
+    }
+
+    replaceChildren(slot, h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+      h("div", { class: "field" },
+        h("label", { for: "change-request-text" }, t("changeRequestLabel")),
+        h("p", { class: "hint", id: "change-request-hint" }, t("changeRequestHint")),
+        unsentStorage ? h("p", { class: "hint", id: "change-request-unsent" }, t("changeRequestUnsent")) : null,
+        input, error),
+      failure, button));
+    form = input;
+    input.focus();
+  }
+
+  const why = context.closed === "received"
+    ? t("receivedNotice", { date: formatDate(state.lang, context.assignment.updated_at || (context.lastResponse && context.lastResponse.submitted_at)) })
+    : t("replacedNotice");
+  const links = context.closed === "replaced"
+    ? [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: "#/" }]
+    : [];
+  const notice = noticeElement({ tone: "info", text: why, dismissible: false, actions: [...links, { label: t("requestChange"), onClick: openForm }] });
+  actionButton = notice.querySelector(".notice-actions button");
+  // A region named by its action, so the earlier requests and the form sit in a landmark like the rest of the page.
+  replaceChildren(pinned, h("section", { class: "closure", "aria-label": t("requestChange") },
+    late ? noticeElement({ tone: "info", text: t("lateSendNotice"), dismissible: false }) : null,
+    notice, lines, slot));
 }
 
 async function showPiece(pieceId, viewId) {
@@ -594,17 +710,28 @@ async function showPiece(pieceId, viewId) {
   let tooLarge = false;
   let draftSinceTooLarge = false;
   let lastSubmittedAt = context.lastSubmittedAt;
+  const { closed } = context;
   // The newest storage this tab saw is never older than the server copy it sent, so it wins.
   const seededHere = state.localDrafts.has(pieceId);
-  const seed = seededHere ? state.localDrafts.get(pieceId) : context.draftStorage;
+  const draftSeed = seededHere ? state.localDrafts.get(pieceId) : context.draftStorage;
+  // A closed piece opens with what was sent, never with the draft (seedFor).
+  const seed = seedFor(closed, context.lastResponse, draftSeed);
   // A send the server has but the piece's saved draft cannot show (it did not get to save its «sent» mark):
   // only then the line says «Enviada el …». A copy from this tab was taken after the piece wrote its mark.
-  // The person's first change or a new send here leaves it to the piece again.
-  let sendUnshown = !seededHere && sendNotInDraft(context);
+  // The person's first change or a new send here leaves it to the piece again. A closed piece says it itself.
+  let sendUnshown = !closed && !seededHere && sendNotInDraft(context);
   const handled = new Set();
-  // A version replaced by a newer one (opened from an old email, say): what is saved here is never picked
-  // up on its own, only what is sent. The notice says so and points to the newer version.
-  const replaced = context.assignment.status === "replaced" && !context.lastSubmittedAt;
+  // A send of this piece that arrived after the close: said once, now.
+  const late = state.lateSend && state.lateSend.pieceId === pieceId && state.lateSend.userId === user.id ? state.lateSend : null;
+  if (late) state.lateSend = null;
+  if (closed) {
+    const unsent = hasUnsentChanges(context.draftUpdatedAt, context.lastSubmittedAt);
+    showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late,
+      unsentStorage: unsent ? draftSeed : null });
+  }
+  // A version replaced by a newer one (opened from an old email, say) that the person never sent: what is saved
+  // here is never picked up on its own, only what is sent. The notice says so and points to the newer version.
+  const replaced = context.assignment.status === "replaced" && !closed;
   if (replaced) {
     showNotice(pinned, {
       tone: "warning", text: t("replacedNotice"), dismissible: false,
@@ -649,9 +776,13 @@ async function showPiece(pieceId, viewId) {
     // Let the draft the bridge flushed just before the send land first.
     await Promise.race([saver.idle(), sleep(SUBMIT_SAVE_WAIT_MS)]);
     let result;
+    let lateSend = null;
     try {
-      await submitResponse(supabase, pieceId, payload);
+      const sent = await submitResponse(supabase, pieceId, payload, localDrafts.get(pieceId) || seed);
       result = { ok: true };
+      // The piece was closed meanwhile: the server kept the send as a change request. The piece hears ok (nothing
+      // was lost), and the piece opens again, closed, saying so.
+      if (sent.late) lateSend = { userId: user.id, pieceId, requestId: sent.id };
       // The piece moves focus to its own sent screen, which says it; the portal does not announce it again.
       lastSubmittedAt = new Date().toISOString();
       sendUnshown = false;
@@ -666,11 +797,15 @@ async function showPiece(pieceId, viewId) {
     }
     render();
     if (answeringFrame) answeringFrame.respond(requestId, result);
+    if (lateSend) {
+      state.lateSend = lateSend;
+      if (viewId === state.viewId) route();
+    }
   }
 
   frame = mountPiece({
     container: main, html: piece.html, kind: piece.kind, storage: seed, title: pieceTitle,
-    host: { reviewerName: context.memberDisplayName },
+    host: { reviewerName: context.memberDisplayName, closed, sentAt: closed && context.lastResponse ? context.lastResponse.submitted_at : null },
     onReady: (ready) => { if (!ready.persistence) showNotice(notices, { tone: "warning", text: t("noPersistence") }); },
     onDirty: () => saver.markPending(),
     onDraft: (storage) => {
