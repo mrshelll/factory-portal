@@ -251,7 +251,8 @@ and a change request (`list-received-<width>-<scheme>.png`); a received piece re
 rejection) and arriving (`request-sent-…`), closed with «Cancelar»; a replaced version that was sent (`closed-replaced-…`); a
 draft with unsent changes going with the request (`request-with-unsent-…`); and a send from a tab left
 open after the close (`late-send-…`). At 320 × 640: the piece stays at least 60 % high with the form open
-(`request-short-phone-320-light.png`, `…-scrolled.png`), and a piece reopened while the person writes
+(`request-short-phone-320-light.png`), and scrolled into view the piece shows painted, its «Lo que enviaste» inside the
+screen (`…-scrolled.png`); and a piece reopened while the person writes
 opens again on 55000. The piece screen is checked at 320, 768 and
 1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above «Volver» and
 the title and on their left edge; no brand bar inside the piece; every top-level block of each screen

@@ -1431,6 +1431,31 @@ const sendRequestButton = (page) => page.locator("#change-request-text").locator
 // A control that is not there fails its check, it does not stop the run.
 const tap = (locator) => locator.click({ timeout: 3000 }).catch(() => {});
 const typeRequest = (page, text) => page.fill("#change-request-text", text, { timeout: 3000 }).catch(() => {});
+// The piece is a sandboxed iframe, so Chrome runs it in its own process and does not paint it while it is out of view.
+// Scrolled into view, it paints on its next frames: wait for two of its animation frames, then one of the page's,
+// before a capture (without this, the capture shows the iframe's box blank).
+const nextFrames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))));
+async function piecePainted(page) {
+  const frame = pieceFrame(page);
+  if (frame) await Promise.race([frame.evaluate(nextFrames).catch(() => false), sleep(3000)]);
+  await page.evaluate(nextFrames);
+}
+// How many colours a viewport capture holds inside `box` (CSS px of the viewport), decoded in the page: a blank area
+// is one colour.
+const coloursIn = (page, png, box) => page.evaluate(async ([b64, area]) => {
+  const img = new Image();
+  img.src = `data:image/png;base64,${b64}`;
+  await img.decode();
+  const scale = img.width / window.innerWidth;
+  const [x, y, w, h] = [area.x, area.y, area.width, area.height].map((v) => Math.max(1, Math.round(v * scale)));
+  const canvas = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height });
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(x, y, w, h).data;
+  const seen = new Set();
+  for (let i = 0; i < data.length; i += 4) seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+  return seen.size;
+}, [png.toString("base64"), box]);
 const requestCallCount = (backend) => backend.requests.filter((r) => r === "POST /rest/v1/rpc/request_change").length;
 
 // What the questions piece stores when the person sends (the storage a response carries): two answers, sent through the
@@ -1486,8 +1511,9 @@ async function closureChecks(browser, base, html) {
     await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
     return { context, page, errors };
   }
-  // The piece screens as the viewport shows them: a full-page capture stretches the viewport, so the piece's 60dvh
-  // floor grows with it and the iframe is captured blank. The list is captured whole.
+  // The piece screens as the viewport shows them: a full-page capture leaves the piece's iframe blank when part of it
+  // is below the fold (it runs in its own process and is not painted out of view; a person scrolling does see it, see
+  // piecePainted). The list is captured whole.
   const shot = (page, name, width, scheme, fullPage = false) => page.screenshot({ path: join(outDir, `${name}-${width}-${scheme}.png`), fullPage });
   const runs = [[320, "light"], [320, "dark"], [768, "light"], [768, "dark"], [1440, "light"], [1440, "dark"]];
 
@@ -1761,9 +1787,17 @@ async function closureChecks(browser, base, html) {
       check(`${tag}: short phone: with the form open the piece stays at least 60 % of the screen high, and the page scrolls`,
         sizes.iframe >= Math.floor(0.6 * sizes.vh) - 1 && sizes.scroll > sizes.vh, JSON.stringify(sizes));
       await shot(page, "request-short-phone", 320, "light");
-      // A full-page capture does not paint the iframe below the fold: the piece, scrolled into view.
+      // The piece, scrolled into view once it has painted (a full-page capture leaves an iframe below the fold blank):
+      // its heading inside the screen and painted in that capture.
       await page.evaluate(() => document.querySelector("iframe.piece-frame").scrollIntoView());
-      await page.screenshot({ path: join(outDir, "request-short-phone-320-light-scrolled.png") });
+      await piecePainted(page);
+      const scrolledShot = await page.screenshot({ path: join(outDir, "request-short-phone-320-light-scrolled.png") });
+      const heading = pieceFrame(page)?.getByRole("heading", { name: "Lo que enviaste", exact: true });
+      const headingBox = heading && await heading.boundingBox().catch(() => null);
+      const inView = Boolean(headingBox) && headingBox.height > 0 && headingBox.y >= 0 && headingBox.y + headingBox.height <= sizes.vh;
+      const headingColours = inView ? await coloursIn(page, scrolledShot, headingBox) : 0;
+      check(`${tag}: short phone: scrolled into view, the piece's «Lo que enviaste» is inside the screen and painted in the capture`,
+        inView && headingColours > 1, JSON.stringify({ headingBox, vh: sizes.vh, headingColours }));
       await typeRequest(page, "Quiero cambiar algo");
       backend.patch[IDS.questions] = { status: "submitted", updated_at: new Date().toISOString() };
       await tap(sendRequestButton(page));
