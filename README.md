@@ -203,14 +203,15 @@ empty state).
   functions (`factory_preview`, `factory_publish`, `factory_fetch`, `factory_mark_fetched`, execute
   for `service_role` only) and `keep_alive()`. Its name carries the version Supabase registered. It is
   idempotent.
-- `20261023120000_piece_closure.sql` is the piece closure: the `received` status (the factory collected
+- `20261024033949_piece_closure.sql` is the piece closure: the `received` status (the factory collected
   a complete response, so the piece closes), `storage` on responses, the `piece_change_requests` table
   (each person reads only their own), `submit_response` with an optional storage (a send on a closed
   piece is kept as a late change request; a storage copy over 1 MB is stored as null, so the send never fails
   because of it), `request_change` for the person, `factory_publish` also
   replacing `submitted` and `received` pieces, and the factory-only functions `factory_mark_received`,
   `factory_reopen`, `factory_fetch_change_requests` and `factory_mark_change_requests_fetched` (execute
-  for `service_role` only). Not applied to `factory` yet. It is idempotent.
+  for `service_role` only). Applied to `factory` on 2026-10-23; its name carries the version Supabase
+  registered. It is idempotent.
 
 `tests/sql/factory-connection-checks.sql` checks the factory connection migration and
 `tests/sql/piece-closure-checks.sql` checks the piece closure, both against the database (see their

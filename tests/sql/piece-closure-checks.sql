@@ -1,4 +1,4 @@
--- Checks for the piece closure (migration 20261023120000_piece_closure.sql).
+-- Checks for the piece closure (migration 20261024033949_piece_closure.sql).
 --
 -- Run as ONE request against the `factory` database (Supabase MCP execute_sql, or psql as postgres).
 -- Everything happens inside `begin; ... rollback;`: no data is left behind. Every failure raises an
