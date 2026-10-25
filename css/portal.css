@@ -71,6 +71,12 @@ main { padding-block: var(--space-6) var(--space-7); }
 .empty p { margin-inline: auto; margin-bottom: var(--space-4); overflow-wrap: anywhere; }
 .empty .actions { justify-content: center; }
 
+/* A project's page: the way back above the title (the manual's «contexto» zone), and the line under the list that says
+   what the project's owner sees, at the reading measure. */
+.page-context { margin-bottom: var(--space-1); }
+.page-note { max-width: var(--measure-text); color: var(--muted); }
+.body > * + .page-note { margin-top: var(--space-between-blocks); }
+
 /* A row of the list (.rows, .row and .status come from the base): the whole row is the link. */
 .row-link {
   display: flex;

@@ -1,11 +1,12 @@
-// Portal entry point: session, hash router and the three screens (sign in, home, piece).
+// Portal entry point: session, hash router and the screens (sign in, home with the projects, a project's page, piece).
 
 import { supabase } from "./supabase-client.js";
 import { EMAIL_OTP_LENGTH } from "../config.js";
 import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
-import { loadSharedWithMe, loadPiece, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
+import { loadProjects, loadProjectItems, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
+import { parseRoute, projectHref, projectRows } from "./project.js";
 import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
@@ -21,7 +22,6 @@ const SIGN_OUT_SAVE_MS = 4000;
 const REOPEN_SAVE_WAIT_MS = 3000;
 const SUBMIT_SAVE_WAIT_MS = 3000; // a send waits this long for the last draft to land first
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PIECE_ROUTE = /^#\/piece\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const LOGO_URL = new URL("../brand/logo.svg", import.meta.url);
 const LOGO_TIMEOUT_MS = 3000;
 
@@ -78,10 +78,17 @@ function masthead(headerActions = [], tag = "header") {
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
 }
 
+// «← Tus proyectos», «← {project}»: where the screen goes back to. The arrow is not read; the link's name says where.
+function backLink({ href, text, label }) {
+  return h("a", { class: "back-link", href, "aria-label": label }, h("span", { "aria-hidden": "true" }, "←"), text);
+}
+const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backToProjectsLabel") });
+
 // One frame for every screen: masthead, then inside <main> the title band, the notice zone and
 // the body. The frame's box is the .frame (the masthead's too); inside <main>, its data-rol="marco" holds
-// the title band, the notices and the body, as the visual manual's anatomy puts them (marco.md).
-function frameLayout({ title, meta = [], headerActions = [] }) {
+// the title band, the notices and the body, as the visual manual's anatomy puts them (marco.md). `back`
+// ({ href, text, label }) puts the way back first, as the manual's optional «contexto» zone, without a data-rol.
+function frameLayout({ title, meta = [], headerActions = [], back = null }) {
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const body = h("div", { class: "body", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
@@ -89,6 +96,7 @@ function frameLayout({ title, meta = [], headerActions = [] }) {
     masthead(headerActions),
     h("main", { id: "main" },
       h("div", { "data-rol": "marco" },
+        back ? h("p", { class: "page-context" }, backLink(back)) : null,
         h("div", { class: "page-head", "data-rol": "cabecera" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
@@ -130,8 +138,10 @@ async function route() {
   if (viewId !== state.viewId) return;
   if (!state.session) return showSignIn();
   adoptSession();
-  const match = PIECE_ROUTE.exec(location.hash);
-  if (match) return showPiece(match[1].toLowerCase(), viewId);
+  const target = parseRoute(location.hash);
+  if (target.name === "piece") return showPiece(target.pieceId, viewId);
+  if (target.name === "project") return showProject(target.projectId, viewId);
+  // Anything else (an owner's view of a person's piece included, for now) is home.
   if (location.hash && location.hash !== "#/") history.replaceState(null, "", `${location.pathname}${location.search}#/`);
   return showHome(viewId);
 }
@@ -475,18 +485,48 @@ function pieceRow({ piece, assignment, lastRequestAt }) {
 
 const sortTime = (item) => Date.parse(item.assignment.updated_at || item.assignment.assigned_at) || 0;
 const isDone = (item) => DONE.has(item.assignment.status);
+const countOf = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Math.floor(Number(value)) : 0);
+
+// A project on home: its name and what decides there. For the person, what is left to answer (or that everything was
+// sent); for its owner, that they are, its people, what is still pending and the last response, when there is one.
+// An owner with something to answer in it is told that first.
+function projectRow({ project, toAnswer, owned, summary }) {
+  const meta = [];
+  if (toAnswer > 0) meta.push(t("projectToAnswer", { count: toAnswer }));
+  else if (!owned) meta.push(t("projectAllSent"));
+  if (owned && summary) {
+    const people = countOf(summary.people);
+    const open = countOf(summary.open_pieces);
+    meta.push(t("projectOwnerMeta", {
+      people: people === 1 ? t("projectPeopleOne") : t("projectPeople", { count: people }),
+      open: open === 1 ? t("projectOpenOne") : t("projectOpen", { count: open }),
+    }));
+    const last = formatDate(state.lang, summary.last_response_at);
+    if (last) meta.push(t("projectLastResponse", { date: last }));
+  }
+  return h("li", { class: "row" },
+    h("a", { class: "row-link", href: projectHref(project.id) },
+      h("span", { class: "row-main" },
+        h("span", { class: "row-title" }, project.name || project.slug || t("untitled")),
+        h("span", { class: "row-meta" }, meta.join(" · ")))));
+}
+
+const unsavedWarning = (notices) => {
+  if ([...state.savers.values()].some((s) => s.hasUnsaved())) showNotice(notices, { tone: "warning", text: t("unsavedElsewhere") });
+};
 
 async function showHome(viewId) {
   state.view = "home";
   const user = state.session.user;
   const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
-  setTitle(t("homePageTitle"));
-  let layout = frameLayout({ title: t("homeTitle"), meta: [t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
+  setTitle(t("projectsTitle"));
+  let layout = frameLayout({ title: t("projectsTitle"), meta: [t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
   layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
 
-  let groups;
+  let rows;
   try {
-    groups = await loadSharedWithMe(supabase, user);
+    const { groups, owned } = await loadProjects(supabase, user);
+    rows = projectRows(groups, owned);
   } catch (error) {
     if (viewId !== state.viewId) return;
     if (isAuthExpired(error)) return sessionEnded();
@@ -497,16 +537,14 @@ async function showHome(viewId) {
   if (viewId !== state.viewId) return;
 
   // Text follows the projects' language when they all share one; otherwise the browser's.
-  const languages = [...new Set(groups.map((g) => pickLanguage(g.project.language)))];
+  const languages = [...new Set(rows.map((row) => pickLanguage(row.project.language)))];
   setLanguage(languages.length === 1 ? languages[0] : browserLanguage);
-  setTitle(t("homePageTitle"));
-  const items = groups.flatMap((g) => g.items);
-  const toAnswer = items.filter((i) => !isDone(i)).length;
-  const count = !items.length ? null : toAnswer === 0 ? t("countAllSent") : toAnswer === 1 ? t("countOneToAnswer") : t("countToAnswer", { count: toAnswer });
-  layout = frameLayout({ title: t("homeTitle"), meta: [count, t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
-  if ([...state.savers.values()].some((s) => s.hasUnsaved())) showNotice(layout.notices, { tone: "warning", text: t("unsavedElsewhere") });
+  setTitle(t("projectsTitle"));
+  const count = !rows.length ? null : rows.length === 1 ? t("projectsCountOne") : t("projectsCount", { count: rows.length });
+  layout = frameLayout({ title: t("projectsTitle"), meta: [count, t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
+  unsavedWarning(layout.notices);
 
-  if (!items.length) {
+  if (!rows.length) {
     // An empty state (EST-01): its message, then its direct way out, the view's primary action, at the end of the block
     // (MAR-06).
     layout.body.append(h("section", { class: "section empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
@@ -517,14 +555,53 @@ async function showHome(viewId) {
         h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))));
     return;
   }
-  for (const { project, items: projectItems } of groups) {
-    const sorted = [...projectItems].sort((a, b) =>
-      isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
-    const headingId = `project-${project.id}`;
-    layout.body.append(h("section", { class: "section", "aria-labelledby": headingId },
-      h("h2", { id: headingId }, project.name || project.slug),
+  layout.body.append(h("ul", { class: "rows" }, rows.map(projectRow)));
+}
+
+// ---- a project's page -----------------------------------------------------------------------
+
+// What was asked of the person in this project (the list home used to have), then the line that says what the
+// project's owner sees. A project that is not the person's says it is not available, as a piece does.
+async function showProject(projectId, viewId) {
+  state.view = "project";
+  const user = state.session.user;
+  const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
+  setTitle(t("opening"));
+  let layout = frameLayout({ title: t("opening"), headerActions: [signOutButton()], back: homeBack() });
+  layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
+
+  let loaded;
+  try {
+    loaded = await loadProjectItems(supabase, user, projectId);
+  } catch (error) {
+    if (viewId !== state.viewId) return;
+    if (isAuthExpired(error)) return sessionEnded();
+    setTitle(t("pieceLoadErrorTitle"));
+    layout = frameLayout({ title: t("pieceLoadErrorTitle"), headerActions: [signOutButton()], back: homeBack() });
+    showNotice(layout.notices, { tone: "error", text: t("pieceLoadError"), actions: [{ label: t("retry"), onClick: route }], dismissible: false });
+    return;
+  }
+  if (viewId !== state.viewId) return;
+  const { project, items } = loaded;
+  if (!project) {
+    setTitle(t("projectNotFoundTitle"));
+    layout = frameLayout({ title: t("projectNotFoundTitle"), headerActions: [signOutButton()], back: homeBack() });
+    showNotice(layout.notices, { tone: "info", text: t("projectNotFound"), dismissible: false });
+    return;
+  }
+
+  setLanguage(project.language || browserLanguage);
+  const name = project.name || project.slug || t("untitled");
+  setTitle(name);
+  layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
+  unsavedWarning(layout.notices);
+  if (items.length) {
+    const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
+    layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },
+      h("h2", { id: "asked-title" }, t("askedOfYou")),
       h("ul", { class: "rows" }, sorted.map(pieceRow))));
   }
+  layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
 }
 
 // ---- piece ----------------------------------------------------------------------------------
@@ -547,9 +624,10 @@ function saverFor(pieceId) {
   return state.savers.get(pieceId);
 }
 
-// The frame of the piece screen: the same masthead as every screen, then «Volver» and the title band
-// on the same left edge, the notices, and the piece below (it drops its own brand bar in the portal).
-function pieceLayout(titleText) {
+// The frame of the piece screen: the same masthead as every screen, then the way back (to the piece's project, or home
+// until it is known) and the title band on the same left edge, the notices, and the piece below (it drops its own brand
+// bar in the portal).
+function pieceLayout(titleText, back = homeBack()) {
   // A notice that stays for the whole visit (a replaced version); the zone below takes the passing ones.
   const pinned = h("div", { class: "notices", "data-rol": "aviso-fijo" });
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
@@ -563,7 +641,7 @@ function pieceLayout(titleText) {
       h("header", {},
         masthead([], "div"),
         h("div", { class: "piece-bar" },
-          h("a", { class: "back-link", href: "#/", "aria-label": t("backLabel") }, h("span", { "aria-hidden": "true" }, "←"), t("back")),
+          backLink(back),
           h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, status))),
       pinned, notices),
     main));
@@ -717,7 +795,14 @@ async function showPiece(pieceId, viewId) {
   setLanguage((project && project.language) || piece.language || browserLanguage);
   const pieceTitle = piece.title || t("untitled");
   setTitle(pieceTitle);
-  layout = pieceLayout(pieceTitle);
+  // Back to the piece's project, by its name; home when the project cannot be read.
+  const projectName = project && (project.name || project.slug);
+  layout = pieceLayout(pieceTitle, projectName
+    ? { href: projectHref(piece.project_id), text: projectName, label: t("backToProjectLabel", { name: projectName }) }
+    : homeBack());
+  // «La abrió»: an open piece records that the person opened it here (the server keeps the first time). Not awaited,
+  // and it never throws: the piece opens whatever happens to that call.
+  if (context.closed === null) markPieceOpened(supabase, pieceId);
   const { pinned, notices, status, main, live } = layout;
 
   const saver = saverFor(pieceId);

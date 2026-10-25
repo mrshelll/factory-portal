@@ -67,6 +67,44 @@ export async function loadSharedWithMe(client, user) {
     .sort((a, b) => String(a.project.name).localeCompare(String(b.project.name)));
 }
 
+// The person's projects: the groups of what was asked of them (loadSharedWithMe) and the projects they own
+// (owner_projects(): [{ id, slug, name, language, people, open_pieces, last_response_at }]). owned is [] on a database
+// without that function (PGRST202); any other error throws, as the groups' do. -> { groups, owned }
+export async function loadProjects(client, user) {
+  const [groups, owned] = await Promise.all([loadSharedWithMe(client, user), ownedProjects(client)]);
+  return { groups, owned };
+}
+
+async function ownedProjects(client) {
+  const { data, error } = await client.rpc("owner_projects");
+  if (error) {
+    if (error.code === "PGRST202") return [];
+    throw error;
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+// One project's page: the project as the person can read it (RLS lets its members read it), or null when it is not
+// theirs or does not exist; and the person's own items in it, as loadSharedWithMe gives them. -> { project, items }
+export async function loadProjectItems(client, user, projectId) {
+  const [groups, project] = await Promise.all([
+    loadSharedWithMe(client, user),
+    client.from("projects").select("id, slug, name, language").eq("id", projectId).maybeSingle().then(unwrap),
+  ]);
+  const group = groups.find((g) => g.project.id === projectId);
+  return { project: project || null, items: group ? group.items : [] };
+}
+
+// «La abrió»: the person opened this piece in the portal (the server keeps only the first time). Never throws: offline,
+// an ended session or a database without the function must not stop the piece.
+export async function markPieceOpened(client, pieceId) {
+  try {
+    await client.rpc("mark_piece_opened", { p_piece_id: pieceId });
+  } catch {
+    /* the piece opens anyway */
+  }
+}
+
 // A replaced version's newer one: the newest piece of the same kind in the same project that this person
 // has a current (not replaced) assignment for. null when there is none or it cannot be read.
 async function newerVersion(client, members, piece) {

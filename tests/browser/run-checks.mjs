@@ -15,7 +15,7 @@
 // the list and opened read only with «Pedir un cambio»; the change request form; and a send that arrived after the
 // close. Screenshots <name>-<width>-<scheme>.png at 320, 768 and 1440, light and dark.
 //
-// Screen snapshots: the sign-in screens (email step, code step) and home (with pieces, empty) are
+// Screen snapshots: the sign-in screens (email step, code step), home (the projects, empty) and a project's page are
 // saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
 // design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and
@@ -454,7 +454,13 @@ const IDS = {
   replaced: "88888888-8888-4888-8888-888888888888",
   questionsNew: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   replacedDraft: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  // A project the person owns (owner_projects) without anything asked of them, its membership, and one nobody has.
+  ownedProject: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  ownerMember: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  unknownProject: "ffffffff-ffff-4fff-8fff-ffffffffffff",
 };
+// owner_projects() before the project page migration: PostgREST does not know the function.
+const NO_FUNCTION = { code: "PGRST202", message: "Could not find the function public.owner_projects without parameters in the schema cache", details: null, hint: null };
 const EXPIRED = { code: "PGRST303", message: "JWT expired", details: null, hint: null };
 
 function fakeSession(user = USER) {
@@ -516,7 +522,7 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
     const select = url.searchParams.get("select") || "";
     switch (table) {
       case "project_members": return json(backend.members);
-      case "projects": return json(backend.projects);
+      case "projects": return json(queryRows(backend.projects, url));
       case "piece_assignments": {
         const eq = url.searchParams.get("piece_id");
         const rows = backend.assignments(sub);
@@ -579,6 +585,18 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
           storage: body.p_storage ?? null, late: false, created_at: new Date().toISOString() });
         return json(id);
       }
+      case "rpc/owner_projects":
+        if (backend.ownerRpcsMissing) return json(NO_FUNCTION, 404);
+        if (backend.ownerRpcsFail) return json({ code: "XX000", message: "boom", details: null, hint: null }, 500);
+        return json(backend.ownedProjects);
+      case "rpc/mark_piece_opened": {
+        // openedFails: "network" (offline), "missing" (a database without the function) or "expired" (the session ended).
+        if (backend.openedFails === "network") return route.abort("internetdisconnected");
+        if (backend.openedFails === "missing") return json({ ...NO_FUNCTION, message: "Could not find the function public.mark_piece_opened(p_piece_id) in the schema cache" }, 404);
+        if (backend.openedFails === "expired") return json(EXPIRED, 401);
+        backend.openedCalls.push({ ...request.postDataJSON(), sub });
+        return route.fulfill({ status: 204 });
+      }
       default: return json({ message: `unexpected ${table}` }, 404);
     }
   });
@@ -592,6 +610,9 @@ function newBackend(html, flowHtml, demoHtml) {
     // (patch: pieceId -> { status, updated_at }), more assignments, change requests, and the calls that made them.
     responses: [], patch: {}, extraAssignments: [], changeRequests: [], requestCalls: [], lateSubmits: [], requestMode: "ok", requestDelayMs: 0,
     readsExpired: false, expiredSaves: 0, draftBy: {}, saveFails: false, saveDelayMs: 0, logoutFails: false, draftUpdatedAt: null,
+    // The project page: what owner_projects() answers (ownerRpcsMissing: an old database, 404 PGRST202; ownerRpcsFail: a
+    // 500), and the mark_piece_opened calls (openedFails makes them fail, see the route).
+    ownedProjects: [], ownerRpcsMissing: false, ownerRpcsFail: false, openedCalls: [], openedFails: null,
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
@@ -644,6 +665,12 @@ async function noHorizontalScroll(page) {
 async function appPiece(page, timeout = 10000) {
   return waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function").catch(() => false)) ? f : null; }, timeout);
 }
+// Home lists projects: open one (the person's, by default) and wait for its list of what was asked.
+async function openProject(page, projectId = IDS.project) {
+  await page.waitForSelector(`a[href="#/project/${projectId}"]`, { timeout: 10000 });
+  await page.click(`a[href="#/project/${projectId}"]`);
+  await page.waitForSelector('.row-link[href^="#/piece/"]', { timeout: 10000 });
+}
 const pieceState = (frame) => frame.evaluate(() => ({ error: ST.submitError || null, sent: isSent(), text: document.body.innerText }));
 async function settledSend(frame, timeout = 10000) {
   return waitFor(async () => { const s = await pieceState(frame).catch(() => null); return s && !s.text.includes("Enviando…") && (s.error || s.sent) ? s : null; }, timeout);
@@ -663,28 +690,32 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
 
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
   await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
-  const home = await page.evaluate(() => ({
-    lang: document.documentElement.lang,
-    h1: document.querySelector("h1")?.textContent,
-    rows: [...document.querySelectorAll(".row")].map((r) => r.textContent),
-  }));
-  check("app: home lists the assigned pieces, without the replaced version", home.rows.length === 3 && !home.rows.some((r) => r.includes("Demo v1")), JSON.stringify(home.rows));
-  check("app: project language (es) wins over browser (en-US)", home.lang === "es" && home.h1 === "Lo que te compartimos", `${home.lang} · ${home.h1}`);
+  const projects = await page.evaluate(() => ({ lang: document.documentElement.lang, h1: document.querySelector("h1")?.textContent }));
+  check("app: project language (es) wins over browser (en-US)", projects.lang === "es" && projects.h1 === "Tus proyectos", `${projects.lang} · ${projects.h1}`);
+  check("app: home 360px no horizontal scroll", await noHorizontalScroll(page));
+  await page.screenshot({ path: join(outDir, "home-360.png"), fullPage: true });
+  const projectsAxe = await axeViolations(page);
+  if (projectsAxe) check("app: axe on home has no violations", projectsAxe.length === 0, projectsAxe.join(", "));
+  // The pieces are on the project's page, one step from home.
+  await openProject(page);
+  const home = await page.evaluate(() => ({ rows: [...document.querySelectorAll(".row")].map((r) => r.textContent) }));
+  check("app: the project page lists the assigned pieces, without the replaced version", home.rows.length === 3 && !home.rows.some((r) => r.includes("Demo v1")), JSON.stringify(home.rows));
   check("app: statuses in words", home.rows[0].includes("Por empezar") && home.rows[1].includes("Enviada"));
   check("app: the three kinds have their label", ["Preguntas", "Revisión de recorridos", "Revisión de la demo"].every((label) => home.rows.some((r) => r.includes(label))), JSON.stringify(home.rows));
   check("app: list query never asks for pieces.html",
     backend.requests.filter((r) => r.includes("/rest/v1/pieces")).every((r) => !decodeURIComponent(r).includes("html")));
-  check("app: home 360px no horizontal scroll", await noHorizontalScroll(page));
-  await page.screenshot({ path: join(outDir, "home-360.png"), fullPage: true });
-  await snapshot(page, "home-pieces", "lista");
+  check("app: project page 360px no horizontal scroll", await noHorizontalScroll(page));
+  await page.screenshot({ path: join(outDir, "project-360.png"), fullPage: true });
   const homeAxe = await axeViolations(page);
-  if (homeAxe) check("app: axe on home has no violations", homeAxe.length === 0, homeAxe.join(", "));
+  if (homeAxe) check("app: axe on the project page has no violations", homeAxe.length === 0, homeAxe.join(", "));
   // On its own page: resizing this one breaks clicks into the piece iframe later (headless Chrome).
   const wide = await context.newPage();
   await wide.setViewportSize({ width: 1440, height: 900 });
   await wide.goto(`${base}/`, { waitUntil: "networkidle" });
   await wide.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
   await wide.screenshot({ path: join(outDir, "home-1440.png"), fullPage: true });
+  await openProject(wide);
+  await wide.screenshot({ path: join(outDir, "project-1440.png"), fullPage: true });
   await wide.close();
 
   // Open the questions piece, answer, autosave.
@@ -772,7 +803,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await page.click("button[type=submit]");
   await page.waitForSelector("#code", { timeout: 10000 });
   await page.fill("#code", "1".repeat(await page.evaluate(async () => (await import("./config.js")).EMAIL_OTP_LENGTH)));
-  await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+  await openProject(page);
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   frame = await appPiece(page);
   const back = frame && await frame.evaluate(() => ({ n: respondidas(), quien: ST.respuestas["q-002"] && ST.respuestas["q-002"].quien }));
@@ -783,11 +814,11 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: after signing in again, sending works", resent && resent.sent && backend.submits.length === before + 1);
   check("app: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
 
-  // Back home: the list reflects the new status; reopen restores from the server draft.
+  // Back to the project: the list reflects the new status; reopen restores from the server draft.
   await page.click(".back-link");
-  await page.waitForSelector(".row-link", { timeout: 10000 });
+  await page.waitForSelector('.row-link[href^="#/piece/"]', { timeout: 10000 });
   const rows = await page.$$eval(".row", (els) => els.map((e) => e.textContent));
-  check("app: back home shows the piece as sent", rows.every((r) => r.includes("Enviada")), JSON.stringify(rows));
+  check("app: back on the project page shows the piece as sent", rows.every((r) => r.includes("Enviada")), JSON.stringify(rows));
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   const reopened = await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function" && respondidas()).catch(() => 0)); }, 8000);
   check("app: reopening restores the answers from piece_drafts", reopened === 2, String(reopened));
@@ -818,7 +849,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
     const n = document.querySelector("[data-rol=avisos] .notice");
     return n && n.textContent.includes("se perderán") ? { h1: document.querySelector("h1").textContent, text: n.textContent } : null;
   }), 10000);
-  check("app: sign-out with unsaved changes asks before losing them", askOut && askOut.h1 === "Lo que te compartimos", askOut ? askOut.text : "no notice");
+  check("app: sign-out with unsaved changes asks before losing them", askOut && askOut.h1 === "Portal de prueba", askOut ? askOut.text : "no notice");
   const stillSignedIn = await page.evaluate((k) => Boolean(localStorage.getItem(k)), STORAGE_KEY);
   check("app: nothing is discarded until the person confirms", stillSignedIn && !(await page.$("#email")));
   await page.click("text=Salir y perder los cambios");
@@ -1189,7 +1220,7 @@ async function sessionEndDraftRun(browser, base, html, other) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
-  await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+  await openProject(page);
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   let frame = await appPiece(page);
   await frame.evaluate(() => responder("q-001", "si"));
@@ -1204,7 +1235,7 @@ async function sessionEndDraftRun(browser, base, html, other) {
     try { return JSON.parse(storage[QUESTIONS_KEY]).respuestas["q-003"]?.texto === "Escrito al final de la sesión"; } catch { return false; }
   };
   check(`${tag}: the change made after the session expired was refused by the server`, refused && !edited(backend.draft));
-  // Going home finds the session over (401) and lands on the sign-in screen.
+  // Going back to the project finds the session over (401) and lands on the sign-in screen.
   await page.click(".back-link");
   const ended = await waitFor(async () => page.evaluate(() => {
     const n = document.querySelector("[data-rol=avisos] .notice");
@@ -1222,6 +1253,7 @@ async function sessionEndDraftRun(browser, base, html, other) {
       JSON.stringify(backend.drafts.map((d) => d.sub)));
     const homeB = await page.evaluate(() => ({ notice: document.querySelector("[data-rol=avisos] .notice")?.textContent || null, rows: document.querySelectorAll(".row").length }));
     check(`${tag}: B's home does not warn about A's unsaved changes`, homeB.rows === 1 && !homeB.notice, JSON.stringify(homeB));
+    await openProject(page);
     await page.click(`a[href="#/piece/${IDS.questions}"]`);
     frame = await appPiece(page);
     const seenByB = frame && await frame.evaluate(() => ({ answered: respondidas(), q1: ST.respuestas["q-001"] || null, q3: ST.respuestas["q-003"] || null }));
@@ -1232,11 +1264,12 @@ async function sessionEndDraftRun(browser, base, html, other) {
     await page.click(".masthead .button--secondary");
     backend.signInAs = USER;
     await signInThroughScreens(page);
-    await page.waitForSelector(`a[href="#/piece/${IDS.questions}"]`, { timeout: 10000 });
+    await page.waitForSelector(`a[href="#/project/${IDS.project}"]`, { timeout: 10000 });
   }
   const reached = await waitFor(() => backend.draft && edited(backend.draft), 8000);
   check(`${tag}: after ${other ? "A signs" : "signing"} in again, the unsaved change reaches piece_drafts`, reached,
     backend.draft ? JSON.stringify(JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas) : "no server draft");
+  await openProject(page);
   await page.click(`a[href="#/piece/${IDS.questions}"]`);
   frame = await appPiece(page);
   const shown = frame && await frame.evaluate(() => ({ q1: ST.respuestas["q-001"]?.tipo, q3: ST.respuestas["q-003"]?.texto }));
@@ -1537,9 +1570,11 @@ async function closureChecks(browser, base, html) {
       backend.responses.push({ id: "r-partial", piece_id: IDS.replacedDraft, member_id: IDS.member, submitted_at: "2026-10-10T15:00:00.000Z", storage: null, partial: true });
       backend.patch[IDS.demo] = { status: "pending" };
       const { context, page, errors } = await open(backend, width, scheme, "");
-      await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+      // «por responder» is said on home, in the project's row; the list itself is on the project page.
+      await page.waitForSelector(`a[href="#/project/${IDS.project}"]`, { timeout: 10000 }).catch(() => {});
+      const meta = await page.$$eval(`a[href="#/project/${IDS.project}"] .row-meta`, (els) => els.map((e) => e.textContent));
+      await openProject(page).catch(() => {});
       const rows = await page.$$eval(".row", (els) => els.map((e) => ({ text: e.textContent, status: e.querySelector(".status")?.className || "" })));
-      const meta = await page.$$eval(".page-meta", (els) => els.map((e) => e.textContent));
       const row = (title) => rows.find((r) => r.text.includes(title));
       const received = row("Preguntas sobre Biblioteca del barrio");
       const requested = CLOSURE.listRequested(await formatIn(page, REQUESTED_AT));
@@ -1550,10 +1585,10 @@ async function closureChecks(browser, base, html) {
       check(`${tag}: list: a replaced version that was sent shows as «Recibida» with «${CLOSURE.listNewer}»`, old && old.text.includes(CLOSURE.listReceived) &&
         old.text.includes(CLOSURE.listNewer) && old.status.includes("status--done"), JSON.stringify(old));
       check(`${tag}: list: a replaced version with only a collected draft stays out`, !row("Recorrido de flujos v1") && rows.length === 4, JSON.stringify(rows.map((r) => r.text)));
-      check(`${tag}: list: «por responder» leaves out the sent and the received pieces`, meta.includes("1 por responder"), JSON.stringify(meta));
+      check(`${tag}: list: «por responder» leaves out the sent and the received pieces`, meta.some((m) => m.split(" · ").includes("1 por responder")), JSON.stringify(meta));
       check(`${tag}: list: no horizontal scroll`, await noHorizontalScroll(page));
       await shot(page, "list-received", width, scheme, true);
-      if (first) await snapshot(page, "home-received", "lista");
+      if (first) await snapshot(page, "project-received", "lista");
       check(`${tag}: list: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
     }
@@ -1910,18 +1945,221 @@ async function closureChecks(browser, base, html) {
   }
 }
 
+// ---- the projects home and the project page ---------------------------------------------------------------
+// Home lists the person's projects (the ones with something asked of them, and the ones they own: owner_projects()),
+// each row linking to its page and saying what decides there; a project's page lists what was asked of the person and
+// ends saying what the owner sees; the piece screen goes back to its project; an old email's #/piece/<id> still opens
+// the piece; and opening an open piece records «la abrió» (mark_piece_opened) once per open, never for a closed one,
+// and a call that fails never stops the piece (spec 2026-10-25 página del proyecto §4.1, §4.5).
+const PROJECT = {
+  title: "Tus proyectos",
+  name: "Portal de prueba",
+  owned: "Biblioteca del barrio",
+  askedOfYou: "Lo que se te pidió",
+  ownerSees: "El responsable del proyecto ve cuándo abres lo que te compartimos y lo que envías.",
+  back: "Tus proyectos",
+  notFoundTitle: "No está disponible",
+  notFound: "No encontramos este proyecto entre los tuyos. Puede que ya no esté disponible.",
+};
+const LAST_RESPONSE_AT = "2026-10-21T15:00:00.000Z";
+// The person (Ana) also owns a second project, where nothing is asked of her.
+function ownerBackend(html) {
+  const backend = newBackend(html);
+  backend.members.push({ id: IDS.ownerMember, project_id: IDS.ownedProject, email: USER.email, user_id: USER.id, role: "owner", display_name: "Ana Pérez" });
+  backend.projects.push({ id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es" });
+  backend.ownedProjects = [{ id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es", people: 1, open_pieces: 2,
+    last_response_at: LAST_RESPONSE_AT }];
+  return backend;
+}
+const projectRowsOf = (page) => page.$$eval(".row-link", (els) => els.map((a) => ({ href: a.getAttribute("href"),
+  title: a.querySelector(".row-title")?.textContent || null, meta: a.querySelector(".row-meta")?.textContent || null })));
+// The page as the person sees it: its title, the back link above it, its sections and the last line of its body.
+const projectView = (page) => page.evaluate(() => {
+  const back = document.querySelector("[data-rol=marco] .back-link");
+  const body = document.querySelector("[data-rol=cuerpo]");
+  return {
+    hash: location.hash, h1: document.querySelector("h1")?.textContent || null,
+    back: back ? { href: back.getAttribute("href"), text: back.textContent, label: back.getAttribute("aria-label"),
+      beforeTitle: Boolean(back.compareDocumentPosition(document.querySelector("h1")) & Node.DOCUMENT_POSITION_FOLLOWING) } : null,
+    sections: [...document.querySelectorAll("[data-rol=cuerpo] section h2")].map((h) => h.textContent),
+    pieces: [...document.querySelectorAll('[data-rol=cuerpo] .row-link[href^="#/piece/"]')].map((a) => a.getAttribute("href")),
+    last: body && body.lastElementChild ? body.lastElementChild.textContent : null,
+    notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => ({ text: n.querySelector("p")?.textContent, role: n.getAttribute("role") })),
+  };
+});
+const openedCalls = (backend) => backend.requests.filter((r) => r === "POST /rest/v1/rpc/mark_piece_opened").length;
+
+async function projectPageChecks(browser, base, html) {
+  async function open(backend, hash = "", width = 360) {
+    const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    // The failures these checks force (offline, a 404, a 401) log their failed request; anything else is an error.
+    page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(m.text()); });
+    await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+    return { context, page, errors };
+  }
+  const goHash = async (page, hash, ready) => {
+    await page.evaluate((h) => { location.hash = h; }, hash);
+    return waitFor(ready, 10000);
+  };
+
+  // home-projects, project-page, piece-back-to-project and opened-once, on one visit.
+  {
+    const backend = ownerBackend(html);
+    const { context, page, errors } = await open(backend);
+    await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+    const view = await page.evaluate(() => ({ h1: document.querySelector("h1")?.textContent, lang: document.documentElement.lang,
+      meta: [...document.querySelectorAll(".page-meta")].map((p) => p.textContent) }));
+    const rows = await projectRowsOf(page);
+    const last = await formatIn(page, LAST_RESPONSE_AT);
+    check("home-projects: the title is «Tus proyectos», with how many projects and who is signed in", view.h1 === PROJECT.title && view.lang === "es" &&
+      view.meta[0] === "2 proyectos" && view.meta[1] === `Entraste como ${USER.email}`, JSON.stringify(view));
+    check("home-projects: one row per project, by name, each linking to #/project/…, and no piece on home", rows.length === 2 &&
+      rows[0].href === `#/project/${IDS.ownedProject}` && rows[1].href === `#/project/${IDS.project}` && !(await page.$('a[href^="#/piece/"]')), JSON.stringify(rows));
+    check("home-projects: the person's project says what is left to answer", rows[1] && rows[1].title === PROJECT.name && rows[1].meta === "1 por responder",
+      JSON.stringify(rows[1]));
+    check("home-projects: an owned project says so, with its people, what is pending and the last response", rows[0] && rows[0].title === PROJECT.owned &&
+      rows[0].meta === `Eres responsable · 1 persona · 2 pendientes · última respuesta el ${last}`, JSON.stringify(rows[0]));
+    check("home-projects: 360px no horizontal scroll", await noHorizontalScroll(page));
+    await page.screenshot({ path: join(outDir, "home-projects-360.png"), fullPage: true });
+    await snapshot(page, "home-projects", "lista");
+    const homeAxe = await axeViolations(page);
+    if (homeAxe) check("home-projects: axe has no violations", homeAxe.length === 0, homeAxe.join(", "));
+
+    await openProject(page).catch(() => {});
+    const project = await projectView(page);
+    check("project-page: the title is the project's name, under «← Tus proyectos», which goes home", project.hash === `#/project/${IDS.project}` &&
+      project.h1 === PROJECT.name && project.back && project.back.href === "#/" && project.back.text.includes(PROJECT.back) && project.back.beforeTitle,
+      JSON.stringify(project));
+    check(`project-page: «${PROJECT.askedOfYou}» lists the person's pieces, each opening it`, project.sections[0] === PROJECT.askedOfYou &&
+      project.pieces.length === 3 && [IDS.questions, IDS.flow, IDS.demo].every((id) => project.pieces.includes(`#/piece/${id}`)), JSON.stringify(project));
+    check("project-page: it ends with the line that says what the owner sees", project.last === PROJECT.ownerSees, JSON.stringify(project.last));
+    check("project-page: 360px no horizontal scroll", await noHorizontalScroll(page));
+    await page.screenshot({ path: join(outDir, "project-page-360.png"), fullPage: true });
+    await snapshot(page, "project-page", "lista");
+    const projectAxe = await axeViolations(page);
+    if (projectAxe) check("project-page: axe has no violations", projectAxe.length === 0, projectAxe.join(", "));
+    check("project-page: opening the list records no opening", openedCalls(backend) === 0, String(openedCalls(backend)));
+
+    // The piece screen goes back to its project, with its name.
+    await page.click(`a[href="#/piece/${IDS.questions}"]`).catch(() => {});
+    await appPiece(page);
+    const back = await page.evaluate(() => { const a = document.querySelector(".back-link"); return a && { href: a.getAttribute("href"), text: a.textContent, label: a.getAttribute("aria-label") }; });
+    check("piece-back-to-project: the piece's back link goes to its project, named", back && back.href === `#/project/${IDS.project}` &&
+      back.text.includes(PROJECT.name), JSON.stringify(back));
+    check("opened-once: opening an open piece calls mark_piece_opened once, for that piece", await waitFor(() => backend.openedCalls.length === 1, 3000) &&
+      backend.openedCalls[0].p_piece_id === IDS.questions && backend.openedCalls[0].sub === USER.id, JSON.stringify(backend.openedCalls));
+    await page.click(".back-link").catch(() => {});
+    const returned = await waitFor(async () => { const v = await projectView(page); return v.h1 === PROJECT.name && v.pieces.length ? v : null; }, 10000);
+    check("piece-back-to-project: it lands on the project's page", returned && returned.hash === `#/project/${IDS.project}`, JSON.stringify(returned));
+    await page.click(`a[href="#/piece/${IDS.questions}"]`).catch(() => {});
+    await appPiece(page);
+    await sleep(500);
+    check("opened-once: opening it again calls it once more (the server keeps the first date)", backend.openedCalls.length === 2, JSON.stringify(backend.openedCalls));
+    // A closed piece (received) records nothing.
+    backend.patch[IDS.demo] = { status: "received", updated_at: RECEIVED_AT };
+    backend.responses.push({ id: "r-demo", piece_id: IDS.demo, member_id: IDS.member, submitted_at: SENT_AT, storage: null, partial: false });
+    await goHash(page, `#/piece/${IDS.demo}`, async () => (await page.$("iframe.piece-frame")) && (await page.textContent("h1.piece-title").catch(() => "")) === "Demo v2");
+    await sleep(1000);
+    check("opened-once: a closed piece records no opening", backend.openedCalls.length === 2 && openedCalls(backend) === 2, JSON.stringify(backend.openedCalls));
+
+    // An owned project with nothing asked of the person: its page, without «Lo que se te pidió».
+    const owned = await goHash(page, `#/project/${IDS.ownedProject}`, async () => { const v = await projectView(page); return v.h1 === PROJECT.owned ? v : null; });
+    check(`project-page: an owned project with nothing asked of the person has no «${PROJECT.askedOfYou}»`, owned && !owned.sections.includes(PROJECT.askedOfYou) &&
+      owned.pieces.length === 0 && owned.back && owned.back.href === "#/", JSON.stringify(owned));
+    // A project that is not the person's: the not-found notice, as a piece.
+    const unknown = await goHash(page, `#/project/${IDS.unknownProject}`, async () => { const v = await projectView(page); return v.h1 === PROJECT.notFoundTitle ? v : null; });
+    check("project-page: a project that is not the person's says it is not available", unknown && unknown.notices.length === 1 &&
+      unknown.notices[0].text === PROJECT.notFound && unknown.pieces.length === 0, JSON.stringify(unknown));
+    check("home-projects / project-page: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // An owner with something left to answer in their own project: both are said on its row.
+  {
+    const backend = ownerBackend(html);
+    backend.ownedProjects.push({ id: IDS.project, slug: "portal-test", name: PROJECT.name, language: "es", people: 2, open_pieces: 1, last_response_at: null });
+    const { context, page, errors } = await open(backend);
+    await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+    const rows = await projectRowsOf(page);
+    check("home-projects: an owned project with something to answer says both, without a last response it does not have",
+      rows[1] && rows[1].meta === "1 por responder · Eres responsable · 2 personas · 1 pendiente", JSON.stringify(rows[1]));
+    check("home-projects: owner and something to answer: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // An old database (no owner_projects): home still lists the person's projects; everything sent says so.
+  {
+    const backend = ownerBackend(html);
+    backend.ownerRpcsMissing = true;
+    backend.submits.push({ p_piece_id: IDS.questions, p_payload: {}, submitted_at: SENT_AT });
+    const { context, page, errors } = await open(backend);
+    await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+    const rows = await projectRowsOf(page);
+    const notices = await page.$$eval("[data-rol=avisos] .notice", (els) => els.map((n) => n.textContent));
+    check("home-projects: without owner_projects (an old database) home lists the person's projects, without a notice",
+      rows.length === 1 && rows[0].href === `#/project/${IDS.project}` && rows[0].meta === "Todo enviado" && notices.length === 0 &&
+      backend.requests.some((r) => r.startsWith("POST /rest/v1/rpc/owner_projects")), JSON.stringify({ rows, notices }));
+    check("home-projects: an old database: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // owner_projects fails otherwise: the list cannot be trusted, so home says it could not load, with «Reintentar».
+  {
+    const backend = ownerBackend(html);
+    backend.ownerRpcsFail = true;
+    const { context, page } = await open(backend);
+    const alert = await waitFor(() => page.evaluate(() => document.querySelector("[data-rol=avisos] .notice[role=alert]")?.textContent || null), 8000);
+    check("home-projects: another owner_projects error shows the load error with «Reintentar»", alert && alert.includes("No pudimos cargar") &&
+      alert.includes("Reintentar") && !(await page.$(".row-link")), String(alert));
+    await context.close();
+  }
+
+  // opened-call-fails: offline, a database without the function, an ended session: the piece opens and saves anyway.
+  for (const mode of ["network", "missing", "expired"]) {
+    const backend = newBackend(html);
+    backend.openedFails = mode;
+    const { context, page, errors } = await open(backend, `#/piece/${IDS.questions}`);
+    const frame = await appPiece(page);
+    const tried = await waitFor(() => openedCalls(backend) === 1, 3000);
+    if (frame) await frame.evaluate(() => responder("q-001", "si"));
+    const saved = frame && await waitFor(async () => backend.drafts.length && (await page.textContent(".piece-status")).includes("Guardado"), 5000);
+    const alerts = await page.$$eval("[data-rol=avisos] .notice", (els) => els.map((n) => n.textContent));
+    check(`opened-call-fails (${mode}): the piece mounts and a change still saves, with no notice`, tried && frame && saved && alerts.length === 0,
+      JSON.stringify({ tried, frame: Boolean(frame), saved, alerts }));
+    check(`opened-call-fails (${mode}): no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // old-email-link: #/piece/<id> from an email opens the piece, which goes back to its project.
+  {
+    const backend = newBackend(html);
+    const { context, page, errors } = await open(backend, `#/piece/${IDS.questions}`);
+    const frame = await appPiece(page);
+    const state = await page.evaluate(() => ({ hash: location.hash, title: document.querySelector("h1.piece-title")?.textContent,
+      back: document.querySelector(".back-link")?.getAttribute("href") }));
+    check("old-email-link: #/piece/<id> still opens the piece, which goes back to its project", frame && state.hash === `#/piece/${IDS.questions}` &&
+      state.title === "Preguntas sobre Biblioteca del barrio" && state.back === `#/project/${IDS.project}`, JSON.stringify(state));
+    check("old-email-link: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 // ---- the portal's own frame, measured with the factory's geometry ----------------------------------------
 // The visual manual's frame rules (marco.md: one frame, one page margin on both sides from 672 px and the frame not
 // cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
 // FUN-43; and the rest that geometria.mjs measures on the factory's pieces), on every portal screen at the factory's
 // verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
-// - the four screen snapshots (sign-in email and code steps, home with pieces and empty) through the factory's
-//   design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the four
+// - the five screen snapshots (sign-in email and code steps, home with the projects and empty, a project's page) through
+//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the five
 //   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
 // - the piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
 //   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
 //   its pieces at the width the person sees them; also at 1600, past the frame's cap.
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
+// The screens every run captures and measures: the sign-in steps, home (the projects, and empty) and a project's page.
+const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
 // A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the centred empty home
 // passes FUN-43 on its own.
@@ -1942,11 +2180,11 @@ async function portalGeometryChecks(browser, base, html, factory) {
   const { widthInPortal } = await import(pathToFileURL(join(assets, "piece-host.mjs")).href);
   const passes = (r) => r.ok || Boolean(r.exceptuada);
   const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
-  const names = ["sign-in-email", "sign-in-code", "home-pieces", "home-empty"];
-  check("geometry: the four screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+  const names = PORTAL_SCREENS;
+  check("geometry: the five screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
   const server = await serveDir(screensDir);
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const frames = {}; // `${width}-${scheme}` -> the frame's content box on home (the other screens' reference)
+  const frames = {}; // `${width}-${scheme}` -> the frame's content box on home, the projects (the other screens' reference)
   try {
     for (const scheme of ["light", "dark"]) {
       const records = [], byScreen = new Map();
@@ -1957,11 +2195,11 @@ async function portalGeometryChecks(browser, base, html, factory) {
         const m = await page.evaluate(MEDIR_GEOMETRIA, {});
         await page.close();
         records.push({ pantalla: name, recorrido: "portal", paso: 0, w: width, m });
-        if (name === "home-pieces" && m.contenedor) frames[`${width}-${scheme}`] = m.contenedor;
+        if (name === "home-projects" && m.contenedor) frames[`${width}-${scheme}`] = m.contenedor;
         byScreen.set(`${name}|${width}`, evaluaAncho(m, { patron: screens.get(name), angosto: false, admiteCompleto: false, marca: null,
           excepciones: GEOMETRY_EXCEPTIONS[name] || {} }));
       }
-      const between = evaluaConjunto(records, { grupoDe: () => "portal", modelos: { portal: "home-pieces" }, patronDe: (n) => screens.get(n),
+      const between = evaluaConjunto(records, { grupoDe: () => "portal", modelos: { portal: "home-projects" }, patronDe: (n) => screens.get(n),
         excepcionesDe: (n) => GEOMETRY_EXCEPTIONS[n] || {} });
       for (const r of between) byScreen.get(`${r.pantalla}|${r.w}`).push(r);
       for (const [key, rules] of byScreen) {
@@ -2025,6 +2263,7 @@ try {
   if (args.questions) await questionsChecks(browser, base, read(args.questions));
   if (args.flow) await flowChecks(browser, base, read(args.flow));
   if (args.demo) await demoChecks(browser, base, read(args.demo));
+  if (args.questions) await projectPageChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
@@ -2044,7 +2283,7 @@ if (args.factory) {
   const verifier = join(resolve(args.factory), "design-system", "assets", "verifica-pantalla.mjs");
   if (!existsSync(verifier)) check("manual: verifica-pantalla.mjs found", false, verifier);
   else {
-    check("manual: the four screens were captured", ["sign-in-email", "sign-in-code", "home-pieces", "home-empty"].every((n) => screens.has(n)), [...screens.keys()].join(", "));
+    check("manual: the five screens were captured", PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
     for (const [name, pattern] of screens) {
       for (const width of [320, 768, 1440]) {
         for (const scheme of ["light", "dark"]) {
