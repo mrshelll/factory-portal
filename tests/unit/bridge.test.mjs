@@ -425,3 +425,9 @@ test("observer never posts drafts", async () => {
   assert.equal(of("factory:dirty").length, 0);
   assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:flushed"]);
 });
+
+test("observer never posts submit", async () => {
+  const { win, of } = runBridge({ host: { closed: "received", observer: true } });
+  assert.deepEqual(await plain(win.factorySubmit(questions())), { ok: false, error: "rejected" });
+  assert.equal(of("factory:submit").length, 0);
+});

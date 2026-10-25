@@ -45,7 +45,7 @@
 //    passes it only with `closed`; false otherwise, so a piece can hide its send controls). With `closed` set the bridge posts no factory:draft, factory:dirty nor
 //    factory:save-failed: the piece may still write the shim (in memory), but nothing leaves the
 //    iframe, so the server draft keeps the person's unsent changes. factory:flush still answers
-//    factory:flushed and factorySubmit still sends (the server turns it into a late change
+//    factory:flushed and factorySubmit still sends (except with `observer`: it resolves rejected and posts nothing) (the server turns it into a late change
 //    request). The fields are sanitized in the parent before injection. It also sets
 //    `data-factory-host="portal"` on the piece's <html> before any of the piece is parsed, so the
 //    piece's CSS can drop its own brand bar inside the portal without a flash.
@@ -222,6 +222,7 @@ function bridgeRuntime(cfg) {
   }
 
   function factorySubmit(payload) {
+    if (cfg.observer) return Promise.resolve({ ok: false, error: "rejected" }); // the owner never sends for anyone
     if (inflight) return inflight.promise;
     var json;
     try { json = JSON.stringify(payload); } catch (e) { json = undefined; }
