@@ -212,10 +212,19 @@ empty state).
   `factory_reopen`, `factory_fetch_change_requests` and `factory_mark_change_requests_fetched` (execute
   for `service_role` only). Applied to `factory` on 2026-10-23; its name carries the version Supabase
   registered. It is idempotent.
+- `20261025120000_project_page.sql` is the project page: `first_opened_at` on assignments (the first
+  time the assigned person opens the piece in the portal; null for assignments from before it),
+  `mark_piece_opened` for the person (only the first open counts; status and `updated_at` are not
+  touched), the owner's read-only functions `owner_projects`, `owner_project` and `owner_piece`
+  (execute for `authenticated`; each checks first that the caller is the project's `owner`, and none
+  returns a draft: nothing from `piece_drafts`, no partial response, no storage of a change request)
+  and the factory-only `factory_set_owner` (execute for `service_role` only). No policy is added: a
+  person still reads only their own rows. **Not applied to `factory` yet**; when it is, the file is
+  renamed to the version Supabase registers. It is idempotent.
 
-`tests/sql/factory-connection-checks.sql` checks the factory connection migration and
-`tests/sql/piece-closure-checks.sql` checks the piece closure, both against the database (see their
-headers).
+`tests/sql/factory-connection-checks.sql` checks the factory connection migration,
+`tests/sql/piece-closure-checks.sql` checks the piece closure and `tests/sql/project-page-checks.sql`
+checks the project page, all against the database (see their headers).
 
 ## Keeping Supabase awake
 
