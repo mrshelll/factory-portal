@@ -346,7 +346,7 @@ test("factoryHost carries closed and sentAt", () => {
   const open = runBridge().win.factoryHost;
   assert.equal(open.closed, null, "an open piece has closed null");
   assert.equal(open.sentAt, null);
-  assert.deepEqual(Object.keys(open).sort(), ["closed", "persistence", "reviewerName", "sentAt"]);
+  assert.deepEqual(Object.keys(open).sort(), ["closed", "observer", "persistence", "reviewerName", "sentAt"]);
 });
 
 test("closed accepts only received or replaced", () => {
@@ -394,4 +394,34 @@ test("closed bridge still answers flush and submit", async () => {
   assert.equal(of("factory:draft").length, 0, "submit does not flush a draft either");
   fromParent({ type: "factory:submit-result", nonce: "n-1", requestId: submit.requestId, ok: true });
   assert.deepEqual(await plain(result), { ok: true });
+});
+
+// ---- observer: the project owner is reading the piece -----------------------------------------
+
+test("observer is true only with closed", () => {
+  const read = (host) => runBridge({ host }).win.factoryHost.observer;
+  assert.equal(read({ closed: "received", observer: true }), true);
+  assert.equal(read({ closed: "replaced", observer: true }), true);
+  assert.equal(read({ observer: true }), false, "an open piece is never observed");
+  assert.equal(read({ closed: "bogus", observer: true }), false);
+  for (const observer of ["true", 1, {}, ["x"], null, false]) {
+    assert.equal(read({ closed: "received", observer }), false, String(JSON.stringify(observer)));
+  }
+});
+
+test("observer is false by default", () => {
+  assert.equal(runBridge().win.factoryHost.observer, false);
+  assert.equal(runBridge({ host: { closed: "received" } }).win.factoryHost.observer, false);
+  assert.ok(Object.isFrozen(runBridge({ host: { closed: "received", observer: true } }).win.factoryHost));
+});
+
+test("observer never posts drafts", async () => {
+  const { win, posted, of, fromParent } = runBridge({ host: { closed: "received", observer: true, sentAt: "2026-10-22T15:00:00Z" }, storage: { k: "sent" } });
+  win.localStorage.setItem("k", "changed");
+  win.dispatchPagehide();
+  fromParent({ type: "factory:flush", nonce: "n-1" });
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal(of("factory:draft").length, 0);
+  assert.equal(of("factory:dirty").length, 0);
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:flushed"]);
 });

@@ -37,15 +37,16 @@
 //    "session-expired", "rejected"). A second call while one is in flight returns the same
 //    promise. Downloads are not touched, so the piece's own "Download a copy" works as usual.
 //
-// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName, closed, sentAt }`.
+// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName, closed, observer, sentAt }`.
 //    `persistence` is "server" when the localStorage shim took, "none" otherwise. `closed` is
 //    "received" or "replaced" when the piece is closed (read-only: the factory already collected it,
 //    or a newer version replaced it), null otherwise; `sentAt` is when the person sent it (an ISO
-//    string) or null. With `closed` set the bridge posts no factory:draft, factory:dirty nor
+//    string) or null. `observer` is true when the project owner is reading the piece (the portal
+//    passes it only with `closed`; false otherwise, so a piece can hide its send controls). With `closed` set the bridge posts no factory:draft, factory:dirty nor
 //    factory:save-failed: the piece may still write the shim (in memory), but nothing leaves the
 //    iframe, so the server draft keeps the person's unsent changes. factory:flush still answers
 //    factory:flushed and factorySubmit still sends (the server turns it into a late change
-//    request). Both fields are sanitized in the parent before injection. It also sets
+//    request). The fields are sanitized in the parent before injection. It also sets
 //    `data-factory-host="portal"` on the piece's <html> before any of the piece is parsed, so the
 //    piece's CSS can drop its own brand bar inside the portal without a flash.
 //
@@ -251,6 +252,7 @@ function bridgeRuntime(cfg) {
     persistence: persistence ? "server" : "none",
     reviewerName: cfg.reviewerName,
     closed: closed,
+    observer: cfg.observer,
     sentAt: cfg.sentAt,
   }));
 
@@ -302,6 +304,11 @@ function cleanClosed(host) {
   return host && CLOSED_STATES.includes(host.closed) ? host.closed : null;
 }
 
+// True only when the owner is reading (host.observer === true) a closed piece; anything else is false.
+function cleanObserver(host) {
+  return cleanClosed(host) !== null && host.observer === true;
+}
+
 // Any string Date.parse accepts (the portal passes the response's submitted_at); anything else is null.
 function cleanSentAt(host) {
   const value = host && typeof host.sentAt === "string" ? host.sentAt.trim() : "";
@@ -310,7 +317,7 @@ function cleanSentAt(host) {
 
 const positiveOr = (value, fallback) => (Number.isFinite(value) && value > 0 ? value : fallback);
 
-// host: { reviewerName, closed, sentAt } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
+// host: { reviewerName, closed, observer, sentAt } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
 export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, submitTimeoutMs = SUBMIT_TIMEOUT_MS, quotaChars = STORAGE_QUOTA_CHARS }) {
   if (typeof nonce !== "string" || !nonce) throw new Error("buildBridgeScript needs a nonce");
   const cfg = {
@@ -325,6 +332,7 @@ export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, su
     submitTimeoutMs: positiveOr(submitTimeoutMs, SUBMIT_TIMEOUT_MS),
     reviewerName: cleanReviewerName(host),
     closed: cleanClosed(host),
+    observer: cleanObserver(host),
     sentAt: cleanSentAt(host),
   };
   return `<script>(${bridgeRuntime.toString()})(${serializeForScript(cfg)});</script>`;
