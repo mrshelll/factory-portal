@@ -36,10 +36,14 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    Length" in the Supabase dashboard (this project uses 8). The session
    persists and refreshes on its own (supabase-js defaults). Supabase allows one email per 60 s; the
    code screen shows the countdown and survives a reload (the pending email is kept for one hour).
-2. **Home**: the pieces assigned to the person, grouped by project, with status (not started, in
-   progress, sent) and date. The list never fetches `pieces.html`; it is fetched only when a piece is
-   opened.
-3. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
+2. **Home** («Tus proyectos»): the projects the person belongs to, one row each, with what is left to
+   answer; a project the person owns says so (with its people, what is pending and the last response).
+   The lists never fetch `pieces.html`; it is fetched only when a piece is opened.
+3. **A project's page** (`#/project/<id>`): the person's own items under «Lo que se te pidió», grouped
+   as before, with status (not started, in progress, sent, received) and date, and a line saying that
+   the project's owner can see when they open what was shared and what they send. Every item opens
+   at `#/piece/<id>`. See **The owner's part** below.
+4. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
    normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
@@ -52,11 +56,39 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    Only when the server has a send that the piece's saved draft cannot show (the draft was last saved
    at or before it, or there is none: the piece did not get to save its «sent» mark) does the line say
    «Enviada el …», until the person changes something or sends again.
-4. **A replaced version** (the factory published a newer one; the home list hides the old one) still
+5. **A replaced version** (the factory published a newer one; the home list hides the old one) still
    opens from an old email or a tab left open, and can still send. Until it is sent, a fixed notice says
    there is a newer version, links to it (the newest piece of the same kind in the project among the
    person's own assignments, or the list), and the status line reads «Guardado aquí, sin enviar»: a
    draft saved there never reaches the factory, only a send does.
+
+### The owner's part
+
+Routes: `#/` (home), `#/project/<id>`, `#/piece/<id>` and `#/project/<p>/piece/<x>/person/<m>` (the owner
+reading one person's send). The routes are pure functions in `js/project.js`.
+
+The owner of a project (the member with `role = 'owner'`, which the factory sets after a publish through `factory_set_owner`) sees,
+besides their own items, the section «Cómo va cada cosa que compartiste»: per piece, one entry per person
+assigned, with their state and date: «Por empezar», «La abrió», «En curso», «Enviada», «Recibida» or
+«Reemplazada». A change request is said by its date, never its text. The owner can open what a person sent: the
+same piece, closed and read only, with «Lo que envió <name> el <date>» in the title band. The owner never
+responds, saves or sends for anyone: that screen posts nothing.
+
+**What the owner never sees: drafts.** Not `piece_drafts`, not a response with `partial = true`, not the
+storage of a change request. A person whose only responses are partial, or whose send predates the stored
+`storage`, shows state and date but no link to open: the piece is never seeded with a draft. An old piece
+(stored before the bridge had the observer mode) still opens closed and read only.
+
+**How «La abrió» is recorded.** The first time the assigned person opens the piece in the portal, the portal calls
+`mark_piece_opened`, which sets `first_opened_at` on that assignment once (a second open keeps the first date;
+status and `updated_at` do not change). It does not count when the person opens the email, nor when the owner
+opens someone's piece. An assignment from before the migration has no date and shows none. If the call fails
+(network, expired session, a database without the function) the piece opens and works anyway.
+
+All of this reads through `security definer` functions that first check the caller is the project's owner
+(`owner_projects`, `owner_project`, `owner_piece`); no policy was added to the tables. A person who owns one
+project and is asked things in another sees the owner's part only in the first. The owner's own items in their
+project are normal pieces (drafts, send), and opening them records their own «La abrió».
 
 Text shown to people follows the project language (`projects.language`, `es` or `en`); before the
 project is known (sign-in), the browser language is used, Spanish by default. All strings live in
@@ -212,7 +244,8 @@ empty state).
   `factory_reopen`, `factory_fetch_change_requests` and `factory_mark_change_requests_fetched` (execute
   for `service_role` only). Applied to `factory` on 2026-10-23; its name carries the version Supabase
   registered. It is idempotent.
-- `20261025120000_project_page.sql` is the project page: `first_opened_at` on assignments (the first
+- `20261025120000_project_page.sql` is the project page (the routes and the owner's part are described under
+  **The owner's part**): `first_opened_at` on assignments (the first
   time the assigned person opens the piece in the portal; null for assignments from before it),
   `mark_piece_opened` for the person (only the first open counts; status and `updated_at` are not
   touched), the owner's read-only functions `owner_projects`, `owner_project` and `owner_piece`
@@ -241,7 +274,7 @@ pause again a week later.
 ## Tests
 
 ```sh
-npm test   # node --test: bridge, message validation, draft queue, errors, i18n, sync-brand
+npm test   # node --test: bridge, message validation, draft queue, errors, i18n, closure, project routes and states, sync-brand
 node tests/browser/run-checks.mjs --questions <questions-piece.html> --flow <flow-review-piece.html> \
   --demo <demo-sheet.html> --out <dir> --factory <path to the software factory repo>
 node scripts/sync-brand.mjs --from <path to the software factory repo> --check
@@ -310,26 +343,35 @@ The checks expect these fixtures (the questions sheet for Ana Pérez in `portal-
 `https://example.com/`). Re-emit the pieces whenever a template changes in the factory. The harness takes `submitTimeoutMs` and `quotaChars`
 options so the timeout and the storage quota can be lowered for a check. `tests/harness.html` can also be opened by hand in any browser to try a piece file.
 
-**Visual manual.** Each run saves four screens to `<out>/screens/`: `sign-in-email.html`,
-`sign-in-code.html` (pattern `formulario`), `home-pieces.html` and `home-empty.html` (pattern
-`lista`); with `--questions`, also `home-received.html` (`lista`, the list with closed pieces), which goes
-through `verifica-pantalla.mjs` only. Each one is the rendered DOM without scripts, next to a copy of `css/` and `brand/`, so it
+**The project page and the owner's part.** With `--questions`, the checks cover home «Tus proyectos» and a
+project's page (its own items, the note about what the owner sees, a person who owns one project and is asked things in another,
+the owner who also has a piece assigned in their own project, and `mark_piece_opened` failing: the piece opens
+anyway). With `--questions`, `--flow` and `--demo` together, the owner's part: every state and date, the three
+kinds of piece opened read only, a send kept without its storage (no link), an old piece, and that the owner's
+screens save, send and ask nothing and never read a draft.
+
+**Visual manual.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
+`sign-in-code.html` (pattern `formulario`) and `home-empty.html` (pattern `lista`); with `--questions`, also
+`home-projects.html` and `project-page.html` (`lista`) and `project-received.html` (`lista`, a project with closed
+pieces), which goes through `verifica-pantalla.mjs` only; with `--questions`, `--flow` and `--demo`, also
+`project-owner.html` (`lista`, an owned project with the owner's part). That is six screens measured, seven
+snapshots in all. Each one is the rendered DOM without scripts, next to a copy of `css/` and `brand/`, so it
 looks exactly as in the app. With `--factory`, every screen goes through the factory's
 `design-system/assets/verifica-pantalla.mjs` (the visual manual's checks and axe) at 320, 768 and
 1440 px, in light and dark, and each run is one check (its JSON is saved next to the screen). To
 re-run one by hand:
 
 ```sh
-node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/home-pieces.html \
+node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/home-projects.html \
   --patron lista --ancho 768 --color-scheme dark
 ```
 
-**The portal's frame.** With `--factory`, the same four screens also go through the factory's
+**The portal's frame.** With `--factory`, the same six screens also go through the factory's
 `design-system/assets/geometria.mjs`, the frame measure the factory's pieces are held to, at 320, 672, 1056 and
 1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
-parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the four screens (MAR-02), and
+parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the six screens (MAR-02), and
 every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
-names what fails. The piece screen is checked at the same widths and at 1600: its frame on the other screens' edges
+names what fails. The piece screen, and the owner's read-only piece screen, are checked at the same widths and at 1600: its frame on the other screens' edges
 with the page margin on both sides, and its iframe over the frame's box, as wide as the factory's
 `design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the factory measures its pieces inside the
 portal at the width a person sees them.
@@ -341,10 +383,11 @@ portal at the width a person sees them.
 | `index.html`, `css/portal.css` | Page shell and the portal's own styles (on top of the brand and its components) |
 | `brand/` | Generated copy of the ninben brand (`ninben.css`, `ninben-components.css`, `logo.svg`, `fonts/`) |
 | `scripts/sync-brand.mjs` | Copies the brand from the software factory repo, or checks the copy |
-| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection and the piece closure |
+| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection, the piece closure and the project page |
 | `.github/workflows/keep-alive.yml` | Calls `keep_alive()` every 3 days so Supabase does not pause |
 | `config.js` | Public Supabase configuration |
-| `js/app.js` | Router and screens: sign in, home, piece |
+| `js/app.js` | Router and screens: sign in, home, a project's page (and the owner's part), piece |
+| `js/project.js` | Routes and the states the owner reads, as pure functions |
 | `js/api.js` | Supabase queries and RPCs |
 | `js/bridge.js` | Script injected into each piece (storage shim, `factorySubmit`, `factoryHost`) |
 | `js/piece-frame.js` | Mounts a piece in the sandboxed iframe and speaks the bridge protocol |
