@@ -1606,7 +1606,7 @@ async function closureChecks(browser, base, html) {
       const { context, page, errors } = await open(backend, width, scheme, "");
       // «por responder» is said on home, in the project's row; the list itself is on the project page.
       await page.waitForSelector(`a[href="#/project/${IDS.project}"]`, { timeout: 10000 }).catch(() => {});
-      const meta = await page.$$eval(`a[href="#/project/${IDS.project}"] .row-meta`, (els) => els.map((e) => e.textContent));
+      const meta = await page.$$eval(`a[href="#/project/${IDS.project}"] .row-aside`, (els) => els.map((e) => e.textContent));
       await openProject(page).catch(() => {});
       const rows = await page.$$eval(".row", (els) => els.map((e) => ({ text: e.textContent, status: e.querySelector(".status")?.className || "" })));
       const row = (title) => rows.find((r) => r.text.includes(title));
@@ -1995,21 +1995,29 @@ const PROJECT = {
   notFoundTitle: "No está disponible",
   notFound: "No encontramos este proyecto entre los tuyos. Puede que ya no esté disponible.",
 };
-const LAST_RESPONSE_AT = "2026-10-21T15:00:00.000Z";
-// The person (Ana) also owns a second project, where nothing is asked of her.
+// What owner_projects() answers for a project, worked out from what owner_project answers for it, as the SQL does: its
+// people (the members who are not owners), its open pieces (with an assignment pending or in progress) and its newest
+// send. So home and the project's page always speak of the same project.
+function ownerSummary(view) {
+  const sends = view.pieces.flatMap((p) => p.assignments).map((a) => a.sent_at).filter(Boolean).sort();
+  return { ...view.project, people: view.members.filter((m) => m.role !== "owner").length,
+    open_pieces: view.pieces.filter((p) => p.assignments.some((a) => a.status === "pending" || a.status === "in_progress")).length,
+    last_response_at: sends.at(-1) || null };
+}
+// The person (Ana) also owns a second project, «Biblioteca del barrio» (ownedView), where nothing is asked of her.
 function ownerBackend(html) {
   const backend = newBackend(html);
+  const view = ownedView();
   backend.members.push({ id: IDS.ownerMember, project_id: IDS.ownedProject, email: USER.email, user_id: USER.id, role: "owner", display_name: "Ana Pérez" });
-  backend.projects.push({ id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es" });
-  backend.ownedProjects = [{ id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es", people: 1, open_pieces: 2,
-    last_response_at: LAST_RESPONSE_AT }];
-  // owner_project answers for it; with nobody assigned anything yet, the page has no owner's part.
+  backend.projects.push(view.project);
   backend.ownedIds = [IDS.ownedProject];
-  backend.ownerView[IDS.ownedProject] = { project: backend.projects.at(-1), members: [], pieces: [], change_requests: [] };
+  backend.ownerView[IDS.ownedProject] = view;
+  backend.ownedProjects = [ownerSummary(view)];
   return backend;
 }
 const projectRowsOf = (page) => page.$$eval(".row-link", (els) => els.map((a) => ({ href: a.getAttribute("href"),
-  title: a.querySelector(".row-title")?.textContent || null, meta: a.querySelector(".row-meta")?.textContent || null })));
+  title: a.querySelector(".row-title")?.textContent || null, meta: a.querySelector(".row-meta")?.textContent || null,
+  aside: a.querySelector(".row-aside")?.textContent || null })));
 // The page as the person sees it: its title, the back link above it, its sections and the last line of its body.
 const projectView = (page) => page.evaluate(() => {
   const back = document.querySelector("[data-rol=marco] .back-link");
@@ -2050,16 +2058,25 @@ async function projectPageChecks(browser, base, html) {
     const view = await page.evaluate(() => ({ h1: document.querySelector("h1")?.textContent, lang: document.documentElement.lang,
       meta: [...document.querySelectorAll(".page-meta")].map((p) => p.textContent) }));
     const rows = await projectRowsOf(page);
-    const last = await formatIn(page, LAST_RESPONSE_AT);
+    const last = await formatIn(page, AT.sent);
     check("home-projects: the title is «Tus proyectos», with how many projects and who is signed in", view.h1 === PROJECT.title && view.lang === "es" &&
       view.meta[0] === "2 proyectos" && view.meta[1] === `Entraste como ${USER.email}`, JSON.stringify(view));
     check("home-projects: one row per project, by name, each linking to #/project/…, and no piece on home", rows.length === 2 &&
       rows[0].href === `#/project/${IDS.ownedProject}` && rows[1].href === `#/project/${IDS.project}` && !(await page.$('a[href^="#/piece/"]')), JSON.stringify(rows));
-    check("home-projects: the person's project says what is left to answer", rows[1] && rows[1].title === PROJECT.name && rows[1].meta === "1 por responder",
-      JSON.stringify(rows[1]));
-    check("home-projects: an owned project says so, with its people, what is pending and the last response", rows[0] && rows[0].title === PROJECT.owned &&
-      rows[0].meta === `Eres responsable · 1 persona · 2 pendientes · última respuesta el ${last}`, JSON.stringify(rows[0]));
+    check("home-projects: the person's project says what is left to answer, on the row's right like a list's state", rows[1] && rows[1].title === PROJECT.name &&
+      rows[1].aside === "1 por responder" && !rows[1].meta, JSON.stringify(rows[1]));
+    check("home-projects: an owned project says so on the right, and its people, what is pending and the last response under its name", rows[0] &&
+      rows[0].title === PROJECT.owned && rows[0].aside === "Eres responsable" &&
+      rows[0].meta === `4 personas · 1 cosa con respuestas pendientes · última respuesta el ${last}`, JSON.stringify(rows[0]));
     check("home-projects: 360px no horizontal scroll", await noHorizontalScroll(page));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const wide = await page.$$eval(".rows .row-link", (els) => els.map((a) => {
+      const aside = a.querySelector(".row-aside");
+      return aside ? Math.abs(a.getBoundingClientRect().right - aside.getBoundingClientRect().right) : null;
+    }));
+    check("home-projects: at 1440 every row carries its label on the right edge, as the project lists carry the state (weight spread)",
+      wide.length === 2 && wide.every((gap) => gap !== null && gap <= 1), JSON.stringify(wide));
+    await page.setViewportSize({ width: 360, height: 780 });
     await page.screenshot({ path: join(outDir, "home-projects-360.png"), fullPage: true });
     await snapshot(page, "home-projects", "lista");
     const homeAxe = await axeViolations(page);
@@ -2123,7 +2140,7 @@ async function projectPageChecks(browser, base, html) {
     await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
     const rows = await projectRowsOf(page);
     check("home-projects: an owned project with something to answer says both, without a last response it does not have",
-      rows[1] && rows[1].meta === "1 por responder · Eres responsable · 2 personas · 1 pendiente", JSON.stringify(rows[1]));
+      rows[1] && rows[1].aside === "1 por responder" && rows[1].meta === "Eres responsable · 2 personas · 1 cosa con respuestas pendientes", JSON.stringify(rows[1]));
     check("home-projects: owner and something to answer: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
@@ -2138,7 +2155,7 @@ async function projectPageChecks(browser, base, html) {
     const rows = await projectRowsOf(page);
     const notices = await page.$$eval("[data-rol=avisos] .notice", (els) => els.map((n) => n.textContent));
     check("home-projects: without owner_projects (an old database) home lists the person's projects, without a notice",
-      rows.length === 1 && rows[0].href === `#/project/${IDS.project}` && rows[0].meta === "Todo enviado" && notices.length === 0 &&
+      rows.length === 1 && rows[0].href === `#/project/${IDS.project}` && rows[0].aside === "Todo enviado" && !rows[0].meta && notices.length === 0 &&
       backend.requests.some((r) => r.startsWith("POST /rest/v1/rpc/owner_projects")), JSON.stringify({ rows, notices }));
     check("home-projects: an old database: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
@@ -2195,6 +2212,7 @@ const OWNER = {
   askedChange: (date) => `pidió un cambio el ${date}`,
   lateSend: (date) => `envió después del cierre el ${date}`,
   sentBy: (name, date) => `Lo que envió ${name} el ${date}`,
+  lead: "Aquí ves cuándo cada persona abre y envía lo que compartiste.",
   requestText: "Quiero cambiar el orden de las pantallas",
 };
 const PEOPLE = {
@@ -2276,8 +2294,6 @@ parent.postMessage({ type: "factory:submit", requestId: "forged-1", payload: { f
 function ownerViewBackend(html, flowHtml, demoHtml, storage) {
   const backend = ownerBackend(html);
   const { luis, marta } = PEOPLE;
-  backend.ownedIds = [IDS.ownedProject];
-  backend.ownerView[IDS.ownedProject] = ownedView();
   const response = (s) => ({ id: randomUUID(), submitted_at: AT.sent, storage: s });
   for (const entry of [
     ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: luis, status: "received", response: response(storage) }),
@@ -2309,8 +2325,22 @@ const ownerPart = (page, title = OWNER.section) => page.evaluate((heading) => {
       };
     }),
     text: section.innerText,
+    lead: section.querySelector("h2 + p")?.textContent || null,
   };
 }, title);
+// What the eye weighs, squinting: size and weight of the section's title, a piece's title and a person's name (linked and not).
+const ownerWeights = (page) => page.evaluate(() => {
+  const w = (el) => { if (!el) return null; const cs = getComputedStyle(el); return { size: parseFloat(cs.fontSize), weight: Number(cs.fontWeight), color: cs.color }; };
+  const section = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((s) => s.querySelector(".owner-piece"));
+  if (!section) return null;
+  return { h2: w(section.querySelector("h2")), h3: w(section.querySelector("h3")), link: w(section.querySelector("a .row-title")),
+    plain: w(section.querySelector(".row-item .row-title")), signal: getComputedStyle(document.documentElement).getPropertyValue("--signal").trim() };
+});
+// Each state word's dot as drawn: its border colour and style and its fill (colour and image).
+const ownerDots = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-rol=cuerpo] .owner-piece .status")].map((s) => {
+  const cs = getComputedStyle(s.querySelector(".status-dot"));
+  return [s.textContent, [cs.borderTopColor, cs.borderTopStyle, cs.backgroundColor, cs.backgroundImage].join(" | ")];
+})));
 // The owner's piece screen: its title band, the way back, the pinned zone and the change request form (none of which it has).
 const ownerBand = (page) => page.evaluate(() => {
   const status = document.querySelector(".piece-status");
@@ -2355,7 +2385,10 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
   // owner-project, owner-piece-readonly (the three kinds), owner-no-readable-send and owner-no-drafts, on one visit.
   {
     const backend = ownerViewBackend(html, flowHtml, demoHtml, storage);
-    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`);
+    const { context, page, errors } = await openMocked(browser, base, backend, "");
+    await page.waitForSelector(`a[href="#/project/${IDS.ownedProject}"]`, { timeout: 10000 }).catch(() => {});
+    const homeRow = (await projectRowsOf(page)).find((r) => r.href === `#/project/${IDS.ownedProject}`);
+    await page.click(`a[href="#/project/${IDS.ownedProject}"]`).catch(() => {});
     const part = await waitFor(() => ownerPart(page), 10000);
     const view = await projectView(page);
     const d = Object.fromEntries(await Promise.all(Object.entries(AT).map(async ([k, v]) => [k, await formatIn(page, v)])));
@@ -2398,6 +2431,24 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     check("owner-no-readable-send: a send kept without its storage and a replaced version with only a partial response show their state and date, without a link",
       marta2 && marta2[0].state === S.submitted && marta2[0].meta === d.sent && !marta2[0].href && marta2[1].state === S.replaced && marta2[1].meta === d.assigned && !marta2[1].href,
       JSON.stringify(marta2));
+    // conteo-coherente: what home says of this project is what its page shows: its people, and the pieces still waiting for
+    // someone (an entry «Por empezar», «La abrió» or «En curso»).
+    const shownPeople = new Set(people.map((p) => p.name)).size;
+    const waiting = part ? part.pieces.filter((p) => p.people.some((x) => [S.pending, S.opened, S.in_progress].includes(x.state))).length : -1;
+    const counted = `${shownPeople} personas · ${waiting === 1 ? "1 cosa" : `${waiting} cosas`} con respuestas pendientes · última respuesta el ${d.sent}`;
+    check("owner-project: home counts what the page shows (its people, the pieces still waiting for someone, the last send)", homeRow &&
+      homeRow.meta === counted && homeRow.aside === "Eres responsable" && shownPeople === 4 && waiting === 1, JSON.stringify({ homeRow, counted }));
+    check(`owner-project: the owner's part opens with its own line, and the page has no line for the people asked («${PROJECT.ownerSees}»)`, part &&
+      part.lead === OWNER.lead && !(await page.$("[data-rol=cuerpo] > .page-note")), JSON.stringify({ lead: part && part.lead, first: view.first }));
+    const weights = await ownerWeights(page);
+    const mass = (x) => x && x.size * x.weight;
+    check("owner-project: squinting, the section's title outweighs a piece's title, which outweighs a person's name; a linked name is not bold",
+      weights && mass(weights.h2) > mass(weights.h3) && mass(weights.h3) > mass(weights.link) && mass(weights.h3) > mass(weights.plain) &&
+      weights.link.weight <= 400 && weights.plain.weight <= 400, JSON.stringify(weights));
+    const dots = await ownerDots(page);
+    const marks = Object.values(S).map((word) => dots[word]);
+    check("owner-project: each state has its own dot (no two states drawn alike), in the base's dot family", marks.every(Boolean) &&
+      new Set(marks).size === marks.length, JSON.stringify(dots));
     check("owner-project: the page reads the owner's part through owner_project, for this project", backend.ownerCalls.some((c) => c.rpc === "owner_project" &&
       c.p_project_id === IDS.ownedProject && c.sub === USER.id), JSON.stringify(backend.ownerCalls));
     check("owner-project: 360px no horizontal scroll", await noHorizontalScroll(page));

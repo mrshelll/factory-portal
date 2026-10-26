@@ -98,13 +98,24 @@ main { padding-block: var(--space-6) var(--space-7); }
 @media (min-width: 672px) {
   .row-link, .row-item { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
 }
-/* «La abrió»: the base's hollow dot, in the text colour: between «Por empezar» (hollow grey) and «En curso» (filled). */
-.status--opened .status-dot { --dot: var(--ink); }
+/* What decides on a home row (left to answer, all sent, the owner), on the row's right as a list's state. */
+.row-aside { color: var(--muted); font-size: var(--text-small); }
 
-/* The owner's part of a project's page: per piece its title and kind, then one entry per person. */
+/* One mark per state, all in the base's dot family (COM-13) and the same wherever the state shows; the word says it, the
+   dot repeats it: «Por empezar» the base's hollow grey; «La abrió» half filled in ink; «En curso» filled ink (base);
+   «Enviada» the green ring; «Recibida» filled green (base); «Reemplazada» the grey ring struck through. */
+.status--opened .status-dot { --dot: var(--ink); --dot-fill: linear-gradient(90deg, var(--ink) 50%, transparent 50%); }
+.status--sent .status-dot { --dot: var(--ok); }
+.status--replaced .status-dot { --dot-fill: linear-gradient(135deg, transparent 40%, var(--muted) 40%, var(--muted) 60%, transparent 60%); }
+
+/* The owner's part of a project's page reads, squinting, section > piece > person: the section's title as every
+   section's, its line in muted text; each piece's title smaller and bold, with its kind; each person's name smaller and
+   regular (the link colour only on the ones that open, never bold). */
+.owner-lead { margin-bottom: var(--space-5); color: var(--muted); }
 .owner-piece + .owner-piece { margin-top: var(--space-5); }
-.owner-piece-title { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
-.owner-piece-kind { margin-block: var(--space-1) var(--space-3); color: var(--muted); font-size: var(--text-small); }
+.owner-piece-title { margin: 0; font-size: var(--text-small); font-weight: 600; line-height: 1.4; }
+.owner-piece-kind { margin-block: 0 var(--space-3); color: var(--muted); font-size: var(--text-small); }
+.owner-piece .row-title { font-size: var(--text-small); font-weight: 400; }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 

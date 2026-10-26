@@ -457,8 +457,9 @@ async function sessionEnded() {
 // ---- home -----------------------------------------------------------------------------------
 
 const STATUS_KEYS = { pending: "statusPending", in_progress: "statusInProgress", submitted: "statusSubmitted", received: "statusReceived" };
-// The base's status modifiers (brand/ninben-components.css): pending is the plain hollow dot.
-const STATUS_CLASSES = { pending: "status", in_progress: "status status--active", submitted: "status status--done", received: "status status--done" };
+// The base's status dots (brand/ninben-components.css), one mark per state, the same wherever the state shows (COM-13):
+// pending is the plain hollow dot; sent is the green ring (portal.css), received the filled green.
+const STATUS_CLASSES = { pending: "status", in_progress: "status status--active", submitted: "status status--sent", received: "status status--done" };
 const KIND_KEYS = { questions: "kindQuestions", flow_review: "kindFlowReview", demo_review: "kindDemoReview" };
 // Nothing left to answer: sent, received, or a replaced version (the list only keeps the ones the person had sent).
 const DONE = new Set(["submitted", "received", "replaced"]);
@@ -489,20 +490,20 @@ const sortTime = (item) => Date.parse(item.assignment.updated_at || item.assignm
 const isDone = (item) => DONE.has(item.assignment.status);
 const countOf = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Math.floor(Number(value)) : 0);
 
-// A project on home: its name and what decides there. For the person, what is left to answer (or that everything was
-// sent); for its owner, that they are, its people, what is still pending and the last response, when there is one.
-// An owner with something to answer in it is told that first.
+// A project on home, with the lists' anatomy: its name, and on the row's right what decides there, as a list carries a
+// piece's state. For the person, what is left to answer (or that everything was sent); for an owner with nothing to
+// answer, that they are the owner. Under the name, for its owner: that they are (when the right says what is left to
+// answer), its people, its pieces still waiting for someone and the last response, when there is one; these counts are
+// the ones its page shows (owner_projects() counts as owner_project lists).
 function projectRow({ project, toAnswer, owned, summary }) {
+  const aside = toAnswer > 0 ? t("projectToAnswer", { count: toAnswer }) : owned ? t("projectOwner") : t("projectAllSent");
   const meta = [];
-  if (toAnswer > 0) meta.push(t("projectToAnswer", { count: toAnswer }));
-  else if (!owned) meta.push(t("projectAllSent"));
+  if (owned && toAnswer > 0) meta.push(t("projectOwner"));
   if (owned && summary) {
     const people = countOf(summary.people);
     const open = countOf(summary.open_pieces);
-    meta.push(t("projectOwnerMeta", {
-      people: people === 1 ? t("projectPeopleOne") : t("projectPeople", { count: people }),
-      open: open === 1 ? t("projectOpenOne") : t("projectOpen", { count: open }),
-    }));
+    meta.push(people === 1 ? t("projectPeopleOne") : t("projectPeople", { count: people }));
+    meta.push(open === 1 ? t("projectOpenOne") : t("projectOpen", { count: open }));
     const last = formatDate(state.lang, summary.last_response_at);
     if (last) meta.push(t("projectLastResponse", { date: last }));
   }
@@ -510,7 +511,8 @@ function projectRow({ project, toAnswer, owned, summary }) {
     h("a", { class: "row-link", href: projectHref(project.id) },
       h("span", { class: "row-main" },
         h("span", { class: "row-title" }, project.name || project.slug || t("untitled")),
-        h("span", { class: "row-meta" }, meta.join(" · ")))));
+        meta.length ? h("span", { class: "row-meta" }, meta.join(" · ")) : null),
+      h("span", { class: "row-aside" }, aside)));
 }
 
 const unsavedWarning = (notices) => {
@@ -568,9 +570,11 @@ async function showHome(viewId) {
 // sent, read only (showOwnerPiece); the others are not links. null when nobody was assigned anything yet.
 const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusOpened", in_progress: "ownerStatusInProgress",
   submitted: "ownerStatusSubmitted", received: "ownerStatusReceived", replaced: "ownerStatusReplaced" };
-// The base's status dots (COM-13); «La abrió» has its own (portal.css), between the hollow «Por empezar» and «En curso».
+// The base's status dots (COM-13), one mark per state and the same as in the person's list: «Por empezar» hollow grey,
+// «La abrió» half filled, «En curso» filled, «Enviada» the green ring, «Recibida» filled green, «Reemplazada» the grey
+// ring struck through (the modifiers are in portal.css, with base tokens only).
 const OWNER_STATUS_CLASSES = { pending: "status", opened: "status status--opened", in_progress: "status status--active",
-  submitted: "status status--done", received: "status status--done", replaced: "status" };
+  submitted: "status status--sent", received: "status status--done", replaced: "status status--replaced" };
 
 function ownerEntry(projectId, piece, row, member, requests) {
   const name = row.name && row.name.trim() ? row.name.trim() : (member && member.email) || t("untitled");
@@ -615,15 +619,17 @@ function ownerPart(projectId, view) {
       h("ul", { class: "rows" }, rows.map((row) => ownerEntry(projectId, piece, row, members.get(row.memberId), requestsOf(piece.id, row.memberId)))));
   }).filter(Boolean);
   if (!groups.length) return null;
-  return h("section", { class: "section", "aria-labelledby": "owner-title" },
+  return h("section", { class: "section owner-part", "aria-labelledby": "owner-title" },
     h("h2", { id: "owner-title" }, t("ownerSection")),
+    h("p", { class: "owner-lead" }, t("ownerLead")),
     groups);
 }
 
 // The line that says what the project's owner sees, then what was asked of the person in this project (the list home
-// used to have) and, for its owner, how it is going for everyone. The line goes first and is short, so on a phone what
-// follows it shows within the first screen however long the lists are (FUN-42). A project that is not the person's says
-// it is not available, as a piece does.
+// used to have) and, for its owner, how it is going for everyone. The line is for the people asked: it shows with their
+// own items (and on a page that would otherwise be empty), not to an owner with nothing asked, whose part opens with its
+// own line. It goes first and is short, so on a phone what follows it shows within the first screen however long the
+// lists are (FUN-42). A project that is not the person's says it is not available, as a piece does.
 async function showProject(projectId, viewId) {
   state.view = "project";
   const user = state.session.user;
@@ -661,14 +667,14 @@ async function showProject(projectId, viewId) {
   setTitle(name);
   layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
   unsavedWarning(layout.notices);
-  layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
+  const ownerSection = owner ? ownerPart(projectId, owner) : null;
+  if (items.length || !ownerSection) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
   if (items.length) {
     const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },
       h("h2", { id: "asked-title" }, t("askedOfYou")),
       h("ul", { class: "rows" }, sorted.map(pieceRow))));
   }
-  const ownerSection = owner ? ownerPart(projectId, owner) : null;
   if (ownerSection) layout.body.append(ownerSection);
 }
 
