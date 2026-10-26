@@ -85,14 +85,72 @@ async function ownedProjects(client) {
 }
 
 // One project's page: the project as the person can read it (RLS lets its members read it), or null when it is not
-// theirs or does not exist; and the person's own items in it, as loadSharedWithMe gives them. -> { project, items }
+// theirs or does not exist; the person's own items in it, as loadSharedWithMe gives them; and whether the person's own
+// membership in it is the owner's (only then the page asks owner_project, so nobody else gets a refusal).
+// -> { project, items, owner }
 export async function loadProjectItems(client, user, projectId) {
-  const [groups, project] = await Promise.all([
+  const [groups, project, members] = await Promise.all([
     loadSharedWithMe(client, user),
     client.from("projects").select("id, slug, name, language").eq("id", projectId).maybeSingle().then(unwrap),
+    myMemberships(client, user),
   ]);
   const group = groups.find((g) => g.project.id === projectId);
-  return { project: project || null, items: group ? group.items : [] };
+  const owner = members.some((m) => m.project_id === projectId && m.role === "owner");
+  return { project: project || null, items: group ? group.items : [], owner };
+}
+
+// The owner's errors that mean «not for this person» rather than a failure: not the project's owner (42501), that person
+// has no assignment on that piece (P0002), or a database without the owner's functions yet (PGRST202).
+const NOT_OWNER_CODES = new Set(["42501", "P0002", "PGRST202"]);
+
+// How a project the person owns is going (owner_project): { project, members, pieces: [{ id, kind, title, revision,
+// created_at, assignments }], change_requests }, newest piece first, without drafts. null when the person is not its owner
+// or the database does not have the function yet: the page then shows only what was asked of the person. Any other error
+// throws, as the page's other reads do.
+export async function loadOwnerProject(client, projectId) {
+  const { data, error } = await client.rpc("owner_project", { p_project_id: projectId });
+  if (error) {
+    if (error.code === "42501" || error.code === "PGRST202") return null;
+    throw error;
+  }
+  if (!isPlainObject(data)) return null;
+  const list = (value) => (Array.isArray(value) ? value.filter(isPlainObject) : []);
+  return {
+    project: isPlainObject(data.project) ? data.project : null,
+    members: list(data.members),
+    pieces: list(data.pieces),
+    change_requests: list(data.change_requests),
+  };
+}
+
+// One person's piece in a project the person owns, to read it closed (owner_piece): { piece (with its html), member: { id,
+// display_name }, status, response: { id, submitted_at, storage } | null, project }. response is that person's newest send
+// only when it kept its storage (never a draft nor a partial response); null otherwise, and then there is nothing to open.
+// display_name is trimmed, as loadPiece gives it to the person (a piece keys what it stores by it). project is the project
+// as the owner reads it (its name for the way back), or null. -> null when the person is not the owner, that person has
+// no assignment there, or the piece is not of `projectId`.
+export async function loadOwnerPiece(client, projectId, pieceId, memberId) {
+  const [{ data, error }, project] = await Promise.all([
+    client.rpc("owner_piece", { p_piece_id: pieceId, p_member_id: memberId }),
+    // Only the way back's name: a failure here does not stop the piece.
+    client.from("projects").select("id, slug, name, language").eq("id", projectId).maybeSingle().then(unwrap).catch(() => null),
+  ]);
+  if (error) {
+    if (NOT_OWNER_CODES.has(error.code)) return null;
+    throw error;
+  }
+  if (!isPlainObject(data) || !isPlainObject(data.piece) || data.piece.project_id !== projectId) return null;
+  const member = isPlainObject(data.member) ? data.member : {};
+  if (member.id !== undefined && member.id !== memberId) return null;
+  const name = typeof member.display_name === "string" ? member.display_name.trim() : "";
+  const sent = isPlainObject(data.response) && isPlainObject(data.response.storage) ? data.response : null;
+  return {
+    piece: data.piece,
+    member: { id: memberId, display_name: name || null },
+    status: typeof data.status === "string" ? data.status : null,
+    response: sent ? { id: sent.id, submitted_at: sent.submitted_at, storage: sent.storage } : null,
+    project: isPlainObject(project) && project.id === projectId ? project : null,
+  };
 }
 
 // «La abrió»: the person opened this piece in the portal (the server keeps only the first time). Never throws: offline,

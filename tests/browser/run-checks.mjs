@@ -67,7 +67,12 @@ async function startServer() {
       const timer = setTimeout(() => done(true), 800);
       child.once("exit", () => { clearTimeout(timer); done(false); });
     });
-    if (ok) return { child, base: `http://127.0.0.1:${port}` };
+    if (ok) {
+      // http.server logs every request to stderr: an unread pipe fills up and the server stops answering mid-run.
+      child.stdout.resume();
+      child.stderr.resume();
+      return { child, base: `http://127.0.0.1:${port}` };
+    }
   }
   throw new Error("could not start http.server");
 }
@@ -462,6 +467,7 @@ const IDS = {
 // owner_projects() before the project page migration: PostgREST does not know the function.
 const NO_FUNCTION = { code: "PGRST202", message: "Could not find the function public.owner_projects without parameters in the schema cache", details: null, hint: null };
 const EXPIRED = { code: "PGRST303", message: "JWT expired", details: null, hint: null };
+const NOT_OWNER = { code: "42501", message: "owner_project: not the project owner", details: null, hint: null };
 
 function fakeSession(user = USER) {
   const now = Math.floor(Date.now() / 1000);
@@ -589,6 +595,26 @@ async function mockedContext(browser, { width = 360, locale = "en-US", backend }
         if (backend.ownerRpcsMissing) return json(NO_FUNCTION, 404);
         if (backend.ownerRpcsFail) return json({ code: "XX000", message: "boom", details: null, hint: null }, 500);
         return json(backend.ownedProjects);
+      // The owner's reads (project page migration): owner_project answers backend.ownerView[projectId] and owner_piece
+      // backend.ownerPieces[`${pieceId}|${memberId}`], each only for a project in backend.ownedIds (42501 otherwise, as the
+      // server; P0002 when that person has no assignment on that piece). An old database knows neither (PGRST202).
+      case "rpc/owner_project": {
+        const body = request.postDataJSON();
+        backend.ownerCalls.push({ rpc: "owner_project", ...body, sub });
+        if (backend.ownerRpcsMissing) return json({ ...NO_FUNCTION, message: "Could not find the function public.owner_project(p_project_id) in the schema cache" }, 404);
+        if (!backend.ownedIds.includes(body.p_project_id) || !backend.ownerView[body.p_project_id]) return json(NOT_OWNER, 403);
+        return json(backend.ownerView[body.p_project_id]);
+      }
+      case "rpc/owner_piece": {
+        const body = request.postDataJSON();
+        backend.ownerCalls.push({ rpc: "owner_piece", ...body, sub });
+        if (backend.ownerRpcsMissing) return json({ ...NO_FUNCTION, message: "Could not find the function public.owner_piece(p_member_id, p_piece_id) in the schema cache" }, 404);
+        const entry = backend.ownerPieces[`${body.p_piece_id}|${body.p_member_id}`];
+        const projectId = entry ? entry.piece.project_id : backend.pieceProject(body.p_piece_id);
+        if (!projectId || !backend.ownedIds.includes(projectId)) return json(NOT_OWNER, 403);
+        if (!entry) return json({ code: "P0002", message: "owner_piece: not assigned", details: null, hint: null }, 404);
+        return json(entry);
+      }
       case "rpc/mark_piece_opened": {
         // openedFails: "network" (offline), "missing" (a database without the function) or "expired" (the session ended).
         if (backend.openedFails === "network") return route.abort("internetdisconnected");
@@ -613,6 +639,14 @@ function newBackend(html, flowHtml, demoHtml) {
     // The project page: what owner_projects() answers (ownerRpcsMissing: an old database, 404 PGRST202; ownerRpcsFail: a
     // 500), and the mark_piece_opened calls (openedFails makes them fail, see the route).
     ownedProjects: [], ownerRpcsMissing: false, ownerRpcsFail: false, openedCalls: [], openedFails: null,
+    // The owner's reads: the projects the session owns, what owner_project and owner_piece answer for them, and the calls.
+    ownedIds: [], ownerView: {}, ownerPieces: {}, ownerCalls: [],
+    // The project of a piece, from every piece the stand-in knows (the person's and the owner's views).
+    pieceProject(pieceId) {
+      const own = backend.pieces.find((p) => p.id === pieceId);
+      if (own) return own.project_id;
+      return Object.keys(backend.ownerView).find((id) => (backend.ownerView[id].pieces || []).some((p) => p.id === pieceId)) || null;
+    },
     members: [{ id: IDS.member, project_id: IDS.project, email: USER.email, user_id: USER.id, role: "client", display_name: "Ana Pérez" }],
     projects: [{ id: IDS.project, slug: "portal-test", name: "Portal de prueba", language: "es" }],
     pieces: [
@@ -1499,7 +1533,7 @@ const requestCallCount = (backend) => backend.requests.filter((r) => r === "POST
 
 // What the questions piece stores when the person sends (the storage a response carries): two answers, sent through the
 // app. It also checks that a send passes that storage to submit_response.
-async function sentQuestionsStorage(browser, base, html) {
+async function sentQuestionsStorage(browser, base, html, { checked = true } = {}) {
   const backend = newBackend(html);
   const context = await mockedContext(browser, { backend });
   const page = await context.newPage();
@@ -1509,7 +1543,7 @@ async function sentQuestionsStorage(browser, base, html) {
   await sendQuestions(frame);
   const sent = await settledSend(frame);
   const body = backend.submits[0];
-  check("closure: a send passes the piece's storage to submit_response as p_storage", sent && sent.sent && body && isPlain(body.p_storage) &&
+  if (checked) check("closure: a send passes the piece's storage to submit_response as p_storage", sent && sent.sent && body && isPlain(body.p_storage) &&
     answersIn(body.p_storage)["q-002"]?.quien === "Luis", body ? JSON.stringify(Object.keys(body)) : "no call");
   await sleep(1200); // the draft with the sent mark has been saved
   const storage = body && isPlain(body.p_storage) ? body.p_storage : backend.draft;
@@ -1969,6 +2003,9 @@ function ownerBackend(html) {
   backend.projects.push({ id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es" });
   backend.ownedProjects = [{ id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es", people: 1, open_pieces: 2,
     last_response_at: LAST_RESPONSE_AT }];
+  // owner_project answers for it; with nobody assigned anything yet, the page has no owner's part.
+  backend.ownedIds = [IDS.ownedProject];
+  backend.ownerView[IDS.ownedProject] = { project: backend.projects.at(-1), members: [], pieces: [], change_requests: [] };
   return backend;
 }
 const projectRowsOf = (page) => page.$$eval(".row-link", (els) => els.map((a) => ({ href: a.getAttribute("href"),
@@ -2146,20 +2183,399 @@ async function projectPageChecks(browser, base, html) {
   }
 }
 
+// ---- the owner's part of the project page and the owner's read-only piece ----------------------------------
+// The owner of a project sees on its page, per piece, every person assigned with their state («Por empezar», «La abrió»,
+// «En curso», «Enviada», «Recibida», «Reemplazada») and date; a send that kept its storage opens the same piece closed and
+// read only (observer), with whose send it is in the title band. A change request is said by its date, never its text.
+// The owner's screens save, send, ask and record nothing, and never read a draft (spec 2026-10-25 página del proyecto §4.5).
+const OWNER = {
+  section: "Cómo va cada cosa que compartiste",
+  states: { pending: "Por empezar", opened: "La abrió", in_progress: "En curso", submitted: "Enviada", received: "Recibida", replaced: "Reemplazada" },
+  askedChange: (date) => `pidió un cambio el ${date}`,
+  lateSend: (date) => `envió después del cierre el ${date}`,
+  sentBy: (name, date) => `Lo que envió ${name} el ${date}`,
+  requestText: "Quiero cambiar el orden de las pantallas",
+};
+const PEOPLE = {
+  luis: { id: "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1", name: "Luis Gómez", email: "luis@example.com" },
+  marta: { id: "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2", name: "Marta Ruiz", email: "marta@example.com" },
+  pedro: { id: "a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3", name: "Pedro Díaz", email: "pedro@example.com" },
+  sofia: { id: "a4a4a4a4-a4a4-4a4a-8a4a-a4a4a4a4a4a4", name: "Sofía Rey", email: "sofia@example.com" },
+};
+const OWNED = {
+  questions: "b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1",
+  flow: "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2",
+  demo: "b3b3b3b3-b3b3-4b3b-8b3b-b3b3b3b3b3b3",
+  demoOld: "b4b4b4b4-b4b4-4b4b-8b4b-b4b4b4b4b4b4",
+  old: "b5b5b5b5-b5b5-4b5b-8b5b-b5b5b5b5b5b5",
+};
+const OWNED_TITLES = { [OWNED.questions]: "Preguntas para el equipo", [OWNED.flow]: "Recorrido de flujos", [OWNED.demo]: "Demo de la biblioteca",
+  [OWNED.demoOld]: "Demo de la biblioteca v1", [OWNED.old]: "Preguntas de antes" };
+const AT = { assigned: "2026-10-15T15:00:00.000Z", opened: "2026-10-16T15:00:00.000Z", changed: "2026-10-17T15:00:00.000Z",
+  sent: "2026-10-19T15:00:00.000Z", received: "2026-10-20T15:00:00.000Z", requested: "2026-10-22T15:00:00.000Z", late: "2026-10-23T15:00:00.000Z" };
+const ownerHref = (projectId, pieceId, person) => `#/project/${projectId}/piece/${pieceId}/person/${person.id}`;
+// An assignment as owner_project gives it: sent_at is the newest send that is not partial, readable whether it kept its storage.
+const ownerAssignment = (person, status, { opened = null, sent = null, readable = false, updated = AT.changed } = {}) => ({
+  member_id: person.id, status, assigned_at: AT.assigned, updated_at: updated, first_opened_at: opened, sent_at: sent, readable });
+// The owned project «Biblioteca del barrio»: four people on four pieces, every state the owner can read, a send kept without
+// its storage (Marta's flow review), a replaced version with only a partial response (Marta's first demo), a change
+// request (Luis) and a send after the close (Sofía).
+function ownedView() {
+  const { luis, marta, pedro, sofia } = PEOPLE;
+  return {
+    project: { id: IDS.ownedProject, slug: "biblioteca", name: PROJECT.owned, language: "es" },
+    members: [{ id: IDS.ownerMember, display_name: "Ana Pérez", email: USER.email, role: "owner" },
+      ...[luis, marta, pedro, sofia].map((p) => ({ id: p.id, display_name: p.name, email: p.email, role: "client" }))],
+    pieces: [
+      { id: OWNED.questions, kind: "questions", title: OWNED_TITLES[OWNED.questions], revision: 1, created_at: "2026-10-15T15:00:00Z", assignments: [
+        ownerAssignment(pedro, "pending"),
+        ownerAssignment(luis, "received", { opened: AT.opened, sent: AT.sent, readable: true, updated: AT.received }),
+        ownerAssignment(sofia, "in_progress", { opened: AT.opened }),
+        ownerAssignment(marta, "pending", { opened: AT.opened }),
+      ] },
+      { id: OWNED.flow, kind: "flow_review", title: OWNED_TITLES[OWNED.flow], revision: 1, created_at: "2026-10-14T15:00:00Z", assignments: [
+        ownerAssignment(luis, "submitted", { opened: AT.opened, sent: AT.sent, readable: true, updated: AT.sent }),
+        ownerAssignment(marta, "submitted", { opened: AT.opened, sent: AT.sent, readable: false, updated: AT.sent }),
+      ] },
+      { id: OWNED.demo, kind: "demo_review", title: OWNED_TITLES[OWNED.demo], revision: 2, created_at: "2026-10-13T15:00:00Z", assignments: [
+        ownerAssignment(luis, "received", { opened: AT.opened, sent: AT.sent, readable: true, updated: AT.received }),
+        ownerAssignment(sofia, "received", { opened: AT.opened, sent: AT.sent, readable: true, updated: AT.received }),
+      ] },
+      { id: OWNED.demoOld, kind: "demo_review", title: OWNED_TITLES[OWNED.demoOld], revision: 1, created_at: "2026-10-05T15:00:00Z", assignments: [
+        ownerAssignment(marta, "replaced", { opened: AT.opened }),
+      ] },
+    ],
+    change_requests: [
+      { piece_id: OWNED.demo, member_id: luis.id, text: OWNER.requestText, late: false, created_at: AT.requested },
+      { piece_id: OWNED.demo, member_id: sofia.id, text: null, late: true, created_at: AT.late },
+    ],
+  };
+}
+// What owner_piece answers: the piece with its html, the person, the status and the newest send when it kept its storage.
+const ownerPieceEntry = ({ pieceId, kind, html, person, status, response, projectId = IDS.ownedProject }) => ({
+  piece: { id: pieceId, project_id: projectId, kind, title: OWNED_TITLES[pieceId], revision: 1, language: "es", created_at: "2026-10-15T15:00:00Z", html },
+  member: { id: person.id, display_name: person.name }, status, response });
+// A piece stored before observer existed: it reads factoryHost.closed (if anything), keeps a change and sends on its own,
+// and also forges the bridge's own messages with the nonce read from the injected script, as a hostile piece could.
+const OLD_PIECE = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Preguntas de antes</title></head>
+<body><main><h1>Preguntas de antes</h1><p id="seed"></p></main><script>
+window.old = { seed: localStorage.getItem("vieja"), closed: window.factoryHost ? factoryHost.closed : null, submit: null, forged: null };
+document.getElementById("seed").textContent = window.old.seed || "";
+localStorage.setItem("vieja", JSON.stringify({ a: 2 }));
+factorySubmit({ formato: "respuestas-fabrica/1", respuestas: [] }).then(function (r) { window.old.submit = r; });
+var nonce = (/"nonce":"([0-9a-f]+)"/.exec(document.head.innerHTML) || [])[1] || null;
+window.old.nonce = Boolean(nonce);
+addEventListener("message", function (e) { if (e.data && e.data.type === "factory:submit-result" && e.data.requestId === "forged-1") window.old.forged = e.data; });
+parent.postMessage({ type: "factory:dirty", nonce: nonce }, "*");
+parent.postMessage({ type: "factory:draft", storage: { vieja: "3" }, nonce: nonce }, "*");
+parent.postMessage({ type: "factory:submit", requestId: "forged-1", payload: { formato: "respuestas-fabrica/1", respuestas: [] }, nonce: nonce }, "*");
+</script></body></html>`;
+
+// Ana owns «Biblioteca del barrio» (owner_project and owner_piece answer for it) and is asked things in «Portal de prueba».
+function ownerViewBackend(html, flowHtml, demoHtml, storage) {
+  const backend = ownerBackend(html);
+  const { luis, marta } = PEOPLE;
+  backend.ownedIds = [IDS.ownedProject];
+  backend.ownerView[IDS.ownedProject] = ownedView();
+  const response = (s) => ({ id: randomUUID(), submitted_at: AT.sent, storage: s });
+  for (const entry of [
+    ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: luis, status: "received", response: response(storage) }),
+    ownerPieceEntry({ pieceId: OWNED.flow, kind: "flow_review", html: flowHtml, person: luis, status: "submitted", response: response({}) }),
+    ownerPieceEntry({ pieceId: OWNED.demo, kind: "demo_review", html: demoHtml, person: luis, status: "received", response: response({}) }),
+    // Kept without its storage, and only partial: owner_piece answers no response.
+    ownerPieceEntry({ pieceId: OWNED.flow, kind: "flow_review", html: flowHtml, person: marta, status: "submitted", response: null }),
+    ownerPieceEntry({ pieceId: OWNED.demoOld, kind: "demo_review", html: demoHtml, person: marta, status: "replaced", response: null }),
+    ownerPieceEntry({ pieceId: OWNED.old, kind: "questions", html: OLD_PIECE, person: luis, status: "received", response: response({ vieja: "1" }) }),
+  ]) backend.ownerPieces[`${entry.piece.id}|${entry.member.id}`] = entry;
+  return backend;
+}
+
+// The owner's part of the page as the owner reads it: its title, then per piece its title, its kind and one entry per person.
+const ownerPart = (page, title = OWNER.section) => page.evaluate((heading) => {
+  const section = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((s) => s.querySelector("h2")?.textContent === heading);
+  if (!section) return null;
+  return {
+    pieces: [...section.querySelectorAll("h3")].map((h) => {
+      const group = h.closest(".owner-piece") || h.parentElement;
+      return {
+        title: h.textContent, kind: group.querySelector(".owner-piece-kind")?.textContent || null,
+        people: [...group.querySelectorAll("li")].map((li) => {
+          const status = li.querySelector(".status");
+          return { name: li.querySelector(".row-title")?.textContent || null, meta: li.querySelector(".row-meta")?.textContent || "",
+            state: status ? status.textContent : null, dot: status ? status.className : null, hasDot: Boolean(status && status.querySelector(".status-dot")),
+            href: li.querySelector("a")?.getAttribute("href") || null };
+        }),
+      };
+    }),
+    text: section.innerText,
+  };
+}, title);
+// The owner's piece screen: its title band, the way back, the pinned zone and the change request form (none of which it has).
+const ownerBand = (page) => page.evaluate(() => {
+  const status = document.querySelector(".piece-status");
+  const back = document.querySelector(".back-link");
+  return { title: document.querySelector("h1.piece-title")?.textContent || null, status: status && !status.hidden ? status.textContent : null,
+    back: back ? { href: back.getAttribute("href"), text: back.textContent } : null,
+    pinned: document.querySelector("[data-rol=aviso-fijo]")?.innerText || "", form: Boolean(document.getElementById("change-request-text")),
+    requestButton: [...document.querySelectorAll("button")].some((b) => b.textContent === "Pedir un cambio"),
+    iframes: document.querySelectorAll("iframe").length,
+    notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => n.querySelector("p")?.textContent) };
+});
+// The piece the owner reads, once it shows a title saying whose send it is (or, for the old piece, once its script ran).
+async function ownerFrame(page, ready = () => [...document.querySelectorAll("h1")].some((h) => h.getBoundingClientRect().height > 0 && h.textContent.includes("Lo que envió"))) {
+  return waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(ready).catch(() => false)) ? f : null; }, 10000);
+}
+const hostOf = (frame) => frame.evaluate(() => ({ observer: factoryHost.observer, closed: factoryHost.closed, reviewerName: factoryHost.reviewerName,
+  sentAt: factoryHost.sentAt, h1: [...document.querySelectorAll("h1")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => h.textContent.trim()) }));
+// The writes the owner must never make, and the draft reads.
+const WRITES = ["rpc/save_draft", "rpc/submit_response", "rpc/request_change", "rpc/mark_piece_opened"];
+const writesIn = (requests) => requests.filter((r) => WRITES.some((w) => r.includes(`/rest/v1/${w}`)));
+const draftReadsIn = (requests) => requests.filter((r) => r.includes("/rest/v1/piece_drafts"));
+
+async function openMocked(browser, base, backend, hash = "", width = 360) {
+  const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  // The 403 and 404 the owner's reads answer log their failed request; anything else is an error.
+  page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push(m.text()); });
+  await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+  return { context, page, errors };
+}
+const goTo = async (page, hash, ready) => {
+  await page.evaluate((h) => { location.hash = h; }, hash);
+  return waitFor(ready, 10000);
+};
+
+async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
+  const storage = await sentQuestionsStorage(browser, base, html, { checked: false });
+  const { luis, marta, pedro, sofia } = PEOPLE;
+
+  // owner-project, owner-piece-readonly (the three kinds), owner-no-readable-send and owner-no-drafts, on one visit.
+  {
+    const backend = ownerViewBackend(html, flowHtml, demoHtml, storage);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`);
+    const part = await waitFor(() => ownerPart(page), 10000);
+    const view = await projectView(page);
+    const d = Object.fromEntries(await Promise.all(Object.entries(AT).map(async ([k, v]) => [k, await formatIn(page, v)])));
+    const S = OWNER.states;
+    const href = (pieceId, person) => ownerHref(IDS.ownedProject, pieceId, person);
+    const expected = [
+      { title: OWNED_TITLES[OWNED.questions], kind: "Preguntas", people: [
+        { name: luis.name, state: S.received, meta: d.sent, href: href(OWNED.questions, luis) },
+        { name: marta.name, state: S.opened, meta: d.opened, href: null },
+        { name: pedro.name, state: S.pending, meta: d.assigned, href: null },
+        { name: sofia.name, state: S.in_progress, meta: d.changed, href: null }] },
+      { title: OWNED_TITLES[OWNED.flow], kind: "Revisión de recorridos", people: [
+        { name: luis.name, state: S.submitted, meta: d.sent, href: href(OWNED.flow, luis) },
+        { name: marta.name, state: S.submitted, meta: d.sent, href: null }] },
+      { title: OWNED_TITLES[OWNED.demo], kind: "Revisión de la demo", people: [
+        { name: luis.name, state: S.received, meta: `${d.sent} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis) },
+        { name: sofia.name, state: S.received, meta: `${d.sent} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia) }] },
+      { title: OWNED_TITLES[OWNED.demoOld], kind: "Revisión de la demo", people: [
+        { name: marta.name, state: S.replaced, meta: d.assigned, href: null }] },
+    ];
+    const got = part && part.pieces.map((p) => ({ title: p.title, kind: p.kind, people: p.people.map(({ name, state, meta, href: h }) => ({ name, state, meta, href: h })) }));
+    check(`owner-project: the owned project's page has «${OWNER.section}», and no «${PROJECT.askedOfYou}» when nothing was asked of the owner`,
+      part && view.h1 === PROJECT.owned && view.sections.includes(OWNER.section) && !view.sections.includes(PROJECT.askedOfYou), JSON.stringify(view));
+    check("owner-project: each piece with its title and kind, newest first", got && JSON.stringify(got.map(({ title, kind }) => ({ title, kind }))) ===
+      JSON.stringify(expected.map(({ title, kind }) => ({ title, kind }))), JSON.stringify(got && got.map(({ title, kind }) => ({ title, kind }))));
+    check("owner-project: one entry per person, by name, with the state word and its date", got && JSON.stringify(got.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))) ===
+      JSON.stringify(expected.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))), JSON.stringify(got && got.map((p) => p.people)));
+    const people = part ? part.pieces.flatMap((p) => p.people) : [];
+    const opened = people.find((p) => p.state === S.opened), pending = people.find((p) => p.state === S.pending);
+    check("owner-project: «La abrió» is its own state, with its own dot", opened && pending && opened.name === marta.name && opened.hasDot &&
+      opened.dot !== pending.dot, JSON.stringify({ opened, pending }));
+    check("owner-project: every state is said in words next to the base's status dot (COM-13)", people.length === 9 &&
+      people.every((p) => p.hasDot && /(^| )status( |$)/.test(p.dot) && Object.values(S).includes(p.state)), JSON.stringify(people.map((p) => [p.state, p.dot])));
+    check("owner-project: a readable send links to what the person sent; one that is not readable does not",
+      got && JSON.stringify(got.map((p) => p.people.map((x) => x.href))) === JSON.stringify(expected.map((p) => p.people.map((x) => x.href))),
+      JSON.stringify(got && got.map((p) => p.people.map((x) => x.href))));
+    check("owner-project: a change request and a send after the close are said by their date, never by their text",
+      part && !part.text.includes(OWNER.requestText) && !(await page.evaluate((t) => document.body.innerText.includes(t), OWNER.requestText)), part && part.text);
+    const marta2 = got && [got[1].people[1], got[3].people[0]];
+    check("owner-no-readable-send: a send kept without its storage and a replaced version with only a partial response show their state and date, without a link",
+      marta2 && marta2[0].state === S.submitted && marta2[0].meta === d.sent && !marta2[0].href && marta2[1].state === S.replaced && marta2[1].meta === d.assigned && !marta2[1].href,
+      JSON.stringify(marta2));
+    check("owner-project: the page reads the owner's part through owner_project, for this project", backend.ownerCalls.some((c) => c.rpc === "owner_project" &&
+      c.p_project_id === IDS.ownedProject && c.sub === USER.id), JSON.stringify(backend.ownerCalls));
+    check("owner-project: 360px no horizontal scroll", await noHorizontalScroll(page));
+    await page.screenshot({ path: join(outDir, "project-owner-360.png"), fullPage: true });
+    await snapshot(page, "project-owner", "lista");
+    const ownerAxe = await axeViolations(page);
+    if (ownerAxe) check("owner-project: axe has no violations", ownerAxe.length === 0, ownerAxe.join(", "));
+
+    // owner-piece-readonly: Luis's questions (from the page's link), flow review and demo sheet, each closed and read only.
+    for (const [kind, pieceId] of [["questions", OWNED.questions], ["flow_review", OWNED.flow], ["demo_review", OWNED.demo]]) {
+      const tag = `owner-piece-readonly (${kind})`;
+      const before = backend.requests.length;
+      if (kind === "questions") {
+        await page.click(`a[href="${href(pieceId, luis)}"]`).catch(() => {});
+      } else {
+        await page.evaluate((h) => { location.hash = h; }, href(pieceId, luis));
+      }
+      const frame = await ownerFrame(page);
+      const host = frame ? await hostOf(frame) : null;
+      await sleep(2000); // longer than the draft debounce: anything the piece would post has been posted
+      const band = await ownerBand(page);
+      const calls = backend.requests.slice(before);
+      check(`${tag}: the piece opens closed, with observer, as Luis's send (reviewerName is his display_name)`, host && host.observer === true &&
+        host.closed === "received" && host.reviewerName === luis.name && host.sentAt === AT.sent, JSON.stringify(host));
+      check(`${tag}: the piece says whose send it is`, host && host.h1.some((t) => t.startsWith(`Lo que envió ${luis.name}`)), JSON.stringify(host && host.h1));
+      check(`${tag}: the title band is the piece's title and «${OWNER.sentBy(luis.name, d.sent)}», back to the project`, band.title === OWNED_TITLES[pieceId] &&
+        band.status === OWNER.sentBy(luis.name, d.sent) && band.back && band.back.href === `#/project/${IDS.ownedProject}` && band.back.text.includes(PROJECT.owned),
+        JSON.stringify(band));
+      check(`${tag}: no closed panel, no «Pedir un cambio» and no change request form`, band.pinned === "" && !band.requestButton && !band.form && band.iframes === 1,
+        JSON.stringify(band));
+      check(`${tag}: no save_draft, submit_response, request_change nor mark_piece_opened during the visit`, frame && writesIn(calls).length === 0,
+        JSON.stringify(writesIn(calls)));
+      check(`${tag}: the screen reads the piece through owner_piece, for Luis`, backend.ownerCalls.some((c) => c.rpc === "owner_piece" && c.p_piece_id === pieceId &&
+        c.p_member_id === luis.id && Object.keys(c).sort().join() === "p_member_id,p_piece_id,rpc,sub"), JSON.stringify(backend.ownerCalls.filter((c) => c.rpc === "owner_piece")));
+      if (kind === "questions") {
+        const seeded = frame && await frame.evaluate(() => ({ quien: ST.respuestas["q-002"] ? ST.respuestas["q-002"].quien || null : null,
+          answers: Object.keys(ST.respuestas || {}).sort() })).catch(() => null);
+        check(`${tag}: it shows what Luis sent, seeded with the send's storage`, seeded && seeded.quien === "Luis" && seeded.answers.join() === "q-001,q-002",
+          JSON.stringify(seeded));
+        const result = frame && await frame.evaluate(() => factorySubmit({ formato: "respuestas-fabrica/1", respuestas: [] })).catch(() => null);
+        await sleep(500);
+        check(`${tag}: a send from inside the piece is refused and reaches nobody`, result && result.ok === false && result.error === "rejected" &&
+          writesIn(backend.requests.slice(before)).length === 0, JSON.stringify(result));
+        await page.screenshot({ path: join(outDir, "owner-piece-360.png"), fullPage: true });
+      }
+    }
+
+    // owner-no-readable-send: opened by its address, a send without a readable storage is not available, and nothing is mounted.
+    for (const [pieceId, what] of [[OWNED.flow, "a send kept without its storage"], [OWNED.demoOld, "a replaced version with only a partial response"]]) {
+      const before = backend.requests.length;
+      const callsBefore = backend.ownerCalls.length;
+      const band = await goTo(page, href(pieceId, marta), async () => { const b = await ownerBand(page); return b.title === "No está disponible" ? b : null; });
+      check(`owner-no-readable-send: ${what}, opened by its address, says it is not available, with no piece`, band && band.iframes === 0 &&
+        band.notices.length === 1 && backend.ownerCalls.slice(callsBefore).some((c) => c.rpc === "owner_piece" && c.p_member_id === marta.id), JSON.stringify(band));
+      check(`owner-no-readable-send: ${what}: nothing read from the drafts nor written`, draftReadsIn(backend.requests.slice(before)).length === 0 &&
+        writesIn(backend.requests.slice(before)).length === 0, JSON.stringify(backend.requests.slice(before)));
+    }
+    check("owner-no-drafts: no request to piece_drafts on the owner's page nor on the owner's pieces", draftReadsIn(backend.requests).length === 0,
+      JSON.stringify(draftReadsIn(backend.requests)));
+    check("owner-project / owner-piece: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-old-piece: a piece whose stored HTML predates observer opens closed, read only, says whose send it is, and posts nothing.
+  {
+    const backend = ownerViewBackend(html, flowHtml, demoHtml, storage);
+    const { context, page, errors } = await openMocked(browser, base, backend, ownerHref(IDS.ownedProject, OWNED.old, PEOPLE.luis));
+    const frame = await ownerFrame(page, () => Boolean(window.old && window.old.submit));
+    await sleep(2000);
+    const old = frame ? await frame.evaluate(() => window.old) : null;
+    const band = await ownerBand(page);
+    const d = await formatIn(page, AT.sent);
+    check("owner-old-piece: it opens closed and seeded with the send's storage", old && old.closed === "received" && old.seed === "1", JSON.stringify(old));
+    check("owner-old-piece: the title band says whose send it is", band.title === OWNED_TITLES[OWNED.old] && band.status === OWNER.sentBy(PEOPLE.luis.name, d) &&
+      band.pinned === "" && !band.form, JSON.stringify(band));
+    check("owner-old-piece: its own send is refused, and a send forged with the bridge's nonce is answered rejected", old && old.submit && old.submit.ok === false &&
+      old.submit.error === "rejected" && old.nonce && old.forged && old.forged.ok === false && old.forged.error === "rejected", JSON.stringify(old));
+    check("owner-old-piece: no draft, send, change request nor opening reached the server, and no draft was read", writesIn(backend.requests).length === 0 &&
+      draftReadsIn(backend.requests).length === 0, JSON.stringify(backend.requests.filter((r) => r.includes("rpc/") || r.includes("piece_drafts"))));
+    check("owner-old-piece: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-and-stakeholder: Ana owns one project and is asked things in another. The other shows only her own pieces, as
+  // before; the owner's reads answer only for the owned one.
+  {
+    const backend = ownerViewBackend(html, flowHtml, demoHtml, storage);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    const other = await waitFor(async () => { const v = await projectView(page); return v.h1 === PROJECT.name && v.pieces.length ? v : null; }, 10000);
+    await sleep(500);
+    check("owner-and-stakeholder: the project where she is asked things shows only her pieces and the closing line, as before", other &&
+      JSON.stringify(other.sections) === JSON.stringify([PROJECT.askedOfYou]) && other.pieces.length === 3 && other.last === PROJECT.ownerSees &&
+      other.notices.length === 0 && !(await ownerPart(page)), JSON.stringify(other));
+    check("owner-and-stakeholder: the project where she is not the owner never asks owner_project", !backend.ownerCalls.some((c) => c.p_project_id === IDS.project),
+      JSON.stringify(backend.ownerCalls));
+    const owned = await goTo(page, `#/project/${IDS.ownedProject}`, () => ownerPart(page));
+    check("owner-and-stakeholder: the project she owns shows the owner's part", owned && owned.pieces.length === 4, JSON.stringify(owned && owned.pieces.map((p) => p.title)));
+    // A person's piece in the project she does not own, and an owned piece under the other project's address: not available.
+    for (const [hash, what] of [[ownerHref(IDS.project, IDS.questions, { id: IDS.member }), "a piece of the project she does not own"],
+      [ownerHref(IDS.project, OWNED.questions, PEOPLE.luis), "an owned piece under another project's address"]]) {
+      const band = await goTo(page, hash, async () => { const b = await ownerBand(page); return b.title === "No está disponible" ? b : null; });
+      check(`owner-and-stakeholder: ${what} is not available, with no piece`, band && band.iframes === 0 && band.notices.length === 1, JSON.stringify(band));
+    }
+    check("owner-and-stakeholder: nothing written and no draft read", writesIn(backend.requests).length === 0 && draftReadsIn(backend.requests).length === 0,
+      JSON.stringify(writesIn(backend.requests)));
+    check("owner-and-stakeholder: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-and-stakeholder: her membership says owner but the server does not agree (42501): the page shows only her part.
+  {
+    const backend = ownerViewBackend(html, flowHtml, demoHtml, storage);
+    backend.members[0].role = "owner";
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    const view = await waitFor(async () => { const v = await projectView(page); return v.h1 === PROJECT.name && v.pieces.length ? v : null; }, 10000);
+    await sleep(500);
+    check("owner-and-stakeholder: refused by owner_project (42501), the page shows only her pieces and the closing line, without a notice", view &&
+      backend.ownerCalls.some((c) => c.rpc === "owner_project" && c.p_project_id === IDS.project) && JSON.stringify(view.sections) === JSON.stringify([PROJECT.askedOfYou]) &&
+      view.last === PROJECT.ownerSees && view.notices.length === 0, JSON.stringify(view));
+    check("owner-and-stakeholder: refused: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-with-own-piece: Ana owns «Portal de prueba» and is also asked things in it: the page shows both, and her own piece
+  // opens as always (draft, «la abrió»).
+  {
+    const backend = newBackend(html, flowHtml, demoHtml);
+    backend.members[0].role = "owner";
+    backend.ownedIds = [IDS.project];
+    backend.ownedProjects = [{ id: IDS.project, slug: "portal-test", name: PROJECT.name, language: "es", people: 1, open_pieces: 1, last_response_at: AT.sent }];
+    const ana = { id: IDS.member, name: "Ana Pérez" };
+    backend.ownerView[IDS.project] = {
+      project: { id: IDS.project, slug: "portal-test", name: PROJECT.name, language: "es" },
+      members: [{ id: IDS.member, display_name: "Ana Pérez", email: USER.email, role: "owner" },
+        { id: PEOPLE.luis.id, display_name: PEOPLE.luis.name, email: PEOPLE.luis.email, role: "client" }],
+      pieces: [{ id: IDS.questions, kind: "questions", title: "Preguntas sobre Biblioteca del barrio", revision: 1, created_at: "2026-10-16T15:00:00Z", assignments: [
+        ownerAssignment(ana, "pending"), ownerAssignment(PEOPLE.luis, "submitted", { sent: AT.sent, readable: true, updated: AT.sent })] }],
+      change_requests: [],
+    };
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    const part = await waitFor(() => ownerPart(page), 10000);
+    const view = await projectView(page);
+    const order = await page.evaluate(() => [...document.querySelector("[data-rol=cuerpo]").children].map((el) => el.querySelector("h2")?.textContent || el.className));
+    check(`owner-with-own-piece: the page shows «${PROJECT.askedOfYou}», the line that says what the owner sees, then the owner's part`, part &&
+      JSON.stringify(order) === JSON.stringify([PROJECT.askedOfYou, "page-note", OWNER.section]) && view.pieces.length === 3, JSON.stringify(order));
+    const people = part ? part.pieces[0].people : [];
+    check("owner-with-own-piece: her own entry goes after the people's, with her state", people.length === 2 && people[0].name === PEOPLE.luis.name &&
+      people[1].name === "Ana Pérez" && people[1].state === OWNER.states.pending, JSON.stringify(people));
+    await page.click(`a[href="#/piece/${IDS.questions}"]`).catch(() => {});
+    const frame = await appPiece(page);
+    const host = frame && await frame.evaluate(() => ({ observer: factoryHost.observer, closed: factoryHost.closed }));
+    check("owner-with-own-piece: her own piece opens as a person's, open and without observer", host && host.observer === false && host.closed === null, JSON.stringify(host));
+    check("owner-with-own-piece: opening it records her own «la abrió»", await waitFor(() => backend.openedCalls.length === 1, 3000) &&
+      backend.openedCalls[0].p_piece_id === IDS.questions && backend.openedCalls[0].sub === USER.id, JSON.stringify(backend.openedCalls));
+    if (frame) await frame.evaluate(() => responder("q-001", "si"));
+    const saved = frame && await waitFor(async () => backend.drafts.length && (await page.textContent(".piece-status")).includes("Guardado"), 5000);
+    check("owner-with-own-piece: a change on it is saved as her draft", saved && backend.drafts.every((x) => x.p_piece_id === IDS.questions && x.sub === USER.id),
+      JSON.stringify(backend.drafts.map((x) => ({ piece: x.p_piece_id, sub: x.sub }))));
+    check("owner-with-own-piece: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 // ---- the portal's own frame, measured with the factory's geometry ----------------------------------------
 // The visual manual's frame rules (marco.md: one frame, one page margin on both sides from 672 px and the frame not
 // cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
 // FUN-43; and the rest that geometria.mjs measures on the factory's pieces), on every portal screen at the factory's
 // verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
-// - the five screen snapshots (sign-in email and code steps, home with the projects and empty, a project's page) through
-//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the five
+// - the six screen snapshots (sign-in email and code steps, home with the projects and empty, a project's page, an owned
+//   project's page with the owner's part) through
+//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the six
 //   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
-// - the piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
+// - the piece screen and the owner's read-only piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
 //   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
 //   its pieces at the width the person sees them; also at 1600, past the frame's cap.
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
-// The screens every run captures and measures: the sign-in steps, home (the projects, and empty) and a project's page.
-const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty"];
+// The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, and an
+// owned project's page with the owner's part (captured with --flow and --demo too).
+const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
 // A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the centred empty home
 // passes FUN-43 on its own.
@@ -2181,7 +2597,7 @@ async function portalGeometryChecks(browser, base, html, factory) {
   const passes = (r) => r.ok || Boolean(r.exceptuada);
   const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
   const names = PORTAL_SCREENS;
-  check("geometry: the five screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+  check("geometry: the six screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
   const server = await serveDir(screensDir);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const frames = {}; // `${width}-${scheme}` -> the frame's content box on home, the projects (the other screens' reference)
@@ -2220,14 +2636,19 @@ async function portalGeometryChecks(browser, base, html, factory) {
   // The piece screen: its frame (the brand's edge) where every other screen has it, at the page margin from both sides
   // from 672 (MAR-02, MAR-11); and the piece's iframe over the frame's box, margins included, as wide as widthInPortal.
   const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
-  for (const scheme of ["light", "dark"]) for (const width of [...GEOMETRY_WIDTHS, 1600]) {
-    const tag = `geometry: piece screen ${width}px ${scheme}`;
-    const backend = newBackend(html);
+  const pieceScreens = [
+    { name: "piece screen", backend: () => newBackend(html), hash: `#/piece/${IDS.questions}` },
+    // The owner reading Luis's send of the questions, closed with observer.
+    { name: "owner piece screen", backend: () => ownerViewBackend(html, null, null, {}), hash: ownerHref(IDS.ownedProject, OWNED.questions, PEOPLE.luis) },
+  ];
+  for (const screen of pieceScreens) for (const scheme of ["light", "dark"]) for (const width of [...GEOMETRY_WIDTHS, 1600]) {
+    const tag = `geometry: ${screen.name} ${width}px ${scheme}`;
+    const backend = screen.backend();
     const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
     const page = await context.newPage();
     await page.setViewportSize({ width, height: width < 672 ? 640 : 900 });
     await page.emulateMedia({ colorScheme: scheme });
-    await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
+    await page.goto(`${base}/${screen.hash}`, { waitUntil: "networkidle" });
     await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function").catch(() => false)); }, 10000);
     const box = await page.evaluate(() => {
       const frame = document.querySelector(".piece-layout > .frame"), iframe = document.querySelector("iframe.piece-frame");
@@ -2264,6 +2685,7 @@ try {
   if (args.flow) await flowChecks(browser, base, read(args.flow));
   if (args.demo) await demoChecks(browser, base, read(args.demo));
   if (args.questions) await projectPageChecks(browser, base, read(args.questions));
+  if (args.questions && args.flow && args.demo) await ownerViewChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
@@ -2283,7 +2705,7 @@ if (args.factory) {
   const verifier = join(resolve(args.factory), "design-system", "assets", "verifica-pantalla.mjs");
   if (!existsSync(verifier)) check("manual: verifica-pantalla.mjs found", false, verifier);
   else {
-    check("manual: the five screens were captured", PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+    check("manual: the six screens were captured", PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
     for (const [name, pattern] of screens) {
       for (const width of [320, 768, 1440]) {
         for (const scheme of ["light", "dark"]) {

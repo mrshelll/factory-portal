@@ -1,12 +1,13 @@
-// Portal entry point: session, hash router and the screens (sign in, home with the projects, a project's page, piece).
+// Portal entry point: session, hash router and the screens (sign in, home with the projects, a project's page, piece, and
+// the owner's read-only view of what a person sent).
 
 import { supabase } from "./supabase-client.js";
 import { EMAIL_OTP_LENGTH } from "../config.js";
 import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
-import { loadProjects, loadProjectItems, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
-import { parseRoute, projectHref, projectRows } from "./project.js";
+import { loadProjects, loadProjectItems, loadOwnerProject, loadOwnerPiece, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
+import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref } from "./project.js";
 import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
@@ -141,7 +142,8 @@ async function route() {
   const target = parseRoute(location.hash);
   if (target.name === "piece") return showPiece(target.pieceId, viewId);
   if (target.name === "project") return showProject(target.projectId, viewId);
-  // Anything else (an owner's view of a person's piece included, for now) is home.
+  if (target.name === "owner-piece") return showOwnerPiece(target, viewId);
+  // Anything else is home.
   if (location.hash && location.hash !== "#/") history.replaceState(null, "", `${location.pathname}${location.search}#/`);
   return showHome(viewId);
 }
@@ -560,8 +562,68 @@ async function showHome(viewId) {
 
 // ---- a project's page -----------------------------------------------------------------------
 
-// What was asked of the person in this project (the list home used to have), then the line that says what the
-// project's owner sees. A project that is not the person's says it is not available, as a piece does.
+// The owner's part of a project's page: per piece (newest first), its title and kind, then one entry per person assigned
+// (personRows: by name, owners after) with the state the owner reads, its date and, said by their date and never by
+// their text, the person's change requests and sends after the close. A send that kept its storage opens what the person
+// sent, read only (showOwnerPiece); the others are not links. null when nobody was assigned anything yet.
+const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusOpened", in_progress: "ownerStatusInProgress",
+  submitted: "ownerStatusSubmitted", received: "ownerStatusReceived", replaced: "ownerStatusReplaced" };
+// The base's status dots (COM-13); «La abrió» has its own (portal.css), between the hollow «Por empezar» and «En curso».
+const OWNER_STATUS_CLASSES = { pending: "status", opened: "status status--opened", in_progress: "status status--active",
+  submitted: "status status--done", received: "status status--done", replaced: "status" };
+
+function ownerEntry(projectId, piece, row, member, requests) {
+  const name = row.name && row.name.trim() ? row.name.trim() : (member && member.email) || t("untitled");
+  const meta = [];
+  const date = formatDate(state.lang, row.at);
+  if (date) meta.push(date);
+  for (const request of requests) {
+    const at = formatDate(state.lang, request.created_at);
+    if (at) meta.push(t(request.late === true ? "ownerLateSend" : "ownerAskedChange", { date: at }));
+  }
+  const status = OWNER_STATUS_KEYS[row.status] ? row.status : "pending";
+  const content = [
+    h("span", { class: "row-main" },
+      h("span", { class: "row-title" }, name),
+      meta.length ? h("span", { class: "row-meta" }, meta.join(" · ")) : null),
+    h("span", { class: OWNER_STATUS_CLASSES[status] }, h("span", { class: "status-dot", "aria-hidden": "true" }), t(OWNER_STATUS_KEYS[status])),
+  ];
+  return h("li", { class: "row" }, row.readable
+    ? h("a", { class: "row-link", href: ownerPieceHref(projectId, piece.id, row.memberId) }, content)
+    : h("div", { class: "row-item" }, content));
+}
+
+function ownerPart(projectId, view) {
+  const members = new Map(view.members.map((m) => [m.id, m]));
+  // A person's change requests on a piece, the newest of each kind (asked, or a send after the close), oldest first.
+  const requestsOf = (pieceId, memberId) => {
+    const newest = new Map();
+    for (const request of view.change_requests) {
+      if (request.piece_id !== pieceId || request.member_id !== memberId) continue;
+      const kind = request.late === true;
+      const at = Date.parse(request.created_at);
+      if (Number.isFinite(at) && !(Date.parse(newest.get(kind)?.created_at) >= at)) newest.set(kind, request);
+    }
+    return [...newest.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  };
+  const groups = view.pieces.map((piece) => {
+    const rows = personRows(piece, members);
+    if (!rows.length) return null;
+    return h("div", { class: "owner-piece" },
+      h("h3", { class: "owner-piece-title" }, piece.title || t("untitled")),
+      h("p", { class: "owner-piece-kind" }, t(KIND_KEYS[piece.kind] || "kindQuestions")),
+      h("ul", { class: "rows" }, rows.map((row) => ownerEntry(projectId, piece, row, members.get(row.memberId), requestsOf(piece.id, row.memberId)))));
+  }).filter(Boolean);
+  if (!groups.length) return null;
+  return h("section", { class: "section", "aria-labelledby": "owner-title" },
+    h("h2", { id: "owner-title" }, t("ownerSection")),
+    groups);
+}
+
+// What was asked of the person in this project (the list home used to have), the line that says what the project's owner
+// sees, and then, for its owner, how it is going for everyone. The line closes the person's part, before the owner's: on a
+// phone the owner's part then shows within the first screen (FUN-42), even when nothing was asked of the owner. A project
+// that is not the person's says it is not available, as a piece does.
 async function showProject(projectId, viewId) {
   state.view = "project";
   const user = state.session.user;
@@ -571,8 +633,11 @@ async function showProject(projectId, viewId) {
   layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
 
   let loaded;
+  let owner;
   try {
     loaded = await loadProjectItems(supabase, user, projectId);
+    // Only the project's owner asks how it is going for everyone; the server still checks it (null when it refuses).
+    owner = loaded.owner ? await loadOwnerProject(supabase, projectId) : null;
   } catch (error) {
     if (viewId !== state.viewId) return;
     if (isAuthExpired(error)) return sessionEnded();
@@ -582,7 +647,8 @@ async function showProject(projectId, viewId) {
     return;
   }
   if (viewId !== state.viewId) return;
-  const { project, items } = loaded;
+  const { items } = loaded;
+  const project = loaded.project || (owner && owner.project) || null;
   if (!project) {
     setTitle(t("projectNotFoundTitle"));
     layout = frameLayout({ title: t("projectNotFoundTitle"), headerActions: [signOutButton()], back: homeBack() });
@@ -602,6 +668,8 @@ async function showProject(projectId, viewId) {
       h("ul", { class: "rows" }, sorted.map(pieceRow))));
   }
   layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
+  const ownerSection = owner ? ownerPart(projectId, owner) : null;
+  if (ownerSection) layout.body.append(ownerSection);
 }
 
 // ---- piece ----------------------------------------------------------------------------------
@@ -929,6 +997,60 @@ async function showPiece(pieceId, viewId) {
     onSubmit,
   });
   render();
+}
+
+// ---- the owner's read-only piece ------------------------------------------------------------
+
+// The owner reads what a person sent: the same piece, closed and with observer, seeded only with that person's newest send
+// that kept its storage (owner_piece). The owner never answers, saves or sends for anyone: no draft saver, no draft or
+// dirty handler, no closed panel nor change request, no «la abrió»; a send the piece posts anyway (an old piece, or one
+// that forges it) is answered rejected, and the server refuses it too. Without such a send there is nothing to open.
+async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
+  state.view = "owner-piece";
+  let frame = null;
+  state.cleanup = () => { if (frame) { frame.destroy(); frame = null; } };
+  setTitle(t("opening"));
+  let layout = pieceLayout(t("opening"));
+
+  let context;
+  try {
+    context = await loadOwnerPiece(supabase, projectId, pieceId, memberId);
+  } catch (error) {
+    if (viewId !== state.viewId) return;
+    if (isAuthExpired(error)) return sessionEnded();
+    layout.title.textContent = t("pieceLoadErrorTitle");
+    setTitle(t("pieceLoadErrorTitle"));
+    showNotice(layout.notices, { tone: "error", text: t("pieceLoadError"), actions: [{ label: t("retry"), onClick: route }], dismissible: false });
+    return;
+  }
+  if (viewId !== state.viewId) return;
+  if (!context || !context.response) {
+    layout.title.textContent = t("pieceNotFoundTitle");
+    setTitle(t("pieceNotFoundTitle"));
+    showNotice(layout.notices, { tone: "info", text: t("pieceNotFound"), dismissible: false });
+    return;
+  }
+
+  const { piece, project, member, response } = context;
+  setLanguage((project && project.language) || piece.language || browserLanguage);
+  const pieceTitle = piece.title || t("untitled");
+  setTitle(pieceTitle);
+  const projectName = project && (project.name || project.slug);
+  layout = pieceLayout(pieceTitle, projectName
+    ? { href: projectHref(projectId), text: projectName, label: t("backToProjectLabel", { name: projectName }) }
+    : homeBack());
+  const date = formatDate(state.lang, response.submitted_at);
+  layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
+  frame = mountPiece({
+    container: layout.main, html: piece.html, kind: piece.kind, storage: response.storage, title: pieceTitle,
+    // reviewerName exactly as loadPiece gives it to the person: a piece keys what it stores by it.
+    host: { reviewerName: member.display_name, closed: "received", sentAt: response.submitted_at, observer: true },
+    onSubmit: ({ requestId }) => { if (frame) frame.respond(requestId, { ok: false, error: "rejected" }); },
+    onNavigatedAway: () => {
+      frame = null;
+      showNotice(layout.notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });
+    },
+  });
 }
 
 // ---- boot -----------------------------------------------------------------------------------

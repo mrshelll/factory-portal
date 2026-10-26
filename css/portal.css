@@ -75,10 +75,11 @@ main { padding-block: var(--space-6) var(--space-7); }
    what the project's owner sees, at the reading measure. */
 .page-context { margin-bottom: var(--space-1); }
 .page-note { max-width: var(--measure-text); color: var(--muted); }
-.body > * + .page-note { margin-top: var(--space-between-blocks); }
+.body > * + .page-note, .page-note + .section { margin-top: var(--space-between-blocks); }
 
-/* A row of the list (.rows, .row and .status come from the base): the whole row is the link. */
-.row-link {
+/* A row of the list (.rows, .row and .status come from the base): the whole row is the link. An entry of the owner's part
+   with nothing to open (.row-item) is laid out the same, its name in the text colour, not the link's. */
+.row-link, .row-item {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -93,9 +94,17 @@ main { padding-block: var(--space-6) var(--space-7); }
 @media (hover: hover) {
   .row-link:hover .row-title { text-decoration: underline; text-underline-offset: 3px; }
 }
+.row-item .row-title { color: var(--ink); }
 @media (min-width: 672px) {
-  .row-link { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
+  .row-link, .row-item { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
 }
+/* «La abrió»: the base's hollow dot, in the text colour: between «Por empezar» (hollow grey) and «En curso» (filled). */
+.status--opened .status-dot { --dot: var(--ink); }
+
+/* The owner's part of a project's page: per piece its title and kind, then one entry per person. */
+.owner-piece + .owner-piece { margin-top: var(--space-5); }
+.owner-piece-title { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
+.owner-piece-kind { margin-block: var(--space-1) var(--space-3); color: var(--muted); font-size: var(--text-small); }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 
