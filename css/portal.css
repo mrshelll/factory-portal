@@ -71,11 +71,11 @@ main { padding-block: var(--space-6) var(--space-7); }
 .empty p { margin-inline: auto; margin-bottom: var(--space-4); overflow-wrap: anywhere; }
 .empty .actions { justify-content: center; }
 
-/* A project's page: the way back above the title (the manual's «contexto» zone), and the line under the list that says
-   what the project's owner sees, at the reading measure. */
+/* A project's page: the way back above the title (the manual's «contexto» zone), and the line that says what the
+   project's owner sees, first in the body and at the reading measure, one block's gap above the lists. */
 .page-context { margin-bottom: var(--space-1); }
 .page-note { max-width: var(--measure-text); color: var(--muted); }
-.body > * + .page-note, .page-note + .section { margin-top: var(--space-between-blocks); }
+.page-note + .section { margin-top: var(--space-between-blocks); }
 
 /* A row of the list (.rows, .row and .status come from the base): the whole row is the link. An entry of the owner's part
    with nothing to open (.row-item) is laid out the same, its name in the text colour, not the link's. */

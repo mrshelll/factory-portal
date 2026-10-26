@@ -620,10 +620,10 @@ function ownerPart(projectId, view) {
     groups);
 }
 
-// What was asked of the person in this project (the list home used to have), the line that says what the project's owner
-// sees, and then, for its owner, how it is going for everyone. The line closes the person's part, before the owner's: on a
-// phone the owner's part then shows within the first screen (FUN-42), even when nothing was asked of the owner. A project
-// that is not the person's says it is not available, as a piece does.
+// The line that says what the project's owner sees, then what was asked of the person in this project (the list home
+// used to have) and, for its owner, how it is going for everyone. The line goes first and is short, so on a phone what
+// follows it shows within the first screen however long the lists are (FUN-42). A project that is not the person's says
+// it is not available, as a piece does.
 async function showProject(projectId, viewId) {
   state.view = "project";
   const user = state.session.user;
@@ -661,13 +661,13 @@ async function showProject(projectId, viewId) {
   setTitle(name);
   layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
   unsavedWarning(layout.notices);
+  layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
   if (items.length) {
     const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },
       h("h2", { id: "asked-title" }, t("askedOfYou")),
       h("ul", { class: "rows" }, sorted.map(pieceRow))));
   }
-  layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
   const ownerSection = owner ? ownerPart(projectId, owner) : null;
   if (ownerSection) layout.body.append(ownerSection);
 }

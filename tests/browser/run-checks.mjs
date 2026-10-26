@@ -2020,7 +2020,7 @@ const projectView = (page) => page.evaluate(() => {
       beforeTitle: Boolean(back.compareDocumentPosition(document.querySelector("h1")) & Node.DOCUMENT_POSITION_FOLLOWING) } : null,
     sections: [...document.querySelectorAll("[data-rol=cuerpo] section h2")].map((h) => h.textContent),
     pieces: [...document.querySelectorAll('[data-rol=cuerpo] .row-link[href^="#/piece/"]')].map((a) => a.getAttribute("href")),
-    last: body && body.lastElementChild ? body.lastElementChild.textContent : null,
+    first: body && body.firstElementChild ? body.firstElementChild.textContent : null,
     notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => ({ text: n.querySelector("p")?.textContent, role: n.getAttribute("role") })),
   };
 });
@@ -2072,7 +2072,8 @@ async function projectPageChecks(browser, base, html) {
       JSON.stringify(project));
     check(`project-page: «${PROJECT.askedOfYou}» lists the person's pieces, each opening it`, project.sections[0] === PROJECT.askedOfYou &&
       project.pieces.length === 3 && [IDS.questions, IDS.flow, IDS.demo].every((id) => project.pieces.includes(`#/piece/${id}`)), JSON.stringify(project));
-    check("project-page: it ends with the line that says what the owner sees", project.last === PROJECT.ownerSees, JSON.stringify(project.last));
+    // First in the body: on a phone what follows it shows within the first screen, however long the list (FUN-42).
+    check("project-page: it starts with the line that says what the owner sees", project.first === PROJECT.ownerSees, JSON.stringify(project.first));
     check("project-page: 360px no horizontal scroll", await noHorizontalScroll(page));
     await page.screenshot({ path: join(outDir, "project-page-360.png"), fullPage: true });
     await snapshot(page, "project-page", "lista");
@@ -2487,8 +2488,8 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
     const other = await waitFor(async () => { const v = await projectView(page); return v.h1 === PROJECT.name && v.pieces.length ? v : null; }, 10000);
     await sleep(500);
-    check("owner-and-stakeholder: the project where she is asked things shows only her pieces and the closing line, as before", other &&
-      JSON.stringify(other.sections) === JSON.stringify([PROJECT.askedOfYou]) && other.pieces.length === 3 && other.last === PROJECT.ownerSees &&
+    check("owner-and-stakeholder: the project where she is asked things shows only her pieces and the line that says what the owner sees, as before", other &&
+      JSON.stringify(other.sections) === JSON.stringify([PROJECT.askedOfYou]) && other.pieces.length === 3 && other.first === PROJECT.ownerSees &&
       other.notices.length === 0 && !(await ownerPart(page)), JSON.stringify(other));
     check("owner-and-stakeholder: the project where she is not the owner never asks owner_project", !backend.ownerCalls.some((c) => c.p_project_id === IDS.project),
       JSON.stringify(backend.ownerCalls));
@@ -2513,9 +2514,9 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
     const view = await waitFor(async () => { const v = await projectView(page); return v.h1 === PROJECT.name && v.pieces.length ? v : null; }, 10000);
     await sleep(500);
-    check("owner-and-stakeholder: refused by owner_project (42501), the page shows only her pieces and the closing line, without a notice", view &&
+    check("owner-and-stakeholder: refused by owner_project (42501), the page shows only her pieces and the line that says what the owner sees, without a notice", view &&
       backend.ownerCalls.some((c) => c.rpc === "owner_project" && c.p_project_id === IDS.project) && JSON.stringify(view.sections) === JSON.stringify([PROJECT.askedOfYou]) &&
-      view.last === PROJECT.ownerSees && view.notices.length === 0, JSON.stringify(view));
+      view.first === PROJECT.ownerSees && view.notices.length === 0, JSON.stringify(view));
     check("owner-and-stakeholder: refused: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
@@ -2540,8 +2541,8 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const part = await waitFor(() => ownerPart(page), 10000);
     const view = await projectView(page);
     const order = await page.evaluate(() => [...document.querySelector("[data-rol=cuerpo]").children].map((el) => el.querySelector("h2")?.textContent || el.className));
-    check(`owner-with-own-piece: the page shows «${PROJECT.askedOfYou}», the line that says what the owner sees, then the owner's part`, part &&
-      JSON.stringify(order) === JSON.stringify([PROJECT.askedOfYou, "page-note", OWNER.section]) && view.pieces.length === 3, JSON.stringify(order));
+    check(`owner-with-own-piece: the page shows the line that says what the owner sees, «${PROJECT.askedOfYou}», then the owner's part`, part &&
+      JSON.stringify(order) === JSON.stringify(["page-note", PROJECT.askedOfYou, OWNER.section]) && view.pieces.length === 3, JSON.stringify(order));
     const people = part ? part.pieces[0].people : [];
     check("owner-with-own-piece: her own entry goes after the people's, with her state", people.length === 2 && people[0].name === PEOPLE.luis.name &&
       people[1].name === "Ana Pérez" && people[1].state === OWNER.states.pending, JSON.stringify(people));
@@ -2565,17 +2566,18 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
 // cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
 // FUN-43; and the rest that geometria.mjs measures on the factory's pieces), on every portal screen at the factory's
 // verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
-// - the six screen snapshots (sign-in email and code steps, home with the projects and empty, a project's page, an owned
-//   project's page with the owner's part) through
-//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the six
+// - the seven screen snapshots (sign-in email and code steps, home with the projects and empty, a project's page, an owned
+//   project's page with the owner's part, a project's page with a received piece) through
+//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the seven
 //   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
 // - the piece screen and the owner's read-only piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
 //   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
 //   its pieces at the width the person sees them; also at 1600, past the frame's cap.
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
-// The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, and an
-// owned project's page with the owner's part (captured with --flow and --demo too).
-const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner"];
+// The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, an
+// owned project's page with the owner's part (captured with --flow and --demo too), and a project's page with a received
+// piece, a replaced version that was sent and a change request (the piece closure).
+const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
 // A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the centred empty home
 // passes FUN-43 on its own.
@@ -2597,7 +2599,7 @@ async function portalGeometryChecks(browser, base, html, factory) {
   const passes = (r) => r.ok || Boolean(r.exceptuada);
   const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
   const names = PORTAL_SCREENS;
-  check("geometry: the six screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+  check("geometry: the seven screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
   const server = await serveDir(screensDir);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const frames = {}; // `${width}-${scheme}` -> the frame's content box on home, the projects (the other screens' reference)
@@ -2705,7 +2707,7 @@ if (args.factory) {
   const verifier = join(resolve(args.factory), "design-system", "assets", "verifica-pantalla.mjs");
   if (!existsSync(verifier)) check("manual: verifica-pantalla.mjs found", false, verifier);
   else {
-    check("manual: the six screens were captured", PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+    check("manual: the seven screens were captured", PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
     for (const [name, pattern] of screens) {
       for (const width of [320, 768, 1440]) {
         for (const scheme of ["light", "dark"]) {
