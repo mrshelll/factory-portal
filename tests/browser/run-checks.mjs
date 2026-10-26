@@ -1996,11 +1996,13 @@ const PROJECT = {
   notFound: "No encontramos este proyecto entre los tuyos. Puede que ya no esté disponible.",
 };
 // What owner_projects() answers for a project, worked out from what owner_project answers for it, as the SQL does: its
-// people (the members who are not owners), its open pieces (with an assignment pending or in progress) and its newest
-// send. So home and the project's page always speak of the same project.
+// people (the distinct members with at least one assignment, the owner included: the ones the owner's part lists), its
+// open pieces (with an assignment pending or in progress) and its newest send. No count is written by hand, so home and
+// the project's page always speak of the same project.
 function ownerSummary(view) {
-  const sends = view.pieces.flatMap((p) => p.assignments).map((a) => a.sent_at).filter(Boolean).sort();
-  return { ...view.project, people: view.members.filter((m) => m.role !== "owner").length,
+  const assignments = view.pieces.flatMap((p) => p.assignments);
+  const sends = assignments.map((a) => a.sent_at).filter(Boolean).sort();
+  return { ...view.project, people: new Set(assignments.map((a) => a.member_id)).size,
     open_pieces: view.pieces.filter((p) => p.assignments.some((a) => a.status === "pending" || a.status === "in_progress")).length,
     last_response_at: sends.at(-1) || null };
 }
@@ -2032,6 +2034,19 @@ const projectView = (page) => page.evaluate(() => {
     notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => ({ text: n.querySelector("p")?.textContent, role: n.getAttribute("role") })),
   };
 });
+// What home says of an owned project, worked out from what its page shows: its people (the names in the owner's part),
+// the pieces still waiting for someone (an entry «Por empezar», «La abrió» or «En curso») and the last send; a count of 0
+// is not said. ownerFirst: «Eres responsable» goes first, when the row's right says what is left to answer.
+function homeMetaFrom(part, lastSent, { ownerFirst = false } = {}) {
+  const waitingStates = ["Por empezar", "La abrió", "En curso"];
+  const people = new Set(part.pieces.flatMap((p) => p.people.map((x) => x.name))).size;
+  const waiting = part.pieces.filter((p) => p.people.some((x) => waitingStates.includes(x.state))).length;
+  const segments = ownerFirst ? ["Eres responsable"] : [];
+  if (people) segments.push(people === 1 ? "1 persona" : `${people} personas`);
+  if (waiting) segments.push(waiting === 1 ? "1 cosa con respuestas pendientes" : `${waiting} cosas con respuestas pendientes`);
+  if (lastSent) segments.push(`última respuesta el ${lastSent}`);
+  return segments.length ? segments.join(" · ") : null;
+}
 const openedCalls = (backend) => backend.requests.filter((r) => r === "POST /rest/v1/rpc/mark_piece_opened").length;
 
 async function projectPageChecks(browser, base, html) {
@@ -2132,10 +2147,53 @@ async function projectPageChecks(browser, base, html) {
     await context.close();
   }
 
+  // An owned project where nothing was shared yet (owner_project lists no pieces), and nothing asked of its owner: home
+  // says no count of 0, and the page has the owner's own line, never the line for the people asked.
+  {
+    const backend = ownerBackend(html);
+    backend.ownerView[IDS.ownedProject].pieces = [];
+    backend.ownerView[IDS.ownedProject].change_requests = [];
+    backend.ownedProjects = [ownerSummary(backend.ownerView[IDS.ownedProject])];
+    const { context, page, errors } = await open(backend);
+    await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+    const row = (await projectRowsOf(page)).find((r) => r.href === `#/project/${IDS.ownedProject}`);
+    check("home-projects: an owned project with nothing shared yet says it is the owner's, without a count of 0", row && row.aside === "Eres responsable" &&
+      !row.meta, JSON.stringify(row));
+    const owned = await goHash(page, `#/project/${IDS.ownedProject}`, async () => { const v = await projectView(page); return v.h1 === PROJECT.owned ? v : null; });
+    const body = await page.evaluate(() => [...document.querySelector("[data-rol=cuerpo]").children].map((el) => ({ cls: el.className, text: el.innerText })));
+    check(`project-page: an owned project with nothing shared yet nor asked shows the owner's line «${OWNER.empty}», not «${PROJECT.ownerSees}»`, owned &&
+      !owned.sections.includes(PROJECT.askedOfYou) && owned.pieces.length === 0 && body.length === 1 && body[0].text.includes(OWNER.empty) &&
+      !body.some((b) => b.text.includes(PROJECT.ownerSees)), JSON.stringify(body));
+    check("project-page: nothing shared yet: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // D: an owned project where nobody is waiting (every send in): home says its people and last send, not «0 cosas…».
+  {
+    const backend = ownerBackend(html);
+    const view = backend.ownerView[IDS.ownedProject];
+    for (const piece of view.pieces) for (const a of piece.assignments) {
+      if (a.status === "pending" || a.status === "in_progress") Object.assign(a, { status: "submitted", sent_at: AT.sent, readable: true, updated_at: AT.sent });
+    }
+    backend.ownedProjects = [ownerSummary(view)];
+    const { context, page, errors } = await open(backend);
+    await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+    const row = (await projectRowsOf(page)).find((r) => r.href === `#/project/${IDS.ownedProject}`);
+    const last = await formatIn(page, AT.sent);
+    await page.click(`a[href="#/project/${IDS.ownedProject}"]`).catch(() => {});
+    const part = await waitFor(() => ownerPart(page), 10000);
+    check("home-projects: with nobody waiting, an owned project says its people and last send, never «0 cosas con respuestas pendientes»", row && part &&
+      row.meta === `4 personas · última respuesta el ${last}` && row.meta === homeMetaFrom(part, last) && !row.meta.includes("0 cosas"), JSON.stringify({ row, expected: part && homeMetaFrom(part, last) }));
+    check("home-projects: nobody waiting: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
   // An owner with something left to answer in their own project: both are said on its row.
   {
     const backend = ownerBackend(html);
-    backend.ownedProjects.push({ id: IDS.project, slug: "portal-test", name: PROJECT.name, language: "es", people: 2, open_pieces: 1, last_response_at: null });
+    // Her own project, «Portal de prueba»: Ana has the questions to answer and Luis has them in progress; nothing sent yet.
+    backend.ownedProjects.push(ownerSummary({ project: backend.projects[0], members: [], change_requests: [], pieces: [
+      { id: IDS.questions, assignments: [ownerAssignment({ id: IDS.member }, "pending"), ownerAssignment(PEOPLE.luis, "in_progress")] }] }));
     const { context, page, errors } = await open(backend);
     await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
     const rows = await projectRowsOf(page);
@@ -2213,6 +2271,7 @@ const OWNER = {
   lateSend: (date) => `envió después del cierre el ${date}`,
   sentBy: (name, date) => `Lo que envió ${name} el ${date}`,
   lead: "Aquí ves cuándo cada persona abre y envía lo que compartiste.",
+  empty: "Todavía no compartiste nada en este proyecto.",
   requestText: "Quiero cambiar el orden de las pantallas",
 };
 const PEOPLE = {
@@ -2435,7 +2494,7 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     // someone (an entry «Por empezar», «La abrió» or «En curso»).
     const shownPeople = new Set(people.map((p) => p.name)).size;
     const waiting = part ? part.pieces.filter((p) => p.people.some((x) => [S.pending, S.opened, S.in_progress].includes(x.state))).length : -1;
-    const counted = `${shownPeople} personas · ${waiting === 1 ? "1 cosa" : `${waiting} cosas`} con respuestas pendientes · última respuesta el ${d.sent}`;
+    const counted = part && homeMetaFrom(part, d.sent);
     check("owner-project: home counts what the page shows (its people, the pieces still waiting for someone, the last send)", homeRow &&
       homeRow.meta === counted && homeRow.aside === "Eres responsable" && shownPeople === 4 && waiting === 1, JSON.stringify({ homeRow, counted }));
     check(`owner-project: the owner's part opens with its own line, and the page has no line for the people asked («${PROJECT.ownerSees}»)`, part &&
@@ -2578,7 +2637,6 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const backend = newBackend(html, flowHtml, demoHtml);
     backend.members[0].role = "owner";
     backend.ownedIds = [IDS.project];
-    backend.ownedProjects = [{ id: IDS.project, slug: "portal-test", name: PROJECT.name, language: "es", people: 1, open_pieces: 1, last_response_at: AT.sent }];
     const ana = { id: IDS.member, name: "Ana Pérez" };
     backend.ownerView[IDS.project] = {
       project: { id: IDS.project, slug: "portal-test", name: PROJECT.name, language: "es" },
@@ -2588,9 +2646,17 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
         ownerAssignment(ana, "pending"), ownerAssignment(PEOPLE.luis, "submitted", { sent: AT.sent, readable: true, updated: AT.sent })] }],
       change_requests: [],
     };
-    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    backend.ownedProjects = [ownerSummary(backend.ownerView[IDS.project])];
+    const { context, page, errors } = await openMocked(browser, base, backend, "");
+    await page.waitForSelector(`a[href="#/project/${IDS.project}"]`, { timeout: 10000 }).catch(() => {});
+    const homeRow = (await projectRowsOf(page)).find((r) => r.href === `#/project/${IDS.project}`);
+    const lastSent = await formatIn(page, AT.sent);
+    await page.click(`a[href="#/project/${IDS.project}"]`).catch(() => {});
     const part = await waitFor(() => ownerPart(page), 10000);
     const view = await projectView(page);
+    check("owner-with-own-piece: home counts what the page shows, her own entry included (2 personas)", homeRow && part &&
+      homeRow.aside === "1 por responder" && homeRow.meta === homeMetaFrom(part, lastSent, { ownerFirst: true }) && homeRow.meta.includes("2 personas"),
+      JSON.stringify({ homeRow, expected: part && homeMetaFrom(part, lastSent, { ownerFirst: true }) }));
     const order = await page.evaluate(() => [...document.querySelector("[data-rol=cuerpo]").children].map((el) => el.querySelector("h2")?.textContent || el.className));
     check(`owner-with-own-piece: the page shows the line that says what the owner sees, «${PROJECT.askedOfYou}», then the owner's part`, part &&
       JSON.stringify(order) === JSON.stringify(["page-note", PROJECT.askedOfYou, OWNER.section]) && view.pieces.length === 3, JSON.stringify(order));

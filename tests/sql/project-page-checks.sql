@@ -22,6 +22,7 @@ declare
   v_beto constant text := 'pp-check-beto@example.invalid';
   v_pia constant text := 'pp-check-pia@example.invalid';
   v_nobody constant text := 'pp-check-nobody@example.invalid';
+  v_idle constant text := 'pp-check-idle@example.invalid';
   v_marker constant text := 'pp-check-draft-marker';
   v_ana_draft constant jsonb := '{"pp-check:answers": {"q1": "pp-check-draft-marker ana"}}';
   v_beto_draft constant jsonb := '{"pp-check:answers": {"f1": "pp-check-draft-marker beto"}}';
@@ -51,6 +52,7 @@ declare
   v_ana_id uuid;
   v_beto_id uuid;
   v_pia_id uuid;
+  v_idle_id uuid;
   v_qa uuid;
   v_fb uuid;
   v_fb2 uuid;
@@ -191,7 +193,13 @@ begin
   v_checks := v_checks + 1;
 
   -- (4) owner_projects as Olga lists pp-check-project only (she is a stakeholder in pp-check-other),
-  --     with people = 2; open_pieces and last_response_at follow Ana's send. As Ana it is [].
+  --     with people = 2: the members with an assignment (Ana and Beto), not Olga (the owner, with none)
+  --     nor a stakeholder added without any (Idle, removed again at the end of this check); open_pieces
+  --     and last_response_at follow Ana's send. As Ana it is []. As Pía, pp-check-other counts 2: Olga
+  --     and Pía herself, the owner, who has an assignment there.
+  insert into public.project_members (project_id, email, role, display_name)
+  values (v_project_id, v_idle, 'stakeholder', 'Idle')
+  returning id into v_idle_id;
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
   perform public.save_draft(v_qa, v_ana_draft);
@@ -242,6 +250,18 @@ begin
      or (v_elem ->> 'last_response_at')::timestamptz is distinct from v_r1_at then
     raise exception 'project-page (4): after Ana''s send, Olga''s project is %', v_elem;
   end if;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_pia)::text, true);
+  v_res := public.owner_projects();
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  if jsonb_typeof(v_res) is distinct from 'array' or jsonb_array_length(v_res) <> 1
+     or v_res -> 0 ->> 'id' is distinct from v_other_id::text
+     or v_res -> 0 -> 'people' is distinct from '2'::jsonb then
+    raise exception 'project-page (4): Pía''s project should count Olga and Pía (both assigned): %', v_res;
+  end if;
+  delete from public.project_members where id = v_idle_id;
   v_checks := v_checks + 1;
 
   -- (5) owner_project as Olga: Ana's assignment shows first_opened_at, sent_at and readable after a

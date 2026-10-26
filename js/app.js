@@ -494,7 +494,7 @@ const countOf = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 
 // piece's state. For the person, what is left to answer (or that everything was sent); for an owner with nothing to
 // answer, that they are the owner. Under the name, for its owner: that they are (when the right says what is left to
 // answer), its people, its pieces still waiting for someone and the last response, when there is one; these counts are
-// the ones its page shows (owner_projects() counts as owner_project lists).
+// the ones its page shows (owner_projects() counts as owner_project lists), and a count of 0 is not said.
 function projectRow({ project, toAnswer, owned, summary }) {
   const aside = toAnswer > 0 ? t("projectToAnswer", { count: toAnswer }) : owned ? t("projectOwner") : t("projectAllSent");
   const meta = [];
@@ -502,8 +502,8 @@ function projectRow({ project, toAnswer, owned, summary }) {
   if (owned && summary) {
     const people = countOf(summary.people);
     const open = countOf(summary.open_pieces);
-    meta.push(people === 1 ? t("projectPeopleOne") : t("projectPeople", { count: people }));
-    meta.push(open === 1 ? t("projectOpenOne") : t("projectOpen", { count: open }));
+    if (people) meta.push(people === 1 ? t("projectPeopleOne") : t("projectPeople", { count: people }));
+    if (open) meta.push(open === 1 ? t("projectOpenOne") : t("projectOpen", { count: open }));
     const last = formatDate(state.lang, summary.last_response_at);
     if (last) meta.push(t("projectLastResponse", { date: last }));
   }
@@ -567,7 +567,7 @@ async function showHome(viewId) {
 // The owner's part of a project's page: per piece (newest first), its title and kind, then one entry per person assigned
 // (personRows: by name, owners after) with the state the owner reads, its date and, said by their date and never by
 // their text, the person's change requests and sends after the close. A send that kept its storage opens what the person
-// sent, read only (showOwnerPiece); the others are not links. null when nobody was assigned anything yet.
+// sent, read only (showOwnerPiece); the others are not links. When nobody was assigned anything yet, the section says so.
 const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusOpened", in_progress: "ownerStatusInProgress",
   submitted: "ownerStatusSubmitted", received: "ownerStatusReceived", replaced: "ownerStatusReplaced" };
 // The base's status dots (COM-13), one mark per state and the same as in the person's list: «Por empezar» hollow grey,
@@ -618,17 +618,16 @@ function ownerPart(projectId, view) {
       h("p", { class: "owner-piece-kind" }, t(KIND_KEYS[piece.kind] || "kindQuestions")),
       h("ul", { class: "rows" }, rows.map((row) => ownerEntry(projectId, piece, row, members.get(row.memberId), requestsOf(piece.id, row.memberId)))));
   }).filter(Boolean);
-  if (!groups.length) return null;
   return h("section", { class: "section owner-part", "aria-labelledby": "owner-title" },
     h("h2", { id: "owner-title" }, t("ownerSection")),
-    h("p", { class: "owner-lead" }, t("ownerLead")),
+    h("p", { class: "owner-lead" }, t(groups.length ? "ownerLead" : "ownerEmpty")),
     groups);
 }
 
 // The line that says what the project's owner sees, then what was asked of the person in this project (the list home
 // used to have) and, for its owner, how it is going for everyone. The line is for the people asked: it shows with their
-// own items (and on a page that would otherwise be empty), not to an owner with nothing asked, whose part opens with its
-// own line. It goes first and is short, so on a phone what follows it shows within the first screen however long the
+// own items, and to someone who is not the owner and has nothing here (the page is not left empty); never to an owner
+// with nothing asked, whose part opens with its own line (or says nothing was shared yet). It goes first and is short, so on a phone what follows it shows within the first screen however long the
 // lists are (FUN-42). A project that is not the person's says it is not available, as a piece does.
 async function showProject(projectId, viewId) {
   state.view = "project";
@@ -668,7 +667,7 @@ async function showProject(projectId, viewId) {
   layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
   unsavedWarning(layout.notices);
   const ownerSection = owner ? ownerPart(projectId, owner) : null;
-  if (items.length || !ownerSection) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
+  if (items.length || !owner) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
   if (items.length) {
     const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },

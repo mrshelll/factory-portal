@@ -56,9 +56,10 @@ end;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
--- owner_projects: the caller's owned projects, by name, each with the people in it (members who are
--- not owners), its open pieces (pieces with an assignment pending or in progress) and the date of
--- its newest send (partial responses are drafts and do not count). [] when the caller owns none.
+-- owner_projects: the caller's owned projects, by name, each with its people (the distinct members
+-- with at least one assignment in it, the owner included when assigned: the ones owner_project lists
+-- per piece), its open pieces (pieces with an assignment pending or in progress) and the date of its
+-- newest send (partial responses are drafts and do not count). [] when the caller owns none.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function public.owner_projects()
@@ -73,9 +74,10 @@ as $function$
            'slug', pr.slug,
            'name', pr.name,
            'language', pr.language,
-           'people', (select count(*)
-                      from public.project_members m
-                      where m.project_id = pr.id and m.role <> 'owner'),
+           'people', (select count(distinct a.member_id)
+                      from public.piece_assignments a
+                      join public.pieces p on p.id = a.piece_id
+                      where p.project_id = pr.id),
            'open_pieces', (select count(distinct a.piece_id)
                            from public.piece_assignments a
                            join public.pieces p on p.id = a.piece_id

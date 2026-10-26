@@ -111,8 +111,8 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* The owner's part of a project's page reads, squinting, section > piece > person: the section's title as every
    section's, its line in muted text; each piece's title smaller and bold, with its kind; each person's name smaller and
    regular (the link colour only on the ones that open, never bold). */
-.owner-lead { margin-bottom: var(--space-5); color: var(--muted); }
-.owner-piece + .owner-piece { margin-top: var(--space-5); }
+.owner-lead { color: var(--muted); }
+.owner-lead + .owner-piece, .owner-piece + .owner-piece { margin-top: var(--space-5); }
 .owner-piece-title { margin: 0; font-size: var(--text-small); font-weight: 600; line-height: 1.4; }
 .owner-piece-kind { margin-block: 0 var(--space-3); color: var(--muted); font-size: var(--text-small); }
 .owner-piece .row-title { font-size: var(--text-small); font-weight: 400; }
