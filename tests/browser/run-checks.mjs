@@ -1041,8 +1041,12 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   // column's edge (MAR-10) and ends on the frame's right edge (MAR-13); plus the «Ver todos los flujos» link and the width of three texts the person reads:
   // the questions' (the first paragraph of the sheet's body, .flow > p), the sentence in the flows' title band
   // (.heading > p: how many flows, steps and minutes, or what is left) and the text of a step (.step-intro > p).
+  // null when there is no piece to measure (it did not open, or its frame went away): the check that reads it fails, the
+  // run goes on.
   const contentOf = async (page, frame) => {
-    const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f.getBoundingClientRect().left + f.clientLeft; });
+    if (!frame) return null;
+    const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f ? f.getBoundingClientRect().left + f.clientLeft : null; });
+    if (offset === null) return null;
     const inner = await frame.evaluate(() => {
       const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(el).visibility !== "hidden"; };
       const containers = [...document.querySelectorAll("main, main #app, main #view, main .frame, main .view, main .layout, main .main-col")].filter(shown);
@@ -1057,18 +1061,23 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
         home: home && shown(home) ? home.getBoundingClientRect().left : null, flowReading: flowReading ? flowReading.getBoundingClientRect().width : null,
         stepReading: stepReading ? stepReading.getBoundingClientRect().width : null,
         reading: reading ? reading.getBoundingClientRect().width : null };
-    });
+    }).catch(() => null);
+    if (!inner) return null;
     const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset, right: b.right + offset }));
     return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, stepReading: inner.stepReading, reading: inner.reading };
   };
   // Every top-level block on the brand's edge (±1 px), and a side column ending on the frame's right edge; the
-  // detail names the ones that are not.
+  // detail names the ones that are not. With no brand on screen or no piece measured, this one check fails.
   const onEdge = (tag, what, content, brand) => {
-    const off = content ? content.blocks.filter((b) => (b.side ? Math.abs(b.right - brand.frameRight) > 1 : Math.abs(b.left - brand.left) > 1)) : [];
-    const sides = content ? content.blocks.filter((b) => b.side).length : 0;
+    if (!brand || !content) {
+      check(`${tag}: ${what}: every top-level block starts on the brand's left edge`, false, JSON.stringify({ brand: Boolean(brand), content: Boolean(content) }));
+      return;
+    }
+    const off = content.blocks.filter((b) => (b.side ? Math.abs(b.right - brand.frameRight) > 1 : Math.abs(b.left - brand.left) > 1));
+    const sides = content.blocks.filter((b) => b.side).length;
     check(`${tag}: ${what}: every top-level block starts on the brand's left edge${sides ? " and the side column ends on the frame's right edge" : ""}`,
-      content && content.blocks.some((b) => !b.side) && off.length === 0,
-      JSON.stringify({ brand: brand.left, frameRight: brand.frameRight, blocks: content ? content.blocks.length : 0, sides, off: off.slice(0, 4) }));
+      content.blocks.some((b) => !b.side) && off.length === 0,
+      JSON.stringify({ brand: brand.left, frameRight: brand.frameRight, blocks: content.blocks.length, sides, off: off.slice(0, 4) }));
   };
   const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
   // Opened and left alone: no «Guardando…» (nor any save line) and nothing sent to save_draft.
@@ -1116,14 +1125,14 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     await hostShot(page, "questions", width, scheme);
     await quietOpen(tag, page, backend);
     // The first change the person makes is saved, with what the piece wrote while it opened.
-    await frame.evaluate(() => responder("q-001", "si"));
-    const saved = await waitFor(async () => (await page.textContent(".piece-status")).includes("Guardado"), 5000);
+    if (frame) await frame.evaluate(() => responder("q-001", "si"));
+    const saved = frame && await waitFor(async () => (await page.textContent(".piece-status")).includes("Guardado"), 5000);
     const opened = backend.draft && JSON.parse(backend.draft[QUESTIONS_KEY]).abierta_en;
     check(`${tag}: the first change says «Guardado» and carries the opening time the piece wrote`, saved && opened, String(opened));
-    await frame.evaluate(() => showReview());
+    if (frame) await frame.evaluate(() => showReview());
     onEdge(tag, "review", await contentOf(page, frame), layout.brand);
-    await sendQuestions(frame);
-    const sentShown = await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(QUESTIONS_SENT)), 8000);
+    if (frame) await sendQuestions(frame);
+    const sentShown = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(QUESTIONS_SENT)), 8000);
     check(`${tag}: the piece sends and shows its sent screen`, sentShown);
     onEdge(tag, "sent", await contentOf(page, frame), layout.brand);
     check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
@@ -1589,8 +1598,15 @@ const pieceHost = (frame) => frame.evaluate(() => ({ closed: factoryHost.closed,
   sendButton: [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Enviar respuestas") }));
 const requestButton = (page) => page.getByRole("button", { name: CLOSURE.action, exact: true });
 const sendRequestButton = (page) => page.locator("#change-request-text").locator("xpath=ancestor::form").locator("button[type=submit]");
-// A control that is not there fails its check, it does not stop the run.
-const tap = (locator) => locator.click({ timeout: 3000 }).catch(() => {});
+// A control that is not there fails its check, it does not stop the run. Before the click, two of the page's animation
+// frames: the piece's iframe runs in its own process, and Chrome sends a pointer event to the frame that was under it on
+// the last frame it drew. A click right after the layout moved (the request form just opened above the piece) can land in
+// the piece where it was a frame ago, though the page's DOM already has the button there (Playwright's own target check
+// passes), and the form is never sent.
+const tap = async (locator) => {
+  await locator.page().evaluate(nextFrames).catch(() => {});
+  await locator.click({ timeout: 3000 }).catch(() => {});
+};
 const typeRequest = (page, text) => page.fill("#change-request-text", text, { timeout: 3000 }).catch(() => {});
 // The piece is a sandboxed iframe, so Chrome runs it in its own process and does not paint it while it is out of view.
 // Scrolled into view, it paints on its next frames: wait for two of its animation frames, then one of the page's,
