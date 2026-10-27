@@ -58,8 +58,8 @@ $function$;
 -- ---------------------------------------------------------------------------------------------
 -- owner_projects: the caller's owned projects, by name, each with its people (the distinct members
 -- with at least one assignment in it, the owner included when assigned: the ones owner_project lists
--- per piece), its open pieces (pieces with an assignment pending or in progress) and the date of its
--- newest send (partial responses are drafts and do not count). [] when the caller owns none.
+-- per piece) and the date of its newest send (partial responses are drafts and do not count). [] when
+-- the caller owns none.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function public.owner_projects()
@@ -78,10 +78,6 @@ as $function$
                       from public.piece_assignments a
                       join public.pieces p on p.id = a.piece_id
                       where p.project_id = pr.id),
-           'open_pieces', (select count(distinct a.piece_id)
-                           from public.piece_assignments a
-                           join public.pieces p on p.id = a.piece_id
-                           where p.project_id = pr.id and a.status in ('pending', 'in_progress')),
            'last_response_at', (select max(r.submitted_at)
                                 from public.piece_responses r
                                 join public.pieces p on p.id = r.piece_id

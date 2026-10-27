@@ -2083,14 +2083,12 @@ const PROJECT = {
   notFound: "No encontramos este proyecto entre los tuyos. Puede que ya no esté disponible.",
 };
 // What owner_projects() answers for a project, worked out from what owner_project answers for it, as the SQL does: its
-// people (the distinct members with at least one assignment, the owner included: the ones the owner's part lists), its
-// open pieces (with an assignment pending or in progress) and its newest send. No count is written by hand, so home and
-// the project's page always speak of the same project.
+// people (the distinct members with at least one assignment, the owner included: the ones the owner's part lists) and
+// its newest send. No count is written by hand, so home and the project's page always speak of the same project.
 function ownerSummary(view) {
   const assignments = view.pieces.flatMap((p) => p.assignments);
   const sends = assignments.map((a) => a.sent_at).filter(Boolean).sort();
   return { ...view.project, people: new Set(assignments.map((a) => a.member_id)).size,
-    open_pieces: view.pieces.filter((p) => p.assignments.some((a) => a.status === "pending" || a.status === "in_progress")).length,
     last_response_at: sends.at(-1) || null };
 }
 // The person (Ana) also owns a second project, «Biblioteca del barrio» (ownedView), where nothing is asked of her.

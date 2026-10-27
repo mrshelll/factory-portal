@@ -68,7 +68,7 @@ export async function loadSharedWithMe(client, user) {
 }
 
 // The person's projects: the groups of what was asked of them (loadSharedWithMe) and the projects they own
-// (owner_projects(): [{ id, slug, name, language, people, open_pieces, last_response_at }]). owned is [] on a database
+// (owner_projects(): [{ id, slug, name, language, people, last_response_at }]). owned is [] on a database
 // without that function (PGRST202); any other error throws, as the groups' do. -> { groups, owned }
 export async function loadProjects(client, user) {
   const [groups, owned] = await Promise.all([loadSharedWithMe(client, user), ownedProjects(client)]);

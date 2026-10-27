@@ -194,8 +194,8 @@ begin
 
   -- (4) owner_projects as Olga lists pp-check-project only (she is a stakeholder in pp-check-other),
   --     with people = 2: the members with an assignment (Ana and Beto), not Olga (the owner, with none)
-  --     nor a stakeholder added without any (Idle, removed again at the end of this check); open_pieces
-  --     and last_response_at follow Ana's send. As Ana it is []. As Pía, pp-check-other counts 2: Olga
+  --     nor a stakeholder added without any (Idle, removed again at the end of this check);
+  --     last_response_at follows Ana's send. As Ana it is []. As Pía, pp-check-other counts 2: Olga
   --     and Pía herself, the owner, who has an assignment there.
   insert into public.project_members (project_id, email, role, display_name)
   values (v_project_id, v_idle, 'stakeholder', 'Idle')
@@ -212,14 +212,13 @@ begin
     raise exception 'project-page (4): Olga''s projects are %, expected only %', v_res, v_slug;
   end if;
   v_elem := v_res -> 0;
-  if (select count(*) from jsonb_object_keys(v_elem)) <> 7
-     or not v_elem ?& array['id', 'slug', 'name', 'language', 'people', 'open_pieces', 'last_response_at']
+  if (select count(*) from jsonb_object_keys(v_elem)) <> 6
+     or not v_elem ?& array['id', 'slug', 'name', 'language', 'people', 'last_response_at']
      or v_elem ->> 'id' is distinct from v_project_id::text
      or v_elem ->> 'slug' is distinct from v_slug
      or v_elem ->> 'name' is distinct from 'PP Check Project'
      or v_elem ->> 'language' is distinct from 'es'
      or v_elem -> 'people' is distinct from '2'::jsonb
-     or v_elem -> 'open_pieces' is distinct from '2'::jsonb
      or v_elem -> 'last_response_at' is distinct from 'null'::jsonb then
     raise exception 'project-page (4): before the send, Olga''s project is %', v_elem;
   end if;
@@ -246,7 +245,6 @@ begin
   v_elem := v_res -> 0;
   if jsonb_array_length(v_res) <> 1
      or v_elem -> 'people' is distinct from '2'::jsonb
-     or v_elem -> 'open_pieces' is distinct from '1'::jsonb
      or (v_elem ->> 'last_response_at')::timestamptz is distinct from v_r1_at then
     raise exception 'project-page (4): after Ana''s send, Olga''s project is %', v_elem;
   end if;
