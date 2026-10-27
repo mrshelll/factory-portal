@@ -15,7 +15,8 @@
 // the list and opened read only with «Pedir un cambio»; the change request form; and a send that arrived after the
 // close. Screenshots <name>-<width>-<scheme>.png at 320, 768 and 1440, light and dark.
 //
-// Screen snapshots: the sign-in screens (email step, code step), home (the projects, empty) and a project's page are
+// Screen snapshots: the sign-in screens (email step, code step), home (the projects, empty), a project's page, an owned
+// project's page with the owner's part (with --flow and --demo too) and a project's page with a received piece are
 // saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
 // design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and

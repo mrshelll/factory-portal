@@ -48,18 +48,18 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
    normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
-   screen, then «Volver» and the piece's title with its save line («Guardando…», «Guardado»), all on
-   the brand's left edge. The iframe takes the frame's box (margins included, so as wide as the window
-   up to 1440 px, and centred above it), and the factory's pieces, inside the portal, start their content at the frame's
+   screen, then the way back to the piece's project («← <project name>»; «← Tus proyectos» when its name cannot be
+   read) and the piece's title with its save line («Guardando…», «Guardado»), all on the brand's left edge. The
+   iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it), and the factory's pieces, inside the portal, start their content at the frame's
    margin (16 px, 24 px from 672 px), on the brand's edge, keeping their reading measure. The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
    which the piece shows on its own sent screen, and says nothing until the person changes something.
    Only when the server has a send that the piece's saved draft cannot show (the draft was last saved
    at or before it, or there is none: the piece did not get to save its «sent» mark) does the line say
    «Enviada el …», until the person changes something or sends again.
-5. **A replaced version** (the factory published a newer one; the home list hides the old one) still
-   opens from an old email or a tab left open, and can still send. Until it is sent, a fixed notice says
-   there is a newer version, links to it (the newest piece of the same kind in the project among the
+5. **A replaced version** (the factory published a newer one; the project's page lists the old one only if the
+   person had sent it) still opens from an old email or a tab left open, and can still send. Until it is sent, a
+   fixed notice says there is a newer version, links to it (the newest piece of the same kind in the project among the
    person's own assignments, or the list), and the status line reads «Guardado aquí, sin enviar»: a
    draft saved there never reaches the factory, only a send does.
 
@@ -313,7 +313,7 @@ screen (`…-scrolled.png`); and a piece reopened while the person writes
 opens again on 55000; a send whose late check cannot be read still answers ok and opens the piece again as the
 server has it (closed after a late send, open after a normal one); and signing out with a change request written and
 not sent asks first («Quedarme» keeps the text). The piece screen is checked at 320, 768 and
-1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above «Volver» and
+1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above the way back and
 the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
 the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),
 and «Ver todos los flujos» in a flow, on that same edge, with the reading measure kept; no second
