@@ -917,13 +917,13 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
   await snapshot(emptyPage, "home-empty", "lista");
-  // anatomia-del-patron and peso-repartido (home-empty): the empty home is the list it replaces, with one row. The list's
-  // own top rule (the base's .rows), never a rule of the empty state's own; on the row's left its title and message, on the
-  // title's edge as every other screen's body; its way out in the row's aside (.row-aside), as a home row carries its
-  // state: on the row's right from 672 px, ending on the body's right edge; at 320 under the message, the main action as
-  // wide as the body like the sign-in buttons, «Actualizar» under it on the same edge. The main action is a 44 px target
-  // at every width (FUN-18).
-  for (const width of [320, 1440]) {
+  // anatomia-del-patron and accion (home-empty): the empty home is the list it replaces, with one row. The list's own top
+  // rule (the base's .rows), never a rule of the empty state's own; its title, message and notice on the title's edge as
+  // every other screen's body; its way out right after the notice that explains it, in the same column and at every width,
+  // as on sign-in the action goes under its field: the main action as wide as the body up to the form measure like the
+  // sign-in buttons, «Actualizar» under it on the same edge. Nothing of the row sits apart on its right. The main action is
+  // a 44 px target at every width (FUN-18). The view does not reach FUN-43's 60 %: its exception is in GEOMETRY_EXCEPTIONS.
+  for (const width of [320, 768, 1440]) {
     await emptyPage.setViewportSize({ width, height: width < 672 ? 640 : 900 });
     const g = await emptyPage.evaluate(() => {
       const textBox = (el) => { if (!el) return null; const r = document.createRange(); r.selectNodeContents(el); const q = [...r.getClientRects()].filter((x) => x.width > 0);
@@ -938,7 +938,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       const vacio = document.querySelector("[data-rol=vacio]");
       const action = document.querySelector("[data-rol=vacio] [data-rol=accion-principal]");
       const refresh = [...document.querySelectorAll("[data-rol=vacio] button")].find((b) => b.textContent === "Actualizar");
-      const aside = action && action.closest(".row-aside");
+      const group = action && action.closest(".empty-actions");
       const ruled = (el) => { const s = getComputedStyle(el); return parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"; };
       const list = vacio && (vacio.matches(".rows") ? vacio : vacio.querySelector(".rows"));
       const notice = document.querySelector("[data-rol=vacio] .notice");
@@ -952,16 +952,20 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
         body: { x: Math.round(bodyBox.left + parseFloat(cs.paddingLeft)), der: Math.round(bodyBox.right - parseFloat(cs.paddingRight)),
           w: Math.round(bodyBox.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) }, measure,
         list: Boolean(list), rows: list ? list.querySelectorAll(":scope > .row").length : 0, listRule: Boolean(list && ruled(list)),
-        inRow: Boolean(aside && aside.parentElement && aside.parentElement.matches(".row-item") && list && list.contains(aside)),
-        refreshInAside: Boolean(aside && refresh && aside.contains(refresh)),
+        // The way out: one group, the last thing in the row's main column and right after the notice; no aside in the row.
+        afterNotice: Boolean(group && notice && group.parentElement === notice.parentElement && group.previousElementSibling === notice &&
+          !group.nextElementSibling && group.parentElement.matches(".row-main") && list && list.contains(group)),
+        refreshInGroup: Boolean(group && refresh && group.contains(refresh)),
+        asides: vacio ? vacio.querySelectorAll(".row-aside").length : null,
         // Only the list draws a top rule: the empty state, the row and what holds its text, none. A control's own border and the
         // base's section notice (its sheet, the component's own) are not rules of the empty state.
         otherRules: vacio ? [vacio, ...vacio.querySelectorAll("*")].filter((el) => el !== list && !el.matches("button, a, input, .notice") && ruled(el))
           .map((el) => el.className || el.tagName) : null };
     });
     const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
-    check(`home-empty ${width}px: the empty home is the list it replaces: one row of the base's list, its top rule the list's, its way out in the row's aside`,
-      g.list && g.rows === 1 && g.listRule && g.inRow && g.refreshInAside && Array.isArray(g.otherRules) && g.otherRules.length === 0, JSON.stringify(g));
+    check(`home-empty ${width}px: the empty home is the list it replaces: one row of the base's list, its top rule the list's, its way out right after the notice in the row's main column, no aside`,
+      g.list && g.rows === 1 && g.listRule && g.afterNotice && g.refreshInGroup && g.asides === 0 && Array.isArray(g.otherRules) && g.otherRules.length === 0,
+      JSON.stringify(g));
     check(`home-empty ${width}px: its title and its message start on the title's edge, not centred`,
       g.h1 !== null && g.title && near(g.title.x, g.h1) && g.message && near(g.message.x, g.h1), JSON.stringify(g));
     // aviso-de-seccion: what asks the person to check their email is the base's section notice (information: the grey stripe,
@@ -971,15 +975,12 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       parseFloat(g.notice.stripe) > 1 && g.notice.accent === g.notice.muted && near(g.notice.box.x, g.h1) &&
       g.messageText === EMPTY.body(USER.email) && !g.messageText.includes(EMPTY.hint), JSON.stringify({ notice: g.notice, message: g.messageText }));
     check(`home-empty ${width}px: its main action is a 44 px target (FUN-18)`, g.action && g.action.h >= 44, JSON.stringify(g.action));
-    if (width < 672) {
-      check(`home-empty ${width}px: under the message, the main action takes the body's width as the sign-in buttons do, «Actualizar» under it on the same edge`,
-        g.action && g.message && g.action.top >= g.message.bottom && near(g.action.x, g.h1) && near(g.action.w, Math.min(g.body.w, g.measure)) &&
-        g.refresh && g.refresh.top >= g.action.bottom && near(g.refresh.x, g.h1), JSON.stringify(g));
-    } else {
-      check(`home-empty ${width}px: the way out is on the row's right, beside the message and ending on the body's right edge, as a home row carries its state`,
-        g.action && g.refresh && g.message && g.action.x > g.message.der && g.action.top < g.message.bottom && g.action.bottom > g.title.top &&
-        near(Math.max(g.action.der, g.refresh.der), g.body.der), JSON.stringify(g));
-    }
+    // accion (home-empty): right under the notice, at most a gap of the scale's 16 px, on the title's edge; never on the
+    // row's right.
+    check(`home-empty ${width}px: right under the notice, the main action takes the body's width up to the form measure as the sign-in buttons do, «Actualizar» under it on the same edge`,
+      g.action && g.notice && g.action.top >= g.notice.box.bottom && g.action.top - g.notice.box.bottom <= 16 && near(g.action.x, g.h1) &&
+      near(g.action.w, Math.min(g.body.w, g.measure)) && g.refresh && g.refresh.top >= g.action.bottom && near(g.refresh.x, g.h1) &&
+      g.refresh.der < g.body.x + g.body.w / 2, JSON.stringify(g));
     if (width >= 672) await emptyPage.screenshot({ path: join(outDir, `home-empty-${width}.png`) });
   }
   await emptyContext.close();
@@ -2159,12 +2160,14 @@ async function projectPageChecks(browser, base, html) {
       rows[0].title === PROJECT.owned && rows[0].aside === "Eres responsable" &&
       rows[0].meta === `4 personas · última respuesta el ${last}`, JSON.stringify(rows[0]));
     check("home-projects: 360px no horizontal scroll", await noHorizontalScroll(page));
-    await page.setViewportSize({ width: 1440, height: 900 });
+    // Below 1056 a row keeps its label on the row's right edge, as the project lists carry the state; from 1056 the rows are
+    // columns (listColumnChecks, on every list screen).
+    await page.setViewportSize({ width: 672, height: 900 });
     const wide = await page.$$eval(".rows .row-link", (els) => els.map((a) => {
       const aside = a.querySelector(".row-aside");
       return aside ? Math.abs(a.getBoundingClientRect().right - aside.getBoundingClientRect().right) : null;
     }));
-    check("home-projects: at 1440 every row carries its label on the right edge, as the project lists carry the state (weight spread)",
+    check("home-projects: at 672 every row carries its label on the right edge, as the project lists carry the state",
       wide.length === 2 && wide.every((gap) => gap !== null && gap <= 1), JSON.stringify(wide));
     await page.setViewportSize({ width: 360, height: 780 });
     await page.screenshot({ path: join(outDir, "home-projects-360.png"), fullPage: true });
@@ -2538,12 +2541,18 @@ const ownerLinkRing = async (page) => {
     const a = document.activeElement;
     if (!a || !a.matches("a.owner-open")) return { focused: a ? a.className || a.tagName : null };
     const ringOf = (el) => { const cs = getComputedStyle(el); const w = parseFloat(cs.outlineWidth) || 0;
-      return cs.outlineStyle !== "none" && w > 0 ? { el: el.className || el.tagName, bottom: el.getBoundingClientRect().bottom + (parseFloat(cs.outlineOffset) || 0) + w } : null; };
+      const r = el.getBoundingClientRect(), out = (parseFloat(cs.outlineOffset) || 0) + w;
+      return cs.outlineStyle !== "none" && w > 0 ? { el: el.className || el.tagName, bottom: r.bottom + out, top: r.top - out, left: r.left - out, right: r.right + out } : null; };
     const rings = [a, ...a.querySelectorAll("*")].map(ringOf).filter(Boolean);
     const meta = a.closest("li").querySelector(".row-meta");
     const rg = document.createRange(); rg.selectNodeContents(meta);
-    const metaTop = Math.min(...[...rg.getClientRects()].filter((x) => x.width > 0).map((x) => x.top));
-    const ring = { visible: rings.length > 0, rings, bottom: rings.length ? Math.round(Math.max(...rings.map((x) => x.bottom)) * 10) / 10 : null, metaTop: Math.round(metaTop * 10) / 10 };
+    const metaRects = [...rg.getClientRects()].filter((x) => x.width > 0);
+    const metaTop = Math.min(...metaRects.map((x) => x.top));
+    const round = (v) => Math.round(v * 10) / 10;
+    const ring = { visible: rings.length > 0, rings, bottom: rings.length ? round(Math.max(...rings.map((x) => x.bottom))) : null, metaTop: round(metaTop),
+      // The ring's box (the outline around its element) against every rect of the date text: it never crosses any of them,
+      // whether the date line is under the link (below 1056) or beside it (the columns from 1056).
+      crosses: rings.some((x) => metaRects.some((m) => x.left < m.right && x.right > m.left && x.top < m.bottom && x.bottom > m.top)) };
     a.blur();
     return ring;
   });
@@ -2720,7 +2729,8 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
         hits.length === 4 && hits.every((x) => x.h >= 44 && x.samples >= 3 * x.h && x.misses.length === 0),
         JSON.stringify(hits.map((x) => ({ name: x.name, h: x.h, samples: x.samples, misses: x.misses.slice(0, 6) }))));
       const ring = await ownerLinkRing(page);
-      check(`owner-project ${width}px: «${OWNER.open}»'s focus ring stays off the date line`, ring && ring.visible && ring.bottom <= ring.metaTop,
+      check(`owner-project ${width}px: «${OWNER.open}»'s focus ring stays off the date line`, ring && ring.visible && ring.crosses === false &&
+        (width >= 1056 || ring.bottom <= ring.metaTop),
         JSON.stringify(ring));
     }
     await page.setViewportSize({ width: 360, height: 800 });
@@ -2908,8 +2918,77 @@ const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 // piece, a replaced version that was sent and a change request (the piece closure).
 const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
-// A screen's exceptions, by rule code, each with its reason in the rule's own words. None today.
-const GEOMETRY_EXCEPTIONS = {};
+// A screen's exceptions, by rule code, each with its reason in the rule's own words.
+const GEOMETRY_EXCEPTIONS = {
+  // Controller's ruling (design judges, round 4): FUN-43 lets an empty view that is «un vacío centrado con un mensaje
+  // angosto» stay under 60 %; the ruling applies that intent to this empty view, which is start-aligned instead of centred.
+  "home-empty": { "FUN-43": "vista vacía (todavía no hay proyectos): un mensaje angosto con su aviso y su salida justo debajo, "
+    + "alineado al inicio como el resto del conjunto en vez de centrado; fallo del controlador que aplica la excepción del vacío "
+    + "centrado de FUN-43 a un vacío alineado al inicio" },
+};
+// densidad (the lists at 1056 and up, FUN-43 «el grupo tabular como tabla»): every list row of a screen as laid out, its
+// row box (the link or the entry, without its padding), and the text of its three parts: the title (a person's name with
+// its «Ver lo que envió» in the owner's part), the meta line (people, dates) and the state or the aside. Text boxes are the
+// text's own rects, never a padded box.
+const LIST_SCREENS = ["home-projects", "project-page", "project-owner", "project-received"];
+const listColumns = (page) => page.evaluate(() => {
+  const textBox = (el) => {
+    if (!el) return null;
+    const rects = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.textContent.trim()) continue;
+      const r = document.createRange(); r.selectNodeContents(n);
+      rects.push(...[...r.getClientRects()].filter((x) => x.width > 0));
+    }
+    return rects.length ? { x: Math.round(Math.min(...rects.map((x) => x.left))), der: Math.round(Math.max(...rects.map((x) => x.right))),
+      top: Math.round(Math.min(...rects.map((x) => x.top))), bottom: Math.round(Math.max(...rects.map((x) => x.bottom))) } : null;
+  };
+  const boxOf = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+  return [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row")].map((li) => {
+    const row = li.querySelector(":scope > .row-link, :scope > .row-item");
+    const main = row && row.querySelector(":scope > .row-main");
+    const state = row && row.querySelector(":scope > .row-aside, :scope > .status");
+    const title = main && main.firstElementChild;
+    return { text: title ? title.textContent : null, row: row ? boxOf(row) : null, gap: row ? Math.round(parseFloat(getComputedStyle(row).columnGap) || 0) : null,
+      title: textBox(title),
+      meta: textBox(main && main.querySelector(":scope > .row-meta")), state: state ? boxOf(state) : null };
+  });
+});
+// From 1056 the rows are columns, title · meta · state, each column on the same x down every list of the screen, in that
+// order and on one line, so the eye crosses the row in short steps: the row's width is shared in three equal columns, so
+// the state starts two thirds into the row, not on its far edge. Below 1056 a row is as it was: at 672 the title on the row's left and the state on its right
+// edge, the meta under the title; at 320, everything stacked on the title's edge (the owner's entries keep their two lines,
+// checked in ownerViewChecks).
+function listColumnChecks(name, width, scheme, rows) {
+  const tag = `densidad: ${name} ${width}px ${scheme}`;
+  const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+  const same = (xs) => xs.length > 0 && xs.every((x) => near(x, xs[0]));
+  const ok = rows.length > 0 && rows.every((r) => r.row && r.title && r.state);
+  const detail = JSON.stringify(rows.map((r) => [r.text, r.row && [r.row.x, r.row.der], r.title && [r.title.x, r.title.der, r.title.top],
+    r.meta && [r.meta.x, r.meta.der, r.meta.top], r.state && [r.state.x, r.state.der, r.state.top]]));
+  if (width >= 1056) {
+    const metas = rows.filter((r) => r.meta);
+    check(`${tag}: the rows are columns, title · meta · state, each column aligned down the list`, ok && same(rows.map((r) => r.title.x)) &&
+      same(metas.map((r) => r.meta.x)) && same(rows.map((r) => r.state.x)) &&
+      rows.every((r) => near(r.title.x, r.row.x) && (!r.meta || r.meta.x > r.title.der) && r.state.x > (r.meta ? r.meta.der : r.title.der) &&
+        r.state.top < r.title.bottom && (!r.meta || r.meta.top < r.title.bottom)), detail);
+    // Three equal columns: from the title to the meta, from the meta to the state and from the state to the row's end (plus
+    // the gap between columns) is the same step: a third of the row and one gap.
+    const metaX = metas.length ? metas[0].meta.x : null;
+    check(`${tag}: the row's width is shared in three equal columns, the state two thirds into the row, not on its far edge`, ok && metaX !== null &&
+      rows.every((r) => { const step = (r.row.der - r.row.x + r.gap) / 3;
+        return Math.abs(metaX - r.title.x - step) <= 2 && Math.abs(r.state.x - metaX - step) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2; }),
+      JSON.stringify({ metaX, gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
+  } else if (width >= 672) {
+    check(`${tag}: as before the columns, the title on the row's left, the meta under it, the state on the row's right edge`, ok &&
+      rows.every((r) => near(r.title.x, r.row.x) && near(r.state.der, r.row.der) && (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
+  } else if (name !== "project-owner") {
+    check(`${tag}: as before the columns, the title, the meta and the state one under another on the title's edge`, ok &&
+      rows.every((r) => near(r.title.x, r.row.x) && near(r.state.x, r.row.x) && r.state.top >= (r.meta || r.title).bottom - 1 &&
+        (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
+  }
+}
 function serveDir(dir) {
   const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
   const server = createServer((req, res) => {
@@ -2939,6 +3018,7 @@ async function portalGeometryChecks(browser, base, html, factory) {
         await page.goto(`${origin}/${name}.html`, { waitUntil: "networkidle" });
         await page.evaluate(() => document.fonts.ready);
         const m = await page.evaluate(MEDIR_GEOMETRIA, {});
+        if (LIST_SCREENS.includes(name)) listColumnChecks(name, width, scheme, await listColumns(page));
         await page.close();
         records.push({ pantalla: name, recorrido: "portal", paso: 0, w: width, m });
         if (name === "home-projects" && m.contenedor) frames[`${width}-${scheme}`] = m.contenedor;

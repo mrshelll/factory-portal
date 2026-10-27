@@ -64,23 +64,19 @@ main { padding-block: var(--space-6) var(--space-7); }
 
 .loading { color: var(--muted); }
 /* Nothing shared yet: the empty state takes the shape of the list it replaces (the manual's «lista»): the list with its own
-   top rule (the base's .rows) and one row (.row-item, below): its title and message on the row's left, the message at the
-   reading measure; its way out in the row's aside, on the right from 672 px as a home row carries its state, and under the
-   message below that. The aside keeps the body's text size and colour for its controls. The main action is the base's
-   primary button, as on sign-in (a 48 px target): as wide as the body up to the form measure while it stacks, like the
-   sign-in buttons; beside the message, as wide as its words, as a row's aside is. «Actualizar» follows it in the same
-   group, so nothing of the block comes after them (MAR-06). What asks the person to check the email they were invited with
-   is the base's section notice (information, aviso-de-seccion), under the message. */
+   top rule (the base's .rows) and one row (.row-item, below): its title and message at the reading measure, then what asks
+   the person to check the email they were invited with, the base's section notice (information, aviso-de-seccion), and
+   right after it, in the same column at every width, its way out, next to what explains it as on sign-in the action goes
+   under its field. The main action is the base's primary button, as on sign-in (a 48 px target): as wide as the body up to
+   the form measure, like the sign-in buttons. «Actualizar» follows it in the same group, so nothing of the block comes
+   after them (MAR-06). */
 .empty .row-main { max-width: var(--measure-text); }
 .empty .notice { margin-top: var(--space-2); }
 .empty .row-title { font-size: var(--text-body); line-height: 1.4; }
 .empty p { overflow-wrap: anywhere; }
-.empty .empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); color: inherit; font-size: var(--text-body); }
+/* Its margin and the column's gap make the 8 px it always had under the notice. */
+.empty .empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); margin-top: var(--space-1); }
 .empty .empty-actions .button--primary { width: 100%; }
-@media (min-width: 672px) {
-  .empty .empty-actions { display: flex; flex: none; align-items: center; max-width: none; }
-  .empty .empty-actions .button--primary { width: auto; }
-}
 
 /* A project's page: the way back above the title (the manual's «contexto» zone), and the line that says what the
    project's owner sees, first in the body and at the reading measure, one block's gap above the lists. */
@@ -155,6 +151,26 @@ main { padding-block: var(--space-6) var(--space-7); }
 .owner-open { position: relative; display: inline-block; padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); font-size: var(--text-small); }
 .owner-open:focus-visible { outline: none; }
 .owner-open:focus-visible > span { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* From 1056 px a list row is a row of a table: its title (a person's name with «Ver lo que envió» in the owner's part), its
+   meta line (people, dates) and its state or aside, in three equal columns of the row (FUN-43: «reparte el ancho con lo que
+   ya existe, el grupo tabular como tabla»). Every row of a screen is as wide as the body, so each column falls on the same
+   x down every list, and the eye crosses the row in short steps instead of from the far left to the far right. The row
+   keeps its markup (a link, or an entry, holding its main part and its state): .row-main only stops being a box. Below
+   1056 the row is as above. The empty home is not a list of rows: it keeps its one column. */
+@media (min-width: 1056px) {
+  .rows:not(.empty) :is(.row-link, .row-item) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas: "title meta state";
+    align-items: center;
+    gap: var(--space-4);
+  }
+  .rows:not(.empty) .row-main { display: contents; }
+  .rows:not(.empty) .row-main > :first-child { grid-area: title; }
+  .rows:not(.empty) .row-meta { grid-area: meta; }
+  .rows:not(.empty) :is(.row-aside, .status) { grid-area: state; }
+}
 
 /* ---- piece ------------------------------------------------------------------------------ */
 

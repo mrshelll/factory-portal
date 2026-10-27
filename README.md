@@ -220,11 +220,14 @@ base's on every screen: the page margin on both sides (16 px, 24 px from 672 px)
 stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
 after the form). The empty home has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top
-rule, and one row, its title and message on the left at the reading measure, under them the base's section notice
-that asks to check the email they were invited with and, in the row's aside, its way out
-«Entrar con otro correo», the view's `accion-principal`, with «Actualizar» beside it, as MAR-06 asks of an empty state.
-From 672 px the aside is on the row's right, as a home row carries its state; below that it goes under the message, the
-main action as wide as the body up to the form measure like the sign-in buttons, «Actualizar» under it.
+rule, and one row, its title and message at the reading measure, under them the base's section notice that asks to
+check the email they were invited with and, right after it in the same column at every width, its way out
+«Entrar con otro correo», the view's `accion-principal`, as wide as the body up to the form measure like the sign-in
+buttons, with «Actualizar» under it, as MAR-06 asks of an empty state. It does not reach FUN-43's 60 % from 1056 px and
+carries that rule's empty-view exception, with its reason, in the geometry check. From 1056 px the rows of every list
+(home's projects, a project's pieces, the owner's entries) are three equal columns: the title, the meta line and the
+state or aside, each on the same x down the list (FUN-43, «el grupo tabular como tabla»); from 672 to 1056 px the state
+stays on the row's right, and below 672 px the rows keep their phone layout.
 
 ## Database migrations
 
