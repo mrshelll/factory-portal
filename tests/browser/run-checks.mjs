@@ -2411,12 +2411,15 @@ const ownerBand = (page) => page.evaluate(() => {
     iframes: document.querySelectorAll("iframe").length,
     notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => n.querySelector("p")?.textContent) };
 });
-// The piece the owner reads, once it shows a title saying whose send it is (or, for the old piece, once its script ran).
-async function ownerFrame(page, ready = () => [...document.querySelectorAll("h1")].some((h) => h.getBoundingClientRect().height > 0 && h.textContent.includes("Lo que envió"))) {
+// The piece the owner reads, once it shows its heading (or, for the old piece, once its script ran). The piece heads its
+// read view itself («Respuestas», «Revisión»); the portal's band says whose send it is.
+async function ownerFrame(page, ready = () => typeof factoryHost === "object" &&
+  [...document.querySelectorAll("h1")].some((h) => h.getBoundingClientRect().height > 0 && h.textContent.trim())) {
   return waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(ready).catch(() => false)) ? f : null; }, 10000);
 }
 const hostOf = (frame) => frame.evaluate(() => ({ observer: factoryHost.observer, closed: factoryHost.closed, reviewerName: factoryHost.reviewerName,
-  sentAt: factoryHost.sentAt, h1: [...document.querySelectorAll("h1")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => h.textContent.trim()) }));
+  sentAt: factoryHost.sentAt, h1: [...document.querySelectorAll("h1")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => h.textContent.trim()),
+  repeats: document.body.innerText.includes("Lo que envió") }));
 // The writes the owner must never make, and the draft reads.
 const WRITES = ["rpc/save_draft", "rpc/submit_response", "rpc/request_change", "rpc/mark_piece_opened"];
 const writesIn = (requests) => requests.filter((r) => WRITES.some((w) => r.includes(`/rest/v1/${w}`)));
@@ -2532,7 +2535,9 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       const calls = backend.requests.slice(before);
       check(`${tag}: the piece opens closed, with observer, as Luis's send (reviewerName is his display_name)`, host && host.observer === true &&
         host.closed === "received" && host.reviewerName === luis.name && host.sentAt === AT.sent, JSON.stringify(host));
-      check(`${tag}: the piece says whose send it is`, host && host.h1.some((t) => t.startsWith(`Lo que envió ${luis.name}`)), JSON.stringify(host && host.h1));
+      // marco-del-anfitrion: the band says «Lo que envió … el …» (checked below); the piece heads its read view and does not repeat it.
+      check(`${tag}: the piece heads its own read view and does not repeat the band's «Lo que envió»`, host && host.h1.length > 0 &&
+        host.h1.every((t) => !t.startsWith("Lo que envió")) && !host.repeats, JSON.stringify(host && { h1: host.h1, repeats: host.repeats }));
       check(`${tag}: the title band is the piece's title and «${OWNER.sentBy(luis.name, d.sent)}», back to the project`, band.title === OWNED_TITLES[pieceId] &&
         band.status === OWNER.sentBy(luis.name, d.sent) && band.back && band.back.href === `#/project/${IDS.ownedProject}` && band.back.text.includes(PROJECT.owned),
         JSON.stringify(band));
