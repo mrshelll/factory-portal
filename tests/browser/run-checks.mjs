@@ -912,28 +912,57 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
   await snapshot(emptyPage, "home-empty", "lista");
-  // alineacion and accion (home-empty against the other screens): the empty state starts on the title's edge, as every
-  // other screen's body does, and its main action takes the body's width up to the form measure, as the sign-in buttons do,
-  // with «Actualizar» under it on the same edge.
+  // anatomia-del-patron and peso-repartido (home-empty): the empty home is the list it replaces, with one row. The list's
+  // own top rule (the base's .rows), never a rule of the empty state's own; on the row's left its title and message, on the
+  // title's edge as every other screen's body; its way out in the row's aside (.row-aside), as a home row carries its
+  // state: on the row's right from 672 px, ending on the body's right edge; at 320 under the message, the main action as
+  // wide as the body like the sign-in buttons, «Actualizar» under it on the same edge. The main action is a 44 px target
+  // at every width (FUN-18).
   for (const width of [320, 1440]) {
     await emptyPage.setViewportSize({ width, height: width < 672 ? 640 : 900 });
     const g = await emptyPage.evaluate(() => {
-      const textLeft = (el) => { if (!el) return null; const r = document.createRange(); r.selectNodeContents(el); const q = [...r.getClientRects()].filter((x) => x.width > 0);
-        return q.length ? Math.round(Math.min(...q.map((x) => x.left))) : null; };
-      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), w: Math.round(r.width) }; };
+      const textBox = (el) => { if (!el) return null; const r = document.createRange(); r.selectNodeContents(el); const q = [...r.getClientRects()].filter((x) => x.width > 0);
+        return q.length ? { x: Math.round(Math.min(...q.map((x) => x.left))), der: Math.round(Math.max(...q.map((x) => x.right))),
+          top: Math.round(Math.min(...q.map((x) => x.top))), bottom: Math.round(Math.max(...q.map((x) => x.bottom))) } : null; };
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left), der: Math.round(r.right), w: Math.round(r.width), top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) }; };
       const body = document.querySelector("[data-rol=cuerpo]");
       const form = document.createElement("div"); form.style.width = "var(--measure-form)"; body.append(form);
       const measure = Math.round(form.getBoundingClientRect().width); form.remove();
       const bodyBox = body.getBoundingClientRect(), cs = getComputedStyle(body);
-      return { h1: textLeft(document.querySelector("h1")), title: textLeft(document.querySelector(".empty h2")), message: textLeft(document.querySelector(".empty p")),
-        action: box(document.querySelector(".empty [data-rol=accion-principal]")), refresh: box([...document.querySelectorAll(".empty button")].find((b) => b.textContent === "Actualizar")),
-        body: Math.round(bodyBox.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)), measure };
+      const vacio = document.querySelector("[data-rol=vacio]");
+      const action = document.querySelector("[data-rol=vacio] [data-rol=accion-principal]");
+      const refresh = [...document.querySelectorAll("[data-rol=vacio] button")].find((b) => b.textContent === "Actualizar");
+      const aside = action && action.closest(".row-aside");
+      const ruled = (el) => { const s = getComputedStyle(el); return parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"; };
+      const list = vacio && (vacio.matches(".rows") ? vacio : vacio.querySelector(".rows"));
+      return { h1: textBox(document.querySelector("h1"))?.x ?? null, title: textBox(document.querySelector("[data-rol=vacio] h2")),
+        message: textBox(document.querySelector("[data-rol=vacio] p")), action: box(action), refresh: box(refresh),
+        body: { x: Math.round(bodyBox.left + parseFloat(cs.paddingLeft)), der: Math.round(bodyBox.right - parseFloat(cs.paddingRight)),
+          w: Math.round(bodyBox.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) }, measure,
+        list: Boolean(list), rows: list ? list.querySelectorAll(":scope > .row").length : 0, listRule: Boolean(list && ruled(list)),
+        inRow: Boolean(aside && aside.parentElement && aside.parentElement.matches(".row-item") && list && list.contains(aside)),
+        refreshInAside: Boolean(aside && refresh && aside.contains(refresh)),
+        // Only the list draws a top rule: the empty state, the row and what holds its text, none (a control's own border aside).
+        otherRules: vacio ? [vacio, ...vacio.querySelectorAll("*")].filter((el) => el !== list && !el.matches("button, a, input") && ruled(el))
+          .map((el) => el.className || el.tagName) : null };
     });
     const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
-    check(`home-empty ${width}px: the empty state starts on the title's edge (its title, its message, its action and «Actualizar»), not centred`,
-      g.h1 !== null && near(g.title, g.h1) && near(g.message, g.h1) && g.action && near(g.action.x, g.h1) && g.refresh && near(g.refresh.x, g.h1), JSON.stringify(g));
-    check(`home-empty ${width}px: its main action takes the body's width up to the form measure, as the sign-in buttons do`,
-      g.action && near(g.action.w, Math.min(g.body, g.measure)), JSON.stringify(g));
+    check(`home-empty ${width}px: the empty home is the list it replaces: one row of the base's list, its top rule the list's, its way out in the row's aside`,
+      g.list && g.rows === 1 && g.listRule && g.inRow && g.refreshInAside && Array.isArray(g.otherRules) && g.otherRules.length === 0, JSON.stringify(g));
+    check(`home-empty ${width}px: its title and its message start on the title's edge, not centred`,
+      g.h1 !== null && g.title && near(g.title.x, g.h1) && g.message && near(g.message.x, g.h1), JSON.stringify(g));
+    check(`home-empty ${width}px: its main action is a 44 px target (FUN-18)`, g.action && g.action.h >= 44, JSON.stringify(g.action));
+    if (width < 672) {
+      check(`home-empty ${width}px: under the message, the main action takes the body's width as the sign-in buttons do, «Actualizar» under it on the same edge`,
+        g.action && g.message && g.action.top >= g.message.bottom && near(g.action.x, g.h1) && near(g.action.w, Math.min(g.body.w, g.measure)) &&
+        g.refresh && g.refresh.top >= g.action.bottom && near(g.refresh.x, g.h1), JSON.stringify(g));
+    } else {
+      check(`home-empty ${width}px: the way out is on the row's right, beside the message and ending on the body's right edge, as a home row carries its state`,
+        g.action && g.refresh && g.message && g.action.x > g.message.der && g.action.top < g.message.bottom && g.action.bottom > g.title.top &&
+        near(Math.max(g.action.der, g.refresh.der), g.body.der), JSON.stringify(g));
+    }
+    if (width >= 672) await emptyPage.screenshot({ path: join(outDir, `home-empty-${width}.png`) });
   }
   await emptyContext.close();
 }
@@ -2057,22 +2086,24 @@ const projectView = (page) => page.evaluate(() => {
     notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => ({ text: n.querySelector("p")?.textContent, role: n.getAttribute("role") })),
   };
 });
-// What home says of an owned project, worked out from what its page shows: its people (the names in the owner's part),
-// the pieces still waiting for someone (an entry «Por empezar», «La abrió» or «En curso») and the last send; a count of 0
-// is not said. ownerFirst: «Eres responsable» goes first, when the row's right says what is left to answer.
-// What home calls the pieces still waiting for someone: what the owner shared, as the owner's part says it.
-const PENDING_ONE = "1 de lo que compartiste espera respuestas";
-const PENDING = (count) => `${count} de lo que compartiste esperan respuestas`;
+// What home says of an owned project, worked out from what its page shows: its people (the names in the owner's part) and
+// the last send; a count of 0 is not said. ownerFirst: «Eres responsable» goes first, when the row's right says what is
+// left to answer (askedToAnswer: the page's «Lo que se te pidió» entries not yet sent).
 function homeMetaFrom(part, lastSent, { ownerFirst = false } = {}) {
-  const waitingStates = ["Por empezar", "La abrió", "En curso"];
   const people = new Set(part.pieces.flatMap((p) => p.people.map((x) => x.name))).size;
-  const waiting = part.pieces.filter((p) => p.people.some((x) => waitingStates.includes(x.state))).length;
   const segments = ownerFirst ? ["Eres responsable"] : [];
   if (people) segments.push(people === 1 ? "1 persona" : `${people} personas`);
-  if (waiting) segments.push(waiting === 1 ? PENDING_ONE : PENDING(waiting));
   if (lastSent) segments.push(`última respuesta el ${lastSent}`);
   return segments.length ? segments.join(" · ") : null;
 }
+// What the row's right on home counts, read on the project's page: the entries of «Lo que se te pidió» not yet sent (not
+// «Enviada» nor «Recibida»); 0 when the page has no such section.
+const askedToAnswer = (page) => page.evaluate((asked) => {
+  const section = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((el) => el.querySelector("h2")?.textContent === asked);
+  if (!section) return 0;
+  return [...section.querySelectorAll(".row-link .status")].filter((el) => !["Enviada", "Recibida"].includes(el.textContent.trim())).length;
+}, PROJECT.askedOfYou);
+const asideFrom = (toAnswer) => (toAnswer > 0 ? `${toAnswer} por responder` : "Eres responsable");
 const openedCalls = (backend) => backend.requests.filter((r) => r === "POST /rest/v1/rpc/mark_piece_opened").length;
 
 async function projectPageChecks(browser, base, html) {
@@ -2106,9 +2137,9 @@ async function projectPageChecks(browser, base, html) {
       rows[0].href === `#/project/${IDS.ownedProject}` && rows[1].href === `#/project/${IDS.project}` && !(await page.$('a[href^="#/piece/"]')), JSON.stringify(rows));
     check("home-projects: the person's project says what is left to answer, on the row's right like a list's state", rows[1] && rows[1].title === PROJECT.name &&
       rows[1].aside === "1 por responder" && !rows[1].meta, JSON.stringify(rows[1]));
-    check("home-projects: an owned project says so on the right, and its people, what is pending and the last response under its name", rows[0] &&
+    check("home-projects: an owned project says so on the right, and its people and the last response under its name", rows[0] &&
       rows[0].title === PROJECT.owned && rows[0].aside === "Eres responsable" &&
-      rows[0].meta === `4 personas · ${PENDING_ONE} · última respuesta el ${last}`, JSON.stringify(rows[0]));
+      rows[0].meta === `4 personas · última respuesta el ${last}`, JSON.stringify(rows[0]));
     check("home-projects: 360px no horizontal scroll", await noHorizontalScroll(page));
     await page.setViewportSize({ width: 1440, height: 900 });
     const wide = await page.$$eval(".rows .row-link", (els) => els.map((a) => {
@@ -2194,7 +2225,7 @@ async function projectPageChecks(browser, base, html) {
     await context.close();
   }
 
-  // D: an owned project where nobody is waiting (every send in): home says its people and last send, not «0 de lo que compartiste…».
+  // D: an owned project where nobody is waiting (every send in): home says its people and last send, the same as always.
   {
     const backend = ownerBackend(html);
     const view = backend.ownerView[IDS.ownedProject];
@@ -2208,8 +2239,8 @@ async function projectPageChecks(browser, base, html) {
     const last = await formatIn(page, AT.sent);
     await page.click(`a[href="#/project/${IDS.ownedProject}"]`).catch(() => {});
     const part = await waitFor(() => ownerPart(page), 10000);
-    check("home-projects: with nobody waiting, an owned project says its people and last send, never «0 de lo que compartiste esperan respuestas»", row && part &&
-      row.meta === `4 personas · última respuesta el ${last}` && row.meta === homeMetaFrom(part, last) && !row.meta.includes("0 de lo que"), JSON.stringify({ row, expected: part && homeMetaFrom(part, last) }));
+    check("home-projects: with nobody waiting, an owned project says its people and last send, and no count of 0", row && part &&
+      row.meta === `4 personas · última respuesta el ${last}` && row.meta === homeMetaFrom(part, last) && !/(^| )0 /.test(row.meta), JSON.stringify({ row, expected: part && homeMetaFrom(part, last) }));
     check("home-projects: nobody waiting: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
@@ -2224,7 +2255,7 @@ async function projectPageChecks(browser, base, html) {
     await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
     const rows = await projectRowsOf(page);
     check("home-projects: an owned project with something to answer says both, without a last response it does not have",
-      rows[1] && rows[1].aside === "1 por responder" && rows[1].meta === `Eres responsable · 2 personas · ${PENDING_ONE}`, JSON.stringify(rows[1]));
+      rows[1] && rows[1].aside === "1 por responder" && rows[1].meta === "Eres responsable · 2 personas", JSON.stringify(rows[1]));
     check("home-projects: owner and something to answer: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
@@ -2531,13 +2562,14 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     check("owner-no-readable-send: a send kept without its storage and a replaced version with only a partial response show their state and date, without a link",
       marta2 && marta2[0].state === S.submitted && marta2[0].meta === OWNER.sentOn(d.sent) && !marta2[0].href && marta2[1].state === S.replaced && marta2[1].meta === OWNER.sharedOn(d.assigned) && !marta2[1].href,
       JSON.stringify(marta2));
-    // conteo-coherente: what home says of this project is what its page shows: its people, and the pieces still waiting for
-    // someone (an entry «Por empezar», «La abrió» or «En curso»).
+    // conteo-coherente: what home says of this project is what its page shows: under its name, its people and the last send;
+    // on its right, what is left to answer in «Lo que se te pidió» (nothing here, so «Eres responsable»).
     const shownPeople = new Set(people.map((p) => p.name)).size;
-    const waiting = part ? part.pieces.filter((p) => p.people.some((x) => [S.pending, S.opened, S.in_progress].includes(x.state))).length : -1;
+    const toAnswer = await askedToAnswer(page);
     const counted = part && homeMetaFrom(part, d.sent);
-    check("owner-project: home counts what the page shows (its people, the pieces still waiting for someone, the last send)", homeRow &&
-      homeRow.meta === counted && homeRow.aside === "Eres responsable" && shownPeople === 4 && waiting === 1, JSON.stringify({ homeRow, counted }));
+    check("owner-project: home counts what the page shows (its people and the last send under its name, what is left to answer on its right)", homeRow &&
+      homeRow.meta === counted && homeRow.meta.startsWith("4 personas · ") && shownPeople === 4 && toAnswer === 0 && homeRow.aside === asideFrom(toAnswer),
+      JSON.stringify({ homeRow, counted, toAnswer }));
     check(`owner-project: the owner's part opens with its own line, and the page has no line for the people asked («${PROJECT.ownerSees}»)`, part &&
       part.lead === OWNER.lead && !(await page.$("[data-rol=cuerpo] > .page-note")), JSON.stringify({ lead: part && part.lead, first: view.first }));
     const weights = await ownerWeights(page);
@@ -2707,9 +2739,10 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     await page.click(`a[href="#/project/${IDS.project}"]`).catch(() => {});
     const part = await waitFor(() => ownerPart(page), 10000);
     const view = await projectView(page);
-    check("owner-with-own-piece: home counts what the page shows, her own entry included (2 personas)", homeRow && part &&
-      homeRow.aside === "1 por responder" && homeRow.meta === homeMetaFrom(part, lastSent, { ownerFirst: true }) && homeRow.meta.includes("2 personas"),
-      JSON.stringify({ homeRow, expected: part && homeMetaFrom(part, lastSent, { ownerFirst: true }) }));
+    const toAnswer = await askedToAnswer(page);
+    check("owner-with-own-piece: home counts what the page shows, her own entry included (2 personas), and on its right what «Lo que se te pidió» leaves to answer", homeRow && part &&
+      toAnswer === 1 && homeRow.aside === asideFrom(toAnswer) && homeRow.meta === homeMetaFrom(part, lastSent, { ownerFirst: true }) && homeRow.meta.includes("2 personas"),
+      JSON.stringify({ homeRow, toAnswer, expected: part && homeMetaFrom(part, lastSent, { ownerFirst: true }) }));
     const order = await page.evaluate(() => [...document.querySelector("[data-rol=cuerpo]").children].map((el) => el.querySelector("h2")?.textContent || el.className));
     check(`owner-with-own-piece: the page shows the line that says what the owner sees, «${PROJECT.askedOfYou}», then the owner's part`, part &&
       JSON.stringify(order) === JSON.stringify(["page-note", PROJECT.askedOfYou, OWNER.section]) && view.pieces.length === 3, JSON.stringify(order));
@@ -2749,8 +2782,7 @@ const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 // piece, a replaced version that was sent and a change request (the piece closure).
 const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
-// A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the empty home, on the
-// body's edge, passes FUN-43 under the list's top rule (FUN-43 only excuses a centred empty state).
+// A screen's exceptions, by rule code, each with its reason in the rule's own words. None today.
 const GEOMETRY_EXCEPTIONS = {};
 function serveDir(dir) {
   const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };

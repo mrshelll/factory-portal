@@ -493,17 +493,15 @@ const countOf = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 
 // A project on home, with the lists' anatomy: its name, and on the row's right what decides there, as a list carries a
 // piece's state. For the person, what is left to answer (or that everything was sent); for an owner with nothing to
 // answer, that they are the owner. Under the name, for its owner: that they are (when the right says what is left to
-// answer), its people, its pieces still waiting for someone and the last response, when there is one; these counts are
-// the ones its page shows (owner_projects() counts as owner_project lists), and a count of 0 is not said.
+// answer), its people and the last response, when there is one; the count is the one its page shows (owner_projects()
+// counts as owner_project lists), and a count of 0 is not said. What is left to answer is said once, on the right.
 function projectRow({ project, toAnswer, owned, summary }) {
   const aside = toAnswer > 0 ? t("projectToAnswer", { count: toAnswer }) : owned ? t("projectOwner") : t("projectAllSent");
   const meta = [];
   if (owned && toAnswer > 0) meta.push(t("projectOwner"));
   if (owned && summary) {
     const people = countOf(summary.people);
-    const open = countOf(summary.open_pieces);
     if (people) meta.push(people === 1 ? t("projectPeopleOne") : t("projectPeople", { count: people }));
-    if (open) meta.push(open === 1 ? t("projectOpenOne") : t("projectOpen", { count: open }));
     const last = formatDate(state.lang, summary.last_response_at);
     if (last) meta.push(t("projectLastResponse", { date: last }));
   }
@@ -549,15 +547,17 @@ async function showHome(viewId) {
   unsavedWarning(layout.notices);
 
   if (!rows.length) {
-    // An empty state (EST-01): its message, then its direct way out, the view's primary action, at the end of the block
-    // (MAR-06: «Actualizar» goes in the same group, under it, so nothing of the block follows it). It starts on the body's
-    // edge like every other screen's body, and its action has the sign-in's anatomy: the body's width up to the form measure.
-    layout.body.append(h("section", { class: "section empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
-      h("h2", { id: "empty-title" }, t("emptyTitle")),
-      h("p", {}, t("emptyBody", { email: user.email })),
-      h("div", { class: "empty-actions" },
-        h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
-        h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))));
+    // An empty state (EST-01) with the shape of the list it replaces: the list (its own top rule) with one row, the message
+    // on the row's left and, in the row's aside, its direct way out, the view's primary action, with «Actualizar» beside it
+    // in the same group, so nothing of the block follows them (MAR-06). Divs, not a list: there is nothing to enumerate.
+    layout.body.append(h("section", { class: "rows empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
+      h("div", { class: "row" }, h("div", { class: "row-item" },
+        h("div", { class: "row-main" },
+          h("h2", { id: "empty-title", class: "row-title" }, t("emptyTitle")),
+          h("p", {}, t("emptyBody", { email: user.email }))),
+        h("div", { class: "row-aside empty-actions" },
+          h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
+          h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))))));
     return;
   }
   layout.body.append(h("ul", { class: "rows" }, rows.map(projectRow)));

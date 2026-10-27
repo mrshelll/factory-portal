@@ -37,7 +37,7 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    persists and refreshes on its own (supabase-js defaults). Supabase allows one email per 60 s; the
    code screen shows the countdown and survives a reload (the pending email is kept for one hour).
 2. **Home** («Tus proyectos»): the projects the person belongs to, one row each, with what is left to
-   answer; a project the person owns says so (with its people, what is pending and the last response).
+   answer; a project the person owns says so (with its people and the last response).
    The lists never fetch `pieces.html`; it is fetched only when a piece is opened.
 3. **A project's page** (`#/project/<id>`): the person's own items under «Lo que se te pidió», grouped
    as before, with status (not started, in progress, sent, received) and date, and a line saying that
@@ -218,10 +218,11 @@ The sign-in screens follow the visual manual's `formulario` pattern and home fol
 base's on every screen: the page margin on both sides (16 px, 24 px from 672 px) and no cap before 1440 px, where it
 stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
-after the form). The empty home is an empty state in the list's place, on the body's edge like every other screen
-(`data-rol="vacio"`, under the list's top rule: its title, its message at the reading measure and, at the end, its way
-out «Entrar con otro correo», the view's `accion-principal`, as wide as the body up to the form measure like the
-sign-in buttons, with «Actualizar» under it, as MAR-06 asks of an empty state).
+after the form). The empty home has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top
+rule, and one row, its title and message on the left at the reading measure and, in the row's aside, its way out
+«Entrar con otro correo», the view's `accion-principal`, with «Actualizar» beside it, as MAR-06 asks of an empty state.
+From 672 px the aside is on the row's right, as a home row carries its state; below that it goes under the message, the
+main action as wide as the body up to the form measure like the sign-in buttons, «Actualizar» under it.
 
 ## Database migrations
 

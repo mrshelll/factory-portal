@@ -63,15 +63,22 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* ---- home ------------------------------------------------------------------------------- */
 
 .loading { color: var(--muted); }
-/* Nothing shared yet: the whole view is an empty state in the list's place, and it keeps the frame of every other screen:
-   it starts on the body's edge (MAR-10), under the list's own top rule, which spans the body as the list does on home
-   (so the block reaches the width at 1440 without a centred exception, FUN-43); its title, its message at the reading
-   measure, and its way out with the sign-in's anatomy: the main action as wide as the body up to the form measure,
-   «Actualizar» under it on the same edge, both one group at the end of the block (MAR-06). */
-.empty { border-top: 1px solid var(--line); padding-top: var(--space-4); }
-.empty p { margin-bottom: var(--space-4); overflow-wrap: anywhere; }
-.empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); }
-.empty-actions .button--primary { width: 100%; }
+/* Nothing shared yet: the empty state takes the shape of the list it replaces (the manual's «lista»): the list with its own
+   top rule (the base's .rows) and one row (.row-item, below): its title and message on the row's left, the message at the
+   reading measure; its way out in the row's aside, on the right from 672 px as a home row carries its state, and under the
+   message below that. The aside keeps the body's text size and colour for its controls. The main action is the base's
+   primary button, as on sign-in (a 48 px target): as wide as the body up to the form measure while it stacks, like the
+   sign-in buttons; beside the message, as wide as its words, as a row's aside is. «Actualizar» follows it in the same
+   group, so nothing of the block comes after them (MAR-06). */
+.empty .row-main { max-width: var(--measure-text); }
+.empty .row-title { font-size: var(--text-body); line-height: 1.4; }
+.empty p { overflow-wrap: anywhere; }
+.empty .empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); color: inherit; font-size: var(--text-body); }
+.empty .empty-actions .button--primary { width: 100%; }
+@media (min-width: 672px) {
+  .empty .empty-actions { display: flex; flex: none; align-items: center; max-width: none; }
+  .empty .empty-actions .button--primary { width: auto; }
+}
 
 /* A project's page: the way back above the title (the manual's «contexto» zone), and the line that says what the
    project's owner sees, first in the body and at the reading measure, one block's gap above the lists. */
