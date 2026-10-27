@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRoute, projectHref, ownerPieceHref, ownerStatus, latestActivity, personRows, projectRows, DONE } from "../../js/project.js";
+import { parseRoute, projectHref, ownerPieceHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE } from "../../js/project.js";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -51,6 +51,26 @@ test("latestActivity: the date next to the state", () => {
   assert.equal(latestActivity(null), null);
 });
 
+test("latestActivityKind: which date latestActivity gave, so the page can say what it is", () => {
+  const base = { assigned_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-05T00:00:00Z", first_opened_at: "2026-10-02T00:00:00Z", sent_at: "2026-10-04T00:00:00Z" };
+  for (const status of ["submitted", "received", "replaced"]) assert.equal(latestActivityKind({ ...base, status }), "sent", status);
+  // A send that is not on record falls back to the date it was shared, and says so.
+  assert.equal(latestActivityKind({ ...base, status: "replaced", sent_at: null }), "assigned");
+  assert.equal(latestActivityKind({ ...base, status: "in_progress" }), "changed");
+  assert.equal(latestActivityKind({ ...base, status: "in_progress", updated_at: null }), "assigned");
+  assert.equal(latestActivityKind({ ...base, status: "pending" }), "opened");
+  assert.equal(latestActivityKind({ ...base, status: "pending", first_opened_at: null }), "assigned");
+  assert.equal(latestActivityKind({ ...base, status: "bogus", first_opened_at: null }), "assigned");
+  assert.equal(latestActivityKind({ status: "pending" }), null);
+  assert.equal(latestActivityKind(null), null);
+  // Always the same date as latestActivity.
+  for (const a of [{ ...base, status: "received" }, { ...base, status: "in_progress", updated_at: "x" }, { ...base, status: "pending" }]) {
+    const kind = latestActivityKind(a);
+    const field = { sent: "sent_at", changed: "updated_at", opened: "first_opened_at", assigned: "assigned_at" }[kind];
+    assert.equal(latestActivity(a), a[field]);
+  }
+});
+
 test("personRows: people first by name, owners last, a missing member keeps its row", () => {
   const members = new Map([
     [A, { id: A, display_name: "Zoe", role: "stakeholder" }],
@@ -71,7 +91,9 @@ test("personRows: people first by name, owners last, a missing member keeps its 
   assert.deepEqual(rows.map((r) => r.memberId), [gone, B, A, C]);
   assert.deepEqual(rows.map((r) => r.name), [null, "Ana", "Zoe", "Aaron"]);
   const zoe = rows.find((r) => r.memberId === A);
-  assert.deepEqual(zoe, { memberId: A, name: "Zoe", status: "submitted", at: "2026-10-03T00:00:00Z", readable: true });
+  assert.deepEqual(zoe, { memberId: A, name: "Zoe", status: "submitted", at: "2026-10-03T00:00:00Z", atKind: "sent", readable: true });
+  assert.equal(rows.find((r) => r.memberId === B).atKind, "changed");
+  assert.equal(rows.find((r) => r.memberId === C).atKind, "assigned");
   const missing = rows.find((r) => r.memberId === gone);
   assert.equal(missing.name, null);
   assert.equal(missing.status, "pending");

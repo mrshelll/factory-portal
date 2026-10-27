@@ -550,11 +550,12 @@ async function showHome(viewId) {
 
   if (!rows.length) {
     // An empty state (EST-01): its message, then its direct way out, the view's primary action, at the end of the block
-    // (MAR-06).
+    // (MAR-06: «Actualizar» goes in the same group, under it, so nothing of the block follows it). It starts on the body's
+    // edge like every other screen's body, and its action has the sign-in's anatomy: the body's width up to the form measure.
     layout.body.append(h("section", { class: "section empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
       h("h2", { id: "empty-title" }, t("emptyTitle")),
       h("p", {}, t("emptyBody", { email: user.email })),
-      h("div", { class: "actions" },
+      h("div", { class: "empty-actions" },
         h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
         h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))));
     return;
@@ -565,9 +566,11 @@ async function showHome(viewId) {
 // ---- a project's page -----------------------------------------------------------------------
 
 // The owner's part of a project's page: per piece (newest first), its title and kind, then one entry per person assigned
-// (personRows: by name, owners after) with the state the owner reads, its date and, said by their date and never by
-// their text, the person's change requests and sends after the close. A send that kept its storage opens what the person
-// sent, read only (showOwnerPiece); the others are not links. When nobody was assigned anything yet, the section says so.
+// (personRows: by name, owners after) with the state the owner reads, its date said for what it is (sent, opened, last
+// changed or shared) and, said by their date and never by their text, the person's change requests and sends after the
+// close. The name is plain text; a send that kept its storage carries its own link next to it, «Ver lo que envió», that
+// opens what the person sent, read only (showOwnerPiece), so the link colour only ever means a link. When nobody was
+// assigned anything yet, the section says so.
 const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusOpened", in_progress: "ownerStatusInProgress",
   submitted: "ownerStatusSubmitted", received: "ownerStatusReceived", replaced: "ownerStatusReplaced" };
 // The base's status dots (COM-13), one mark per state and the same as in the person's list: «Por empezar» hollow grey,
@@ -576,25 +579,33 @@ const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusO
 const OWNER_STATUS_CLASSES = { pending: "status", opened: "status status--opened", in_progress: "status status--active",
   submitted: "status status--sent", received: "status status--done", replaced: "status status--replaced" };
 
+// The date next to the state, saying which one it is (latestActivityKind).
+function activityLine(kind, date) {
+  if (kind === "sent") return t("ownerSentOn", { date });
+  if (kind === "opened") return t("ownerOpenedOn", { date });
+  if (kind === "changed") return t("changedOn", { date });
+  return t("sharedOn", { date });
+}
+
 function ownerEntry(projectId, piece, row, member, requests) {
   const name = row.name && row.name.trim() ? row.name.trim() : (member && member.email) || t("untitled");
   const meta = [];
   const date = formatDate(state.lang, row.at);
-  if (date) meta.push(date);
+  if (date) meta.push(activityLine(row.atKind, date));
   for (const request of requests) {
     const at = formatDate(state.lang, request.created_at);
     if (at) meta.push(t(request.late === true ? "ownerLateSend" : "ownerAskedChange", { date: at }));
   }
   const status = OWNER_STATUS_KEYS[row.status] ? row.status : "pending";
-  const content = [
+  const open = row.readable
+    ? h("a", { class: "owner-open", href: ownerPieceHref(projectId, piece.id, row.memberId),
+      "aria-label": t("ownerOpenLabel", { name, piece: piece.title || t("untitled") }) }, t("ownerOpen"))
+    : null;
+  return h("li", { class: "row" }, h("div", { class: "row-item" },
     h("span", { class: "row-main" },
-      h("span", { class: "row-title" }, name),
+      h("span", { class: "owner-name" }, h("span", { class: "row-title" }, name), open),
       meta.length ? h("span", { class: "row-meta" }, meta.join(" · ")) : null),
-    h("span", { class: OWNER_STATUS_CLASSES[status] }, h("span", { class: "status-dot", "aria-hidden": "true" }), t(OWNER_STATUS_KEYS[status])),
-  ];
-  return h("li", { class: "row" }, row.readable
-    ? h("a", { class: "row-link", href: ownerPieceHref(projectId, piece.id, row.memberId) }, content)
-    : h("div", { class: "row-item" }, content));
+    h("span", { class: OWNER_STATUS_CLASSES[status] }, h("span", { class: "status-dot", "aria-hidden": "true" }), t(OWNER_STATUS_KEYS[status]))));
 }
 
 function ownerPart(projectId, view) {

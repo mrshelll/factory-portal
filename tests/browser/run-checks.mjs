@@ -912,6 +912,29 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
   await snapshot(emptyPage, "home-empty", "lista");
+  // alineacion and accion (home-empty against the other screens): the empty state starts on the title's edge, as every
+  // other screen's body does, and its main action takes the body's width up to the form measure, as the sign-in buttons do,
+  // with «Actualizar» under it on the same edge.
+  for (const width of [320, 1440]) {
+    await emptyPage.setViewportSize({ width, height: width < 672 ? 640 : 900 });
+    const g = await emptyPage.evaluate(() => {
+      const textLeft = (el) => { if (!el) return null; const r = document.createRange(); r.selectNodeContents(el); const q = [...r.getClientRects()].filter((x) => x.width > 0);
+        return q.length ? Math.round(Math.min(...q.map((x) => x.left))) : null; };
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), w: Math.round(r.width) }; };
+      const body = document.querySelector("[data-rol=cuerpo]");
+      const form = document.createElement("div"); form.style.width = "var(--measure-form)"; body.append(form);
+      const measure = Math.round(form.getBoundingClientRect().width); form.remove();
+      const bodyBox = body.getBoundingClientRect(), cs = getComputedStyle(body);
+      return { h1: textLeft(document.querySelector("h1")), title: textLeft(document.querySelector(".empty h2")), message: textLeft(document.querySelector(".empty p")),
+        action: box(document.querySelector(".empty [data-rol=accion-principal]")), refresh: box([...document.querySelectorAll(".empty button")].find((b) => b.textContent === "Actualizar")),
+        body: Math.round(bodyBox.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)), measure };
+    });
+    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+    check(`home-empty ${width}px: the empty state starts on the title's edge (its title, its message, its action and «Actualizar»), not centred`,
+      g.h1 !== null && near(g.title, g.h1) && near(g.message, g.h1) && g.action && near(g.action.x, g.h1) && g.refresh && near(g.refresh.x, g.h1), JSON.stringify(g));
+    check(`home-empty ${width}px: its main action takes the body's width up to the form measure, as the sign-in buttons do`,
+      g.action && near(g.action.w, Math.min(g.body, g.measure)), JSON.stringify(g));
+  }
   await emptyContext.close();
 }
 
@@ -2037,13 +2060,16 @@ const projectView = (page) => page.evaluate(() => {
 // What home says of an owned project, worked out from what its page shows: its people (the names in the owner's part),
 // the pieces still waiting for someone (an entry «Por empezar», «La abrió» or «En curso») and the last send; a count of 0
 // is not said. ownerFirst: «Eres responsable» goes first, when the row's right says what is left to answer.
+// What home calls the pieces still waiting for someone: what the owner shared, as the owner's part says it.
+const PENDING_ONE = "1 de lo que compartiste espera respuestas";
+const PENDING = (count) => `${count} de lo que compartiste esperan respuestas`;
 function homeMetaFrom(part, lastSent, { ownerFirst = false } = {}) {
   const waitingStates = ["Por empezar", "La abrió", "En curso"];
   const people = new Set(part.pieces.flatMap((p) => p.people.map((x) => x.name))).size;
   const waiting = part.pieces.filter((p) => p.people.some((x) => waitingStates.includes(x.state))).length;
   const segments = ownerFirst ? ["Eres responsable"] : [];
   if (people) segments.push(people === 1 ? "1 persona" : `${people} personas`);
-  if (waiting) segments.push(waiting === 1 ? "1 cosa con respuestas pendientes" : `${waiting} cosas con respuestas pendientes`);
+  if (waiting) segments.push(waiting === 1 ? PENDING_ONE : PENDING(waiting));
   if (lastSent) segments.push(`última respuesta el ${lastSent}`);
   return segments.length ? segments.join(" · ") : null;
 }
@@ -2082,7 +2108,7 @@ async function projectPageChecks(browser, base, html) {
       rows[1].aside === "1 por responder" && !rows[1].meta, JSON.stringify(rows[1]));
     check("home-projects: an owned project says so on the right, and its people, what is pending and the last response under its name", rows[0] &&
       rows[0].title === PROJECT.owned && rows[0].aside === "Eres responsable" &&
-      rows[0].meta === `4 personas · 1 cosa con respuestas pendientes · última respuesta el ${last}`, JSON.stringify(rows[0]));
+      rows[0].meta === `4 personas · ${PENDING_ONE} · última respuesta el ${last}`, JSON.stringify(rows[0]));
     check("home-projects: 360px no horizontal scroll", await noHorizontalScroll(page));
     await page.setViewportSize({ width: 1440, height: 900 });
     const wide = await page.$$eval(".rows .row-link", (els) => els.map((a) => {
@@ -2168,7 +2194,7 @@ async function projectPageChecks(browser, base, html) {
     await context.close();
   }
 
-  // D: an owned project where nobody is waiting (every send in): home says its people and last send, not «0 cosas…».
+  // D: an owned project where nobody is waiting (every send in): home says its people and last send, not «0 de lo que compartiste…».
   {
     const backend = ownerBackend(html);
     const view = backend.ownerView[IDS.ownedProject];
@@ -2182,8 +2208,8 @@ async function projectPageChecks(browser, base, html) {
     const last = await formatIn(page, AT.sent);
     await page.click(`a[href="#/project/${IDS.ownedProject}"]`).catch(() => {});
     const part = await waitFor(() => ownerPart(page), 10000);
-    check("home-projects: with nobody waiting, an owned project says its people and last send, never «0 cosas con respuestas pendientes»", row && part &&
-      row.meta === `4 personas · última respuesta el ${last}` && row.meta === homeMetaFrom(part, last) && !row.meta.includes("0 cosas"), JSON.stringify({ row, expected: part && homeMetaFrom(part, last) }));
+    check("home-projects: with nobody waiting, an owned project says its people and last send, never «0 de lo que compartiste esperan respuestas»", row && part &&
+      row.meta === `4 personas · última respuesta el ${last}` && row.meta === homeMetaFrom(part, last) && !row.meta.includes("0 de lo que"), JSON.stringify({ row, expected: part && homeMetaFrom(part, last) }));
     check("home-projects: nobody waiting: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
@@ -2198,7 +2224,7 @@ async function projectPageChecks(browser, base, html) {
     await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
     const rows = await projectRowsOf(page);
     check("home-projects: an owned project with something to answer says both, without a last response it does not have",
-      rows[1] && rows[1].aside === "1 por responder" && rows[1].meta === "Eres responsable · 2 personas · 1 cosa con respuestas pendientes", JSON.stringify(rows[1]));
+      rows[1] && rows[1].aside === "1 por responder" && rows[1].meta === `Eres responsable · 2 personas · ${PENDING_ONE}`, JSON.stringify(rows[1]));
     check("home-projects: owner and something to answer: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
@@ -2265,12 +2291,19 @@ async function projectPageChecks(browser, base, html) {
 // read only (observer), with whose send it is in the title band. A change request is said by its date, never its text.
 // The owner's screens save, send, ask and record nothing, and never read a draft (spec 2026-10-25 página del proyecto §4.5).
 const OWNER = {
-  section: "Cómo va cada cosa que compartiste",
+  section: "Avance de lo que compartiste",
   states: { pending: "Por empezar", opened: "La abrió", in_progress: "En curso", submitted: "Enviada", received: "Recibida", replaced: "Reemplazada" },
   askedChange: (date) => `pidió un cambio el ${date}`,
   lateSend: (date) => `envió después del cierre el ${date}`,
   sentBy: (name, date) => `Lo que envió ${name} el ${date}`,
-  lead: "Aquí ves cuándo cada persona abre y envía lo que compartiste.",
+  lead: "Aquí ves cuándo cada persona lo abre y lo envía.",
+  // Each date says what it is: when the person sent, opened it or last changed it, or when it was shared.
+  sentOn: (date) => `Envió el ${date}`,
+  openedOn: (date) => `La abrió el ${date}`,
+  changedOn: (date) => `Último cambio el ${date}`,
+  sharedOn: (date) => `Compartida el ${date}`,
+  // A readable send carries this link next to the person's name; the name itself is never a link.
+  open: "Ver lo que envió",
   empty: "Todavía no compartiste nada en este proyecto.",
   requestText: "Quiero cambiar el orden de las pantallas",
 };
@@ -2379,7 +2412,8 @@ const ownerPart = (page, title = OWNER.section) => page.evaluate((heading) => {
           const status = li.querySelector(".status");
           return { name: li.querySelector(".row-title")?.textContent || null, meta: li.querySelector(".row-meta")?.textContent || "",
             state: status ? status.textContent : null, dot: status ? status.className : null, hasDot: Boolean(status && status.querySelector(".status-dot")),
-            href: li.querySelector("a")?.getAttribute("href") || null };
+            href: li.querySelector("a")?.getAttribute("href") || null, links: li.querySelectorAll("a").length,
+            linkText: li.querySelector("a")?.textContent || null, nameInLink: Boolean(li.querySelector("a .row-title, a.row-title")) };
         }),
       };
     }),
@@ -2387,13 +2421,17 @@ const ownerPart = (page, title = OWNER.section) => page.evaluate((heading) => {
     lead: section.querySelector("h2 + p")?.textContent || null,
   };
 }, title);
-// What the eye weighs, squinting: size and weight of the section's title, a piece's title and a person's name (linked and not).
+// What the eye weighs, squinting: size and weight of the section's title, a piece's title and every person's name; and the
+// colours: every name's, every link's in the entries, and the page's ink and link colours (read off probes in the body).
 const ownerWeights = (page) => page.evaluate(() => {
   const w = (el) => { if (!el) return null; const cs = getComputedStyle(el); return { size: parseFloat(cs.fontSize), weight: Number(cs.fontWeight), color: cs.color }; };
   const section = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((s) => s.querySelector(".owner-piece"));
   if (!section) return null;
-  return { h2: w(section.querySelector("h2")), h3: w(section.querySelector("h3")), link: w(section.querySelector("a .row-title")),
-    plain: w(section.querySelector(".row-item .row-title")), signal: getComputedStyle(document.documentElement).getPropertyValue("--signal").trim() };
+  const probe = (css) => { const el = document.createElement("span"); el.style.color = css; section.append(el); const c = getComputedStyle(el).color; el.remove(); return c; };
+  return { h2: w(section.querySelector("h2")), h3: w(section.querySelector("h3")),
+    names: [...section.querySelectorAll(".owner-piece .row-title")].map((el) => ({ text: el.textContent, ...w(el) })),
+    links: [...section.querySelectorAll(".owner-piece li a")].map((el) => ({ text: el.textContent, ...w(el) })),
+    ink: probe("var(--ink)"), signal: probe("var(--signal)") };
 });
 // Each state word's dot as drawn: its border colour and style and its fill (colour and image).
 const ownerDots = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-rol=cuerpo] .owner-piece .status")].map((s) => {
@@ -2458,25 +2496,25 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const href = (pieceId, person) => ownerHref(IDS.ownedProject, pieceId, person);
     const expected = [
       { title: OWNED_TITLES[OWNED.questions], kind: "Preguntas", people: [
-        { name: luis.name, state: S.received, meta: d.sent, href: href(OWNED.questions, luis) },
-        { name: marta.name, state: S.opened, meta: d.opened, href: null },
-        { name: pedro.name, state: S.pending, meta: d.assigned, href: null },
-        { name: sofia.name, state: S.in_progress, meta: d.changed, href: null }] },
+        { name: luis.name, state: S.received, meta: OWNER.sentOn(d.sent), href: href(OWNED.questions, luis) },
+        { name: marta.name, state: S.opened, meta: OWNER.openedOn(d.opened), href: null },
+        { name: pedro.name, state: S.pending, meta: OWNER.sharedOn(d.assigned), href: null },
+        { name: sofia.name, state: S.in_progress, meta: OWNER.changedOn(d.changed), href: null }] },
       { title: OWNED_TITLES[OWNED.flow], kind: "Revisión de recorridos", people: [
-        { name: luis.name, state: S.submitted, meta: d.sent, href: href(OWNED.flow, luis) },
-        { name: marta.name, state: S.submitted, meta: d.sent, href: null }] },
+        { name: luis.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: href(OWNED.flow, luis) },
+        { name: marta.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: null }] },
       { title: OWNED_TITLES[OWNED.demo], kind: "Revisión de la demo", people: [
-        { name: luis.name, state: S.received, meta: `${d.sent} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis) },
-        { name: sofia.name, state: S.received, meta: `${d.sent} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia) }] },
+        { name: luis.name, state: S.received, meta: `${OWNER.sentOn(d.sent)} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis) },
+        { name: sofia.name, state: S.received, meta: `${OWNER.sentOn(d.sent)} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia) }] },
       { title: OWNED_TITLES[OWNED.demoOld], kind: "Revisión de la demo", people: [
-        { name: marta.name, state: S.replaced, meta: d.assigned, href: null }] },
+        { name: marta.name, state: S.replaced, meta: OWNER.sharedOn(d.assigned), href: null }] },
     ];
     const got = part && part.pieces.map((p) => ({ title: p.title, kind: p.kind, people: p.people.map(({ name, state, meta, href: h }) => ({ name, state, meta, href: h })) }));
     check(`owner-project: the owned project's page has «${OWNER.section}», and no «${PROJECT.askedOfYou}» when nothing was asked of the owner`,
       part && view.h1 === PROJECT.owned && view.sections.includes(OWNER.section) && !view.sections.includes(PROJECT.askedOfYou), JSON.stringify(view));
     check("owner-project: each piece with its title and kind, newest first", got && JSON.stringify(got.map(({ title, kind }) => ({ title, kind }))) ===
       JSON.stringify(expected.map(({ title, kind }) => ({ title, kind }))), JSON.stringify(got && got.map(({ title, kind }) => ({ title, kind }))));
-    check("owner-project: one entry per person, by name, with the state word and its date", got && JSON.stringify(got.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))) ===
+    check("owner-project: one entry per person, by name, with the state word and its date, each date saying what it is", got && JSON.stringify(got.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))) ===
       JSON.stringify(expected.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))), JSON.stringify(got && got.map((p) => p.people)));
     const people = part ? part.pieces.flatMap((p) => p.people) : [];
     const opened = people.find((p) => p.state === S.opened), pending = people.find((p) => p.state === S.pending);
@@ -2491,7 +2529,7 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       part && !part.text.includes(OWNER.requestText) && !(await page.evaluate((t) => document.body.innerText.includes(t), OWNER.requestText)), part && part.text);
     const marta2 = got && [got[1].people[1], got[3].people[0]];
     check("owner-no-readable-send: a send kept without its storage and a replaced version with only a partial response show their state and date, without a link",
-      marta2 && marta2[0].state === S.submitted && marta2[0].meta === d.sent && !marta2[0].href && marta2[1].state === S.replaced && marta2[1].meta === d.assigned && !marta2[1].href,
+      marta2 && marta2[0].state === S.submitted && marta2[0].meta === OWNER.sentOn(d.sent) && !marta2[0].href && marta2[1].state === S.replaced && marta2[1].meta === OWNER.sharedOn(d.assigned) && !marta2[1].href,
       JSON.stringify(marta2));
     // conteo-coherente: what home says of this project is what its page shows: its people, and the pieces still waiting for
     // someone (an entry «Por empezar», «La abrió» or «En curso»).
@@ -2504,9 +2542,19 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       part.lead === OWNER.lead && !(await page.$("[data-rol=cuerpo] > .page-note")), JSON.stringify({ lead: part && part.lead, first: view.first }));
     const weights = await ownerWeights(page);
     const mass = (x) => x && x.size * x.weight;
-    check("owner-project: squinting, the section's title outweighs a piece's title, which outweighs a person's name; a linked name is not bold",
-      weights && mass(weights.h2) > mass(weights.h3) && mass(weights.h3) > mass(weights.link) && mass(weights.h3) > mass(weights.plain) &&
-      weights.link.weight <= 400 && weights.plain.weight <= 400, JSON.stringify(weights));
+    check("owner-project: squinting, the section's title outweighs a piece's title, which outweighs a person's name; no name is bold",
+      weights && weights.names.length === 9 && mass(weights.h2) > mass(weights.h3) && weights.names.every((n) => mass(weights.h3) > mass(n) && n.weight <= 400),
+      JSON.stringify(weights && { h2: weights.h2, h3: weights.h3, names: weights.names.map((n) => [n.text, n.size, n.weight]) }));
+    // color-con-un-significado: the link colour means «you can open this». No name is in it; a readable send carries its own
+    // link «Ver lo que envió» next to the name, in the link colour, and an entry with nothing to open has no link at all.
+    const readable = people.filter((p) => p.href);
+    check(`owner-project: every name is in the text colour, never the link's; a readable send carries «${OWNER.open}» next to the name, in the link colour`,
+      weights && weights.ink !== weights.signal && weights.names.length === 9 && weights.names.every((n) => n.color === weights.ink) &&
+      readable.length === 4 && readable.every((p) => p.links === 1 && p.linkText === OWNER.open && !p.nameInLink) &&
+      people.filter((p) => !p.href).every((p) => p.links === 0) &&
+      weights.links.length === 4 && weights.links.every((l) => l.text === OWNER.open && l.color === weights.signal),
+      JSON.stringify(weights && { ink: weights.ink, signal: weights.signal, names: weights.names.map((n) => [n.text, n.color]), links: weights.links.map((l) => [l.text, l.color]),
+        entries: people.map((p) => [p.name, p.links, p.linkText, p.nameInLink]) }));
     const dots = await ownerDots(page);
     const marks = Object.values(S).map((word) => dots[word]);
     check("owner-project: each state has its own dot (no two states drawn alike), in the base's dot family", marks.every(Boolean) &&
@@ -2701,8 +2749,8 @@ const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 // piece, a replaced version that was sent and a change request (the piece closure).
 const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
-// A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the centred empty home
-// passes FUN-43 on its own.
+// A screen's exceptions, by rule code, each with its reason in the rule's own words. None today: the empty home, on the
+// body's edge, passes FUN-43 under the list's top rule (FUN-43 only excuses a centred empty state).
 const GEOMETRY_EXCEPTIONS = {};
 function serveDir(dir) {
   const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };

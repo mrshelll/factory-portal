@@ -43,14 +43,22 @@ export function ownerStatus(assignment) {
   return status;
 }
 
-// The date shown next to the state, or null when there is none.
-export function latestActivity(assignment) {
+// Which date goes next to the state: «sent» (sent_at), «changed» (updated_at), «opened» (first_opened_at) or «assigned»
+// (assigned_at), or null when there is none. The page says what each one is.
+const ACTIVITY_FIELDS = { sent: "sent_at", changed: "updated_at", opened: "first_opened_at", assigned: "assigned_at" };
+export function latestActivityKind(assignment) {
   if (!isPlainObject(assignment)) return null;
   const state = ownerStatus(assignment);
-  if (DONE.has(state) && isDate(assignment.sent_at)) return assignment.sent_at;
-  if (state === "in_progress" && isDate(assignment.updated_at)) return assignment.updated_at;
-  if (state === "opened") return assignment.first_opened_at;
-  return isDate(assignment.assigned_at) ? assignment.assigned_at : null;
+  if (DONE.has(state) && isDate(assignment.sent_at)) return "sent";
+  if (state === "in_progress" && isDate(assignment.updated_at)) return "changed";
+  if (state === "opened") return "opened";
+  return isDate(assignment.assigned_at) ? "assigned" : null;
+}
+
+// The date shown next to the state, or null when there is none.
+export function latestActivity(assignment) {
+  const kind = latestActivityKind(assignment);
+  return kind ? assignment[ACTIVITY_FIELDS[kind]] : null;
 }
 
 // One row per person assigned to a piece: people by name first, owners after. membersById is a Map or a plain object.
@@ -71,6 +79,7 @@ export function personRows(piece, membersById) {
         name: known && typeof member.display_name === "string" ? member.display_name : null,
         status: ownerStatus(assignment),
         at: latestActivity(assignment),
+        atKind: latestActivityKind(assignment),
         readable: assignment.readable === true,
       },
       owner: known && member.role === "owner",

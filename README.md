@@ -68,10 +68,11 @@ Routes: `#/` (home), `#/project/<id>`, `#/piece/<id>` and `#/project/<p>/piece/<
 reading one person's send). The routes are pure functions in `js/project.js`.
 
 The owner of a project (the member with `role = 'owner'`, which the factory sets after a publish through `factory_set_owner`) sees,
-besides their own items, the section «Cómo va cada cosa que compartiste»: per piece, one entry per person
-assigned, with their state and date: «Por empezar», «La abrió», «En curso», «Enviada», «Recibida» or
-«Reemplazada». A change request is said by its date, never its text. The owner can open what a person sent: the
-same piece, closed and read only, with «Lo que envió <name> el <date>» in the title band. The owner never
+besides their own items, the section «Avance de lo que compartiste»: per piece, one entry per person
+assigned, with their state («Por empezar», «La abrió», «En curso», «Enviada», «Recibida» or «Reemplazada») and a
+date that says what it is («Envió el …», «La abrió el …», «Último cambio el …», «Compartida el …»). A change request
+is said by its date, never its text. Names are plain text; a send the owner can read carries the link «Ver lo que
+envió» next to the name, which opens the same piece, closed and read only, with «Lo que envió <name> el <date>» in the title band. The owner never
 responds, saves or sends for anyone: that screen posts nothing.
 
 **What the owner never sees: drafts.** Not `piece_drafts`, not a response with `partial = true`, not the
@@ -217,9 +218,10 @@ The sign-in screens follow the visual manual's `formulario` pattern and home fol
 base's on every screen: the page margin on both sides (16 px, 24 px from 672 px) and no cap before 1440 px, where it
 stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
-after the form). The empty home is an empty state centred in the frame (`data-rol="vacio"`: its title, its message at the reading
-measure and, at the end, its way out «Entrar con otro correo», the view's `accion-principal`, as MAR-06 asks of an
-empty state).
+after the form). The empty home is an empty state in the list's place, on the body's edge like every other screen
+(`data-rol="vacio"`, under the list's top rule: its title, its message at the reading measure and, at the end, its way
+out «Entrar con otro correo», the view's `accion-principal`, as wide as the body up to the form measure like the
+sign-in buttons, with «Actualizar» under it, as MAR-06 asks of an empty state).
 
 ## Database migrations
 

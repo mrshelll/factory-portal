@@ -63,13 +63,15 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* ---- home ------------------------------------------------------------------------------- */
 
 .loading { color: var(--muted); }
-/* Nothing shared yet: the whole view is an empty state, centred in the frame at every width: its title, its message
-   (still at the reading measure) and its way out. A centred empty state is the one the manual lets fall short of the
-   width (FUN-43: «Una pantalla cuya vista principal es un vacío centrado con un mensaje angosto puede no llegar al
-   60 %»), and whose rows are not held to the body's edge (MAR-10: «los estados vacíos centrados no se miden»). */
-.empty { text-align: center; }
-.empty p { margin-inline: auto; margin-bottom: var(--space-4); overflow-wrap: anywhere; }
-.empty .actions { justify-content: center; }
+/* Nothing shared yet: the whole view is an empty state in the list's place, and it keeps the frame of every other screen:
+   it starts on the body's edge (MAR-10), under the list's own top rule, which spans the body as the list does on home
+   (so the block reaches the width at 1440 without a centred exception, FUN-43); its title, its message at the reading
+   measure, and its way out with the sign-in's anatomy: the main action as wide as the body up to the form measure,
+   «Actualizar» under it on the same edge, both one group at the end of the block (MAR-06). */
+.empty { border-top: 1px solid var(--line); padding-top: var(--space-4); }
+.empty p { margin-bottom: var(--space-4); overflow-wrap: anywhere; }
+.empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); }
+.empty-actions .button--primary { width: 100%; }
 
 /* A project's page: the way back above the title (the manual's «contexto» zone), and the line that says what the
    project's owner sees, first in the body and at the reading measure, one block's gap above the lists. */
@@ -78,7 +80,7 @@ main { padding-block: var(--space-6) var(--space-7); }
 .page-note + .section { margin-top: var(--space-between-blocks); }
 
 /* A row of the list (.rows, .row and .status come from the base): the whole row is the link. An entry of the owner's part
-   with nothing to open (.row-item) is laid out the same, its name in the text colour, not the link's. */
+   (.row-item) is laid out the same, its name in the text colour, not the link's: what opens is its own link. */
 .row-link, .row-item {
   display: flex;
   flex-direction: column;
@@ -110,12 +112,17 @@ main { padding-block: var(--space-6) var(--space-7); }
 
 /* The owner's part of a project's page reads, squinting, section > piece > person: the section's title as every
    section's, its line in muted text; each piece's title smaller and bold, with its kind; each person's name smaller and
-   regular (the link colour only on the ones that open, never bold). */
+   regular, always in the text colour. A send that can be read carries «Ver lo que envió» next to the name, a plain link
+   (the base's link colour and underline) at the name's size: the link colour means a link and nothing else. */
 .owner-lead { color: var(--muted); }
 .owner-lead + .owner-piece, .owner-piece + .owner-piece { margin-top: var(--space-5); }
 .owner-piece-title { margin: 0; font-size: var(--text-small); font-weight: 600; line-height: 1.4; }
 .owner-piece-kind { margin-block: 0 var(--space-3); color: var(--muted); font-size: var(--text-small); }
 .owner-piece .row-title { font-size: var(--text-small); font-weight: 400; }
+/* The link is a 44 px target like every other link of the portal (.back-link, the base's .link-button; FUN-18), and every
+   name line takes that height, with or without the link, so the entries keep one rhythm. */
+.owner-name { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); min-height: 44px; }
+.owner-open { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-small); }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 
