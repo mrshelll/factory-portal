@@ -43,12 +43,16 @@ export function ownerStatus(assignment) {
   return status;
 }
 
-// Which date goes next to the state: «sent» (sent_at), «changed» (updated_at), «opened» (first_opened_at) or «assigned»
-// (assigned_at), or null when there is none. The page says what each one is.
-const ACTIVITY_FIELDS = { sent: "sent_at", changed: "updated_at", opened: "first_opened_at", assigned: "assigned_at" };
+// Which date goes next to the state: «received» (updated_at of a received one: the factory's close sets the status and
+// updated_at together, and nothing else touches a received assignment), «sent» (sent_at), «changed» (updated_at), «opened»
+// (first_opened_at) or «assigned» (assigned_at), or null when there is none. The page says what each one is. A received
+// one whose updated_at is missing or comes before its send says its send instead.
+const ACTIVITY_FIELDS = { received: "updated_at", sent: "sent_at", changed: "updated_at", opened: "first_opened_at", assigned: "assigned_at" };
 export function latestActivityKind(assignment) {
   if (!isPlainObject(assignment)) return null;
   const state = ownerStatus(assignment);
+  if (state === "received" && isDate(assignment.updated_at) &&
+    !(isDate(assignment.sent_at) && Date.parse(assignment.updated_at) < Date.parse(assignment.sent_at))) return "received";
   if (DONE.has(state) && isDate(assignment.sent_at)) return "sent";
   if (state === "in_progress" && isDate(assignment.updated_at)) return "changed";
   if (state === "opened") return "opened";

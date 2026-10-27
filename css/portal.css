@@ -69,8 +69,10 @@ main { padding-block: var(--space-6) var(--space-7); }
    message below that. The aside keeps the body's text size and colour for its controls. The main action is the base's
    primary button, as on sign-in (a 48 px target): as wide as the body up to the form measure while it stacks, like the
    sign-in buttons; beside the message, as wide as its words, as a row's aside is. «Actualizar» follows it in the same
-   group, so nothing of the block comes after them (MAR-06). */
+   group, so nothing of the block comes after them (MAR-06). What asks the person to check the email they were invited with
+   is the base's section notice (information, aviso-de-seccion), under the message. */
 .empty .row-main { max-width: var(--measure-text); }
+.empty .notice { margin-top: var(--space-2); }
 .empty .row-title { font-size: var(--text-body); line-height: 1.4; }
 .empty p { overflow-wrap: anywhere; }
 .empty .empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); color: inherit; font-size: var(--text-body); }
@@ -120,16 +122,34 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* The owner's part of a project's page reads, squinting, section > piece > person: the section's title as every
    section's, its line in muted text; each piece's title smaller and bold, with its kind; each person's name smaller and
    regular, always in the text colour. A send that can be read carries «Ver lo que envió» next to the name, a plain link
-   (the base's link colour and underline) at the name's size: the link colour means a link and nothing else. */
+   (the base's link colour and underline) at the name's size: the link colour means a link and nothing else.
+   Below 672 px an entry is two lines: the name (and its link) with the state word on its right, as a list row carries its
+   state, then the date line across the row. From 672 px it is the list row above (the state on the row's right). */
 .owner-lead { color: var(--muted); }
 .owner-lead + .owner-piece, .owner-piece + .owner-piece { margin-top: var(--space-5); }
 .owner-piece-title { margin: 0; font-size: var(--text-small); font-weight: 600; line-height: 1.4; }
 .owner-piece-kind { margin-block: 0 var(--space-3); color: var(--muted); font-size: var(--text-small); }
 .owner-piece .row-title { font-size: var(--text-small); font-weight: 400; }
-/* The link is a 44 px target like every other link of the portal (.back-link, the base's .link-button; FUN-18), and every
-   name line takes that height, with or without the link, so the entries keep one rhythm. */
-.owner-name { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); min-height: 44px; }
-.owner-open { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-small); }
+.owner-piece .row-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name state" "meta meta";
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+.owner-piece .row-item > .row-main { display: contents; }
+.owner-piece .owner-name { grid-area: name; }
+.owner-piece .row-meta { grid-area: meta; }
+.owner-piece .row-item > .status { grid-area: state; }
+@media (min-width: 672px) {
+  .owner-piece .row-item { display: flex; }
+  .owner-piece .row-item > .row-main { display: grid; }
+  .owner-piece .owner-name, .owner-piece .row-meta { grid-area: auto; }
+}
+/* The link is a 44 px target like every other link of the portal (FUN-18): its padding grows what can be touched, and the
+   same negative margin keeps its line, and so the entry, at the text's height. */
+.owner-name { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
+.owner-open { display: inline-block; padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); font-size: var(--text-small); }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 

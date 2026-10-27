@@ -42,7 +42,9 @@ test("ownerStatus: opened only for pending with a readable opening date", () => 
 
 test("latestActivity: the date next to the state", () => {
   const base = { assigned_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-05T00:00:00Z", first_opened_at: "2026-10-02T00:00:00Z", sent_at: "2026-10-04T00:00:00Z" };
-  for (const status of ["submitted", "received", "replaced"]) assert.equal(latestActivity({ ...base, status }), base.sent_at, status);
+  for (const status of ["submitted", "replaced"]) assert.equal(latestActivity({ ...base, status }), base.sent_at, status);
+  // A received one: when it was received (the factory's close sets status and updated_at together).
+  assert.equal(latestActivity({ ...base, status: "received" }), base.updated_at);
   assert.equal(latestActivity({ ...base, status: "submitted", sent_at: null }), base.assigned_at);
   assert.equal(latestActivity({ ...base, status: "in_progress" }), base.updated_at);
   assert.equal(latestActivity({ ...base, status: "pending" }), base.first_opened_at);
@@ -53,7 +55,15 @@ test("latestActivity: the date next to the state", () => {
 
 test("latestActivityKind: which date latestActivity gave, so the page can say what it is", () => {
   const base = { assigned_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-05T00:00:00Z", first_opened_at: "2026-10-02T00:00:00Z", sent_at: "2026-10-04T00:00:00Z" };
-  for (const status of ["submitted", "received", "replaced"]) assert.equal(latestActivityKind({ ...base, status }), "sent", status);
+  for (const status of ["submitted", "replaced"]) assert.equal(latestActivityKind({ ...base, status }), "sent", status);
+  // Received: the date it was received, so «Recibida» and «Enviada» never show the same line. Without a receipt date that
+  // follows the send (missing, unreadable or older than it), the send's date, said as a send.
+  assert.equal(latestActivityKind({ ...base, status: "received" }), "received");
+  assert.equal(latestActivityKind({ ...base, status: "received", updated_at: null }), "sent");
+  assert.equal(latestActivityKind({ ...base, status: "received", updated_at: "x" }), "sent");
+  assert.equal(latestActivityKind({ ...base, status: "received", updated_at: "2026-10-03T00:00:00Z" }), "sent");
+  assert.equal(latestActivityKind({ ...base, status: "received", sent_at: null }), "received");
+  assert.equal(latestActivityKind({ ...base, status: "received", sent_at: null, updated_at: null }), "assigned");
   // A send that is not on record falls back to the date it was shared, and says so.
   assert.equal(latestActivityKind({ ...base, status: "replaced", sent_at: null }), "assigned");
   assert.equal(latestActivityKind({ ...base, status: "in_progress" }), "changed");
@@ -64,9 +74,10 @@ test("latestActivityKind: which date latestActivity gave, so the page can say wh
   assert.equal(latestActivityKind({ status: "pending" }), null);
   assert.equal(latestActivityKind(null), null);
   // Always the same date as latestActivity.
-  for (const a of [{ ...base, status: "received" }, { ...base, status: "in_progress", updated_at: "x" }, { ...base, status: "pending" }]) {
+  for (const a of [{ ...base, status: "received" }, { ...base, status: "received", updated_at: null }, { ...base, status: "submitted" },
+    { ...base, status: "in_progress", updated_at: "x" }, { ...base, status: "pending" }]) {
     const kind = latestActivityKind(a);
-    const field = { sent: "sent_at", changed: "updated_at", opened: "first_opened_at", assigned: "assigned_at" }[kind];
+    const field = { sent: "sent_at", received: "updated_at", changed: "updated_at", opened: "first_opened_at", assigned: "assigned_at" }[kind];
     assert.equal(latestActivity(a), a[field]);
   }
 });

@@ -550,11 +550,14 @@ async function showHome(viewId) {
     // An empty state (EST-01) with the shape of the list it replaces: the list (its own top rule) with one row, the message
     // on the row's left and, in the row's aside, its direct way out, the view's primary action, with «Actualizar» beside it
     // in the same group, so nothing of the block follows them (MAR-06). Divs, not a list: there is nothing to enumerate.
+    // What asks the person to check the email they were invited with is the base's section notice (information), under the
+    // message (aviso-de-seccion).
     layout.body.append(h("section", { class: "rows empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
       h("div", { class: "row" }, h("div", { class: "row-item" },
         h("div", { class: "row-main" },
           h("h2", { id: "empty-title", class: "row-title" }, t("emptyTitle")),
-          h("p", {}, t("emptyBody", { email: user.email }))),
+          h("p", {}, t("emptyBody", { email: user.email })),
+          h("div", { class: "notice" }, h("p", {}, t("emptyHint")))),
         h("div", { class: "row-aside empty-actions" },
           h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
           h("button", { type: "button", class: "link-button", onclick: route }, t("refresh")))))));
@@ -581,6 +584,7 @@ const OWNER_STATUS_CLASSES = { pending: "status", opened: "status status--opened
 
 // The date next to the state, saying which one it is (latestActivityKind).
 function activityLine(kind, date) {
+  if (kind === "received") return t("ownerReceivedOn", { date });
   if (kind === "sent") return t("ownerSentOn", { date });
   if (kind === "opened") return t("ownerOpenedOn", { date });
   if (kind === "changed") return t("changedOn", { date });

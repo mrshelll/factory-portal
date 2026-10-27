@@ -70,8 +70,9 @@ reading one person's send). The routes are pure functions in `js/project.js`.
 The owner of a project (the member with `role = 'owner'`, which the factory sets after a publish through `factory_set_owner`) sees,
 besides their own items, the section «Avance de lo que compartiste»: per piece, one entry per person
 assigned, with their state («Por empezar», «La abrió», «En curso», «Enviada», «Recibida» or «Reemplazada») and a
-date that says what it is («Envió el …», «La abrió el …», «Último cambio el …», «Compartida el …»). A change request
-is said by its date, never its text. Names are plain text; a send the owner can read carries the link «Ver lo que
+date that says what it is («Recibida el …», «Envió el …», «La abrió el …», «Último cambio el …», «Compartida el …»). A
+change request («pidió un cambio el …») and a send after the close («la reenvió el …») are said by their date, never their
+text. Below 672 px each entry is two lines: the name with the state on its right, then the date line. Names are plain text; a send the owner can read carries the link «Ver lo que
 envió» next to the name, which opens the same piece, closed and read only, with «Lo que envió <name> el <date>» in the title band. The owner never
 responds, saves or sends for anyone: that screen posts nothing.
 
@@ -219,7 +220,8 @@ base's on every screen: the page margin on both sides (16 px, 24 px from 672 px)
 stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
 after the form). The empty home has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top
-rule, and one row, its title and message on the left at the reading measure and, in the row's aside, its way out
+rule, and one row, its title and message on the left at the reading measure, under them the base's section notice
+that asks to check the email they were invited with and, in the row's aside, its way out
 «Entrar con otro correo», the view's `accion-principal`, with «Actualizar» beside it, as MAR-06 asks of an empty state.
 From 672 px the aside is on the row's right, as a home row carries its state; below that it goes under the message, the
 main action as wide as the body up to the form measure like the sign-in buttons, «Actualizar» under it.

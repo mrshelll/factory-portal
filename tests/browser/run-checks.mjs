@@ -450,6 +450,11 @@ async function demoChecks(browser, base, html) {
 const SUPABASE_HOST = "lonzcppgdbsatwjgwozb.supabase.co";
 const STORAGE_KEY = "sb-lonzcppgdbsatwjgwozb-auth-token";
 const USER = { id: "11111111-1111-4111-8111-111111111111", email: "ana@example.com" };
+// The empty home: its message, and the notice that asks the person to check the email they were invited with.
+const EMPTY = {
+  body: (email) => `Todavía no hay nada para ${email}.`,
+  hint: "Si esperabas algo, revisa con qué correo te invitaron.",
+};
 const IDS = {
   project: "22222222-2222-4222-8222-222222222222",
   member: "33333333-3333-4333-8333-333333333333",
@@ -897,7 +902,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: no page errors after the forced failures", pageErrors.length === 0, pageErrors.join(" | "));
   await context.close();
 
-  // Empty state: signed in, nothing assigned.
+  // Empty state: signed in, nothing assigned. The message says nothing is here yet; the notice asks to check the email.
   const emptyBackend = newBackend(html);
   emptyBackend.members = [];
   const emptyContext = await mockedContext(browser, { backend: emptyBackend, width: 320, locale: "es-CO" });
@@ -936,15 +941,22 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       const aside = action && action.closest(".row-aside");
       const ruled = (el) => { const s = getComputedStyle(el); return parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"; };
       const list = vacio && (vacio.matches(".rows") ? vacio : vacio.querySelector(".rows"));
+      const notice = document.querySelector("[data-rol=vacio] .notice");
       return { h1: textBox(document.querySelector("h1"))?.x ?? null, title: textBox(document.querySelector("[data-rol=vacio] h2")),
-        message: textBox(document.querySelector("[data-rol=vacio] p")), action: box(action), refresh: box(refresh),
+        message: textBox(document.querySelector("[data-rol=vacio] .row-main > p")), messageText: document.querySelector("[data-rol=vacio] .row-main > p")?.textContent ?? null,
+        notice: notice ? { box: box(notice), text: notice.textContent, className: notice.className, inMain: Boolean(notice.parentElement && notice.parentElement.matches(".row-main")),
+          afterMessage: Boolean(notice.previousElementSibling && notice.previousElementSibling.matches("p")), stripe: getComputedStyle(notice).borderInlineStartWidth,
+          accent: getComputedStyle(notice).borderInlineStartColor, muted: (() => { const el = document.createElement("span"); el.style.color = "var(--muted)"; body.append(el);
+            const c = getComputedStyle(el).color; el.remove(); return c; })() } : null,
+        action: box(action), refresh: box(refresh),
         body: { x: Math.round(bodyBox.left + parseFloat(cs.paddingLeft)), der: Math.round(bodyBox.right - parseFloat(cs.paddingRight)),
           w: Math.round(bodyBox.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) }, measure,
         list: Boolean(list), rows: list ? list.querySelectorAll(":scope > .row").length : 0, listRule: Boolean(list && ruled(list)),
         inRow: Boolean(aside && aside.parentElement && aside.parentElement.matches(".row-item") && list && list.contains(aside)),
         refreshInAside: Boolean(aside && refresh && aside.contains(refresh)),
-        // Only the list draws a top rule: the empty state, the row and what holds its text, none (a control's own border aside).
-        otherRules: vacio ? [vacio, ...vacio.querySelectorAll("*")].filter((el) => el !== list && !el.matches("button, a, input") && ruled(el))
+        // Only the list draws a top rule: the empty state, the row and what holds its text, none. A control's own border and the
+        // base's section notice (its sheet, the component's own) are not rules of the empty state.
+        otherRules: vacio ? [vacio, ...vacio.querySelectorAll("*")].filter((el) => el !== list && !el.matches("button, a, input, .notice") && ruled(el))
           .map((el) => el.className || el.tagName) : null };
     });
     const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
@@ -952,6 +964,12 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       g.list && g.rows === 1 && g.listRule && g.inRow && g.refreshInAside && Array.isArray(g.otherRules) && g.otherRules.length === 0, JSON.stringify(g));
     check(`home-empty ${width}px: its title and its message start on the title's edge, not centred`,
       g.h1 !== null && g.title && near(g.title.x, g.h1) && g.message && near(g.message.x, g.h1), JSON.stringify(g));
+    // aviso-de-seccion: what asks the person to check their email is the base's section notice (information: the grey stripe,
+    // never the signal), in the row under the message and on the same edge; the message says only that nothing is here yet.
+    check(`home-empty ${width}px: «${EMPTY.hint}» is the base's information notice, in the row under the message, on the title's edge`,
+      g.notice && g.notice.text === EMPTY.hint && g.notice.className === "notice" && g.notice.inMain && g.notice.afterMessage &&
+      parseFloat(g.notice.stripe) > 1 && g.notice.accent === g.notice.muted && near(g.notice.box.x, g.h1) &&
+      g.messageText === EMPTY.body(USER.email) && !g.messageText.includes(EMPTY.hint), JSON.stringify({ notice: g.notice, message: g.messageText }));
     check(`home-empty ${width}px: its main action is a 44 px target (FUN-18)`, g.action && g.action.h >= 44, JSON.stringify(g.action));
     if (width < 672) {
       check(`home-empty ${width}px: under the message, the main action takes the body's width as the sign-in buttons do, «Actualizar» under it on the same edge`,
@@ -2325,11 +2343,14 @@ const OWNER = {
   section: "Avance de lo que compartiste",
   states: { pending: "Por empezar", opened: "La abrió", in_progress: "En curso", submitted: "Enviada", received: "Recibida", replaced: "Reemplazada" },
   askedChange: (date) => `pidió un cambio el ${date}`,
-  lateSend: (date) => `envió después del cierre el ${date}`,
+  // A send after the close comes after the line's own date (when it was received): it says «sent again» once.
+  lateSend: (date) => `la reenvió el ${date}`,
   sentBy: (name, date) => `Lo que envió ${name} el ${date}`,
   lead: "Aquí ves cuándo cada persona lo abre y lo envía.",
-  // Each date says what it is: when the person sent, opened it or last changed it, or when it was shared.
+  // Each date says what it is: when the person sent, when it was received (a «Recibida» one), when they opened it or last
+  // changed it, or when it was shared.
   sentOn: (date) => `Envió el ${date}`,
+  receivedOn: (date) => `Recibida el ${date}`,
   openedOn: (date) => `La abrió el ${date}`,
   changedOn: (date) => `Último cambio el ${date}`,
   sharedOn: (date) => `Compartida el ${date}`,
@@ -2469,6 +2490,20 @@ const ownerDots = (page) => page.evaluate(() => Object.fromEntries([...document.
   const cs = getComputedStyle(s.querySelector(".status-dot"));
   return [s.textContent, [cs.borderTopColor, cs.borderTopStyle, cs.backgroundColor, cs.backgroundImage].join(" | ")];
 })));
+// Each entry of the owner's part as laid out: its name line (name and link), its state word, its date line, the link's box,
+// the line heights and the row's content height (without its padding).
+const ownerEntries = (page) => page.evaluate(() => [...document.querySelectorAll("[data-rol=cuerpo] .owner-piece li.row")].map((li) => {
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height),
+      mid: Math.round(r.top + r.height / 2) }; };
+  const item = li.querySelector(".row-item"), cs = getComputedStyle(item);
+  const lineHeight = (el) => { const c = getComputedStyle(el); return parseFloat(c.lineHeight) || parseFloat(c.fontSize) * 1.5; };
+  const name = li.querySelector(".row-title"), meta = li.querySelector(".row-meta");
+  return { name: name?.textContent || null, line: box(li.querySelector(".owner-name")), state: box(li.querySelector(".status")), meta: box(meta),
+    metaText: meta?.textContent || "",
+    link: box(li.querySelector("a.owner-open")), lh: Math.round(lineHeight(name)), metaLh: meta ? Math.round(lineHeight(meta)) : 0,
+    gap: Math.round(parseFloat(cs.rowGap) || 0), content: Math.round(item.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) };
+}));
 // The owner's piece screen: its title band, the way back, the pinned zone and the change request form (none of which it has).
 const ownerBand = (page) => page.evaluate(() => {
   const status = document.querySelector(".piece-status");
@@ -2527,7 +2562,7 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const href = (pieceId, person) => ownerHref(IDS.ownedProject, pieceId, person);
     const expected = [
       { title: OWNED_TITLES[OWNED.questions], kind: "Preguntas", people: [
-        { name: luis.name, state: S.received, meta: OWNER.sentOn(d.sent), href: href(OWNED.questions, luis) },
+        { name: luis.name, state: S.received, meta: OWNER.receivedOn(d.received), href: href(OWNED.questions, luis) },
         { name: marta.name, state: S.opened, meta: OWNER.openedOn(d.opened), href: null },
         { name: pedro.name, state: S.pending, meta: OWNER.sharedOn(d.assigned), href: null },
         { name: sofia.name, state: S.in_progress, meta: OWNER.changedOn(d.changed), href: null }] },
@@ -2535,8 +2570,8 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
         { name: luis.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: href(OWNED.flow, luis) },
         { name: marta.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: null }] },
       { title: OWNED_TITLES[OWNED.demo], kind: "Revisión de la demo", people: [
-        { name: luis.name, state: S.received, meta: `${OWNER.sentOn(d.sent)} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis) },
-        { name: sofia.name, state: S.received, meta: `${OWNER.sentOn(d.sent)} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia) }] },
+        { name: luis.name, state: S.received, meta: `${OWNER.receivedOn(d.received)} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis) },
+        { name: sofia.name, state: S.received, meta: `${OWNER.receivedOn(d.received)} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia) }] },
       { title: OWNED_TITLES[OWNED.demoOld], kind: "Revisión de la demo", people: [
         { name: marta.name, state: S.replaced, meta: OWNER.sharedOn(d.assigned), href: null }] },
     ];
@@ -2548,6 +2583,13 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     check("owner-project: one entry per person, by name, with the state word and its date, each date saying what it is", got && JSON.stringify(got.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))) ===
       JSON.stringify(expected.map((p) => p.people.map(({ name, state, meta }) => ({ name, state, meta })))), JSON.stringify(got && got.map((p) => p.people)));
     const people = part ? part.pieces.flatMap((p) => p.people) : [];
+    // se-entiende-a-la-primera: «Recibida» and «Enviada» never share a date line: each names its own event, and no line says
+    // «envió» twice (a send after the close reads once, as a later send).
+    const firstEvent = (p) => p.meta.split(" · ")[0].replace(/ el .*$/, "");
+    const byState = (state) => new Set(people.filter((p) => p.state === state).map(firstEvent));
+    check("owner-project: «Recibida» and «Enviada» each name their own event on the date line, and no line says «envió» twice",
+      people.length === 9 && [...byState(S.received)].join() === "Recibida" && [...byState(S.submitted)].join() === "Envió" &&
+      people.every((p) => (p.meta.match(/envi[oó]/gi) || []).length <= 1), JSON.stringify(people.map((p) => [p.state, p.meta])));
     const opened = people.find((p) => p.state === S.opened), pending = people.find((p) => p.state === S.pending);
     check("owner-project: «La abrió» is its own state, with its own dot", opened && pending && opened.name === marta.name && opened.hasDot &&
       opened.dot !== pending.dot, JSON.stringify({ opened, pending }));
@@ -2598,6 +2640,23 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     await snapshot(page, "project-owner", "lista");
     const ownerAxe = await axeViolations(page);
     if (ownerAxe) check("owner-project: axe has no violations", ownerAxe.length === 0, ownerAxe.join(", "));
+    // densidad (project-owner at 320): each entry is two lines: the name, with its «Ver lo que envió» and the state word on
+    // the right as a list row carries it, and the date line under them; only a date line that also says a later event (a
+    // change asked, a send after the close) may run onto a second line of its own. The link stays a 44 px target (FUN-18)
+    // by its own padding, which does not grow the line nor the row.
+    await page.setViewportSize({ width: 320, height: 640 });
+    const entries = await ownerEntries(page);
+    const oneLine = (box, lh) => box && box.h <= lh + 1;
+    check("owner-project 320px: each entry is two lines, the name with the state word on its right, then the date line", entries.length === 9 &&
+      entries.every((e) => oneLine(e.line, e.lh) && (oneLine(e.meta, e.metaLh) || e.metaText.includes(" · ")) && e.state.x >= e.line.der && e.state.mid > e.line.top && e.state.mid < e.line.bottom &&
+        e.meta.top >= e.line.bottom - 1 && e.content <= e.line.h + e.gap + e.meta.h + 1),
+      JSON.stringify(entries.map((e) => ({ name: e.name, line: e.line && e.line.h, meta: e.meta && e.meta.h, metaText: e.metaText, lh: e.lh, state: e.state, content: e.content }))));
+    check("owner-project 320px: «Ver lo que envió» is a 44 px target without growing its line", entries.filter((e) => e.link).length === 4 &&
+      entries.filter((e) => e.link).every((e) => e.link.h >= 44 && e.link.w >= 44 && oneLine(e.line, e.lh)),
+      JSON.stringify(entries.filter((e) => e.link).map((e) => ({ name: e.name, link: e.link, line: e.line.h }))));
+    check("owner-project 320px: no horizontal scroll", await noHorizontalScroll(page));
+    await page.screenshot({ path: join(outDir, "project-owner-320.png"), fullPage: true });
+    await page.setViewportSize({ width: 360, height: 800 });
 
     // owner-piece-readonly: Luis's questions (from the page's link), flow review and demo sheet, each closed and read only.
     for (const [kind, pieceId] of [["questions", OWNED.questions], ["flow_review", OWNED.flow], ["demo_review", OWNED.demo]]) {
