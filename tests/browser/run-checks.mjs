@@ -2508,6 +2508,46 @@ const ownerEntries = (page) => page.evaluate(() => [...document.querySelectorAll
     link: box(li.querySelector("a.owner-open")), lh: Math.round(lineHeight(name)), metaLh: meta ? Math.round(lineHeight(meta)) : 0,
     gap: Math.round(parseFloat(cs.rowGap) || 0), content: Math.round(item.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) };
 }));
+// What a tap hits on each «Ver lo que envió»: brought into view, its box sampled every pixel row at its left edge, its centre
+// and its right edge with elementFromPoint; a miss is any sample that is not the link nor inside it.
+const ownerLinkHits = (page) => page.evaluate(async () => {
+  const out = [];
+  for (const link of document.querySelectorAll("[data-rol=cuerpo] .owner-piece a.owner-open")) {
+    link.scrollIntoView({ block: "center" });
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    const r = link.getBoundingClientRect(), misses = [];
+    let samples = 0;
+    for (let y = Math.ceil(r.top); y < r.bottom; y += 1) {
+      for (const x of [r.left + 1, r.left + r.width / 2, r.right - 1]) {
+        samples += 1;
+        const el = document.elementFromPoint(x, y);
+        if (!(el && (el === link || link.contains(el)))) misses.push([Math.round(x - r.left), Math.round(y - r.top), el ? el.className || el.tagName : null]);
+      }
+    }
+    out.push({ name: link.closest("li").querySelector(".row-title")?.textContent || null, h: Math.round(r.height), samples, misses });
+  }
+  return out;
+});
+// The first «Ver lo que envió» focused as the keyboard focuses it: whether a ring shows (on the link or its text) and how far
+// down it reaches, against the top of the date text under it.
+const ownerLinkRing = async (page) => {
+  await page.evaluate(() => { const a = document.querySelector("[data-rol=cuerpo] .owner-piece a.owner-open"); a.scrollIntoView({ block: "center" });
+    const prev = [...document.querySelectorAll("a, button")]; const i = prev.indexOf(a); (prev[i - 1] || document.body).focus(); });
+  await page.keyboard.press("Tab");
+  return page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || !a.matches("a.owner-open")) return { focused: a ? a.className || a.tagName : null };
+    const ringOf = (el) => { const cs = getComputedStyle(el); const w = parseFloat(cs.outlineWidth) || 0;
+      return cs.outlineStyle !== "none" && w > 0 ? { el: el.className || el.tagName, bottom: el.getBoundingClientRect().bottom + (parseFloat(cs.outlineOffset) || 0) + w } : null; };
+    const rings = [a, ...a.querySelectorAll("*")].map(ringOf).filter(Boolean);
+    const meta = a.closest("li").querySelector(".row-meta");
+    const rg = document.createRange(); rg.selectNodeContents(meta);
+    const metaTop = Math.min(...[...rg.getClientRects()].filter((x) => x.width > 0).map((x) => x.top));
+    const ring = { visible: rings.length > 0, rings, bottom: rings.length ? Math.round(Math.max(...rings.map((x) => x.bottom)) * 10) / 10 : null, metaTop: Math.round(metaTop * 10) / 10 };
+    a.blur();
+    return ring;
+  });
+};
 // The owner's piece screen: its title band, the way back, the pinned zone and the change request form (none of which it has).
 const ownerBand = (page) => page.evaluate(() => {
   const status = document.querySelector(".piece-status");
@@ -2651,14 +2691,19 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const ownerAxe = await axeViolations(page);
     if (ownerAxe) check("owner-project: axe has no violations", ownerAxe.length === 0, ownerAxe.join(", "));
     // densidad (project-owner at 320): each entry is two lines: the name, with its «Ver lo que envió» and the state word on
-    // the right as a list row carries it, and the date line under them; only a date line that also says a later event (a
-    // change asked, a send after the close) may run onto a second line of its own. The link stays a 44 px target (FUN-18)
-    // by its own padding, which does not grow the line nor the row.
+    // the right as a list row carries it, and the date line under them. Only an entry with two events (received or sent,
+    // then a change asked or a send after the close) may run its date line onto a third line (controller's ruling). The link
+    // stays a 44 px target (FUN-18) by its own padding, which does not grow the line nor the row.
     await page.setViewportSize({ width: 320, height: 640 });
     const entries = await ownerEntries(page);
     const oneLine = (box, lh) => box && box.h <= lh + 1;
+    // Two events, exactly: its own date (received or sent), then one later event (a change asked or a send after the close).
+    const prefix = (fn) => fn("\u0000").split("\u0000")[0];
+    const twoEvents = (text) => { const parts = text.split(" · ");
+      return parts.length === 2 && [OWNER.receivedOn, OWNER.sentOn].some((fn) => parts[0].startsWith(prefix(fn))) &&
+        [OWNER.askedChange, OWNER.lateSend].some((fn) => parts[1].startsWith(prefix(fn))); };
     check("owner-project 320px: each entry is two lines, the name with the state word on its right, then the date line", entries.length === 9 &&
-      entries.every((e) => oneLine(e.line, e.lh) && (oneLine(e.meta, e.metaLh) || e.metaText.includes(" · ")) && e.state.x >= e.line.der && e.state.mid > e.line.top && e.state.mid < e.line.bottom &&
+      entries.every((e) => oneLine(e.line, e.lh) && (oneLine(e.meta, e.metaLh) || twoEvents(e.metaText)) && e.state.x >= e.line.der && e.state.mid > e.line.top && e.state.mid < e.line.bottom &&
         e.meta.top >= e.line.bottom - 1 && e.content <= e.line.h + e.gap + e.meta.h + 1),
       JSON.stringify(entries.map((e) => ({ name: e.name, line: e.line && e.line.h, meta: e.meta && e.meta.h, metaText: e.metaText, lh: e.lh, state: e.state, content: e.content }))));
     check("owner-project 320px: «Ver lo que envió» is a 44 px target without growing its line", entries.filter((e) => e.link).length === 4 &&
@@ -2666,6 +2711,18 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       JSON.stringify(entries.filter((e) => e.link).map((e) => ({ name: e.name, link: e.link, line: e.line.h }))));
     check("owner-project 320px: no horizontal scroll", await noHorizontalScroll(page));
     await page.screenshot({ path: join(outDir, "project-owner-320.png"), fullPage: true });
+    // FUN-18 as it is touched: down the link's whole box (every pixel row, at its left edge, its centre and its right edge),
+    // what the browser hits is the link, never the date line under it. And its focus ring stays off the date text.
+    for (const width of [320, 1440]) {
+      await page.setViewportSize({ width, height: width < 672 ? 640 : 900 });
+      const hits = await ownerLinkHits(page);
+      check(`owner-project ${width}px: «${OWNER.open}» answers a tap on its whole 44 px target, the date line under it never takes it (FUN-18)`,
+        hits.length === 4 && hits.every((x) => x.h >= 44 && x.samples >= 3 * x.h && x.misses.length === 0),
+        JSON.stringify(hits.map((x) => ({ name: x.name, h: x.h, samples: x.samples, misses: x.misses.slice(0, 6) }))));
+      const ring = await ownerLinkRing(page);
+      check(`owner-project ${width}px: «${OWNER.open}»'s focus ring stays off the date line`, ring && ring.visible && ring.bottom <= ring.metaTop,
+        JSON.stringify(ring));
+    }
     await page.setViewportSize({ width: 360, height: 800 });
 
     // owner-piece-readonly: Luis's questions (from the page's link), flow review and demo sheet, each closed and read only.

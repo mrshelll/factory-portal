@@ -603,7 +603,7 @@ function ownerEntry(projectId, piece, row, member, requests) {
   const status = OWNER_STATUS_KEYS[row.status] ? row.status : "pending";
   const open = row.readable
     ? h("a", { class: "owner-open", href: ownerPieceHref(projectId, piece.id, row.memberId),
-      "aria-label": t("ownerOpenLabel", { name, piece: piece.title || t("untitled") }) }, t("ownerOpen"))
+      "aria-label": t("ownerOpenLabel", { name, piece: piece.title || t("untitled") }) }, h("span", {}, t("ownerOpen")))
     : null;
   return h("li", { class: "row" }, h("div", { class: "row-item" },
     h("span", { class: "row-main" },

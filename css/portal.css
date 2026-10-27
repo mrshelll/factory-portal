@@ -148,9 +148,13 @@ main { padding-block: var(--space-6) var(--space-7); }
   .owner-piece .owner-name, .owner-piece .row-meta { grid-area: auto; }
 }
 /* The link is a 44 px target like every other link of the portal (FUN-18): its padding grows what can be touched, and the
-   same negative margin keeps its line, and so the entry, at the text's height. */
+   same negative margin keeps its line, and so the entry, at the text's height. Its padding reaches over the date line, so
+   it is positioned: it paints, and takes the tap, above that line on its whole box. Its focus ring goes around its words
+   (the base's ring on its text), not around the padded box, so it never crosses the date line. */
 .owner-name { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
-.owner-open { display: inline-block; padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); font-size: var(--text-small); }
+.owner-open { position: relative; display: inline-block; padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); font-size: var(--text-small); }
+.owner-open:focus-visible { outline: none; }
+.owner-open:focus-visible > span { outline: 2px solid var(--signal); outline-offset: 2px; }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 
