@@ -2480,7 +2480,11 @@ const ownerWeights = (page) => page.evaluate(() => {
   const section = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((s) => s.querySelector(".owner-piece"));
   if (!section) return null;
   const probe = (css) => { const el = document.createElement("span"); el.style.color = css; section.append(el); const c = getComputedStyle(el).color; el.remove(); return c; };
+  const first = section.firstElementChild;
   return { h2: w(section.querySelector("h2")), h3: w(section.querySelector("h3")),
+    // The section's place: its heading first in the owner part, its lead line right after it, then the pieces.
+    place: { headingFirst: Boolean(first && first.matches("h2")), leadNext: Boolean(first && first.nextElementSibling && first.nextElementSibling.matches("p.owner-lead")),
+      piecesAfter: [...section.querySelectorAll(".owner-piece")].every((g) => first && (first.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING)) },
     names: [...section.querySelectorAll(".owner-piece .row-title")].map((el) => ({ text: el.textContent, ...w(el) })),
     links: [...section.querySelectorAll(".owner-piece li a")].map((el) => ({ text: el.textContent, ...w(el) })),
     ink: probe("var(--ink)"), signal: probe("var(--signal)") };
@@ -2616,9 +2620,15 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       part.lead === OWNER.lead && !(await page.$("[data-rol=cuerpo] > .page-note")), JSON.stringify({ lead: part && part.lead, first: view.first }));
     const weights = await ownerWeights(page);
     const mass = (x) => x && x.size * x.weight;
-    check("owner-project: squinting, the section's title outweighs a piece's title, which outweighs a person's name; no name is bold",
-      weights && weights.names.length === 9 && mass(weights.h2) > mass(weights.h3) && weights.names.every((n) => mass(weights.h3) > mass(n) && n.weight <= 400),
-      JSON.stringify(weights && { h2: weights.h2, h3: weights.h3, names: weights.names.map((n) => [n.text, n.size, n.weight]) }));
+    // tipografia (project-owner): section ≥ piece > person. The section and a piece's title may share the type (both are
+    // section titles in the base's scale, FUN-02); the section is told apart by its place: its heading first in the owner part,
+    // its lead line next. A piece's title outweighs every name by a step of the scale in size and in weight, never by
+    // weight alone.
+    check("owner-project: squinting, section ≥ piece > person (the piece above every name in size and in weight), the section's heading first with its lead; no name is bold",
+      weights && weights.names.length === 9 && mass(weights.h2) >= mass(weights.h3) &&
+      weights.names.every((n) => mass(weights.h3) > mass(n) && weights.h3.size > n.size && weights.h3.weight > n.weight && n.weight <= 400) &&
+      weights.place.headingFirst && weights.place.leadNext && weights.place.piecesAfter,
+      JSON.stringify(weights && { h2: weights.h2, h3: weights.h3, place: weights.place, names: weights.names.map((n) => [n.text, n.size, n.weight]) }));
     // color-con-un-significado: the link colour means «you can open this». No name is in it; a readable send carries its own
     // link «Ver lo que envió» next to the name, in the link colour, and an entry with nothing to open has no link at all.
     const readable = people.filter((p) => p.href);
