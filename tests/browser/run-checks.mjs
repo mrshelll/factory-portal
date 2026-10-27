@@ -3,10 +3,10 @@
 //   node tests/browser/run-checks.mjs --questions <piece.html> [--flow <piece.html>] [--demo <piece.html>] [--out <dir>]
 //                                     [--factory <software factory repo>]
 //
-// Starts `python3 -m http.server` on the repo, drives system Chrome headless with playwright-core
-// and prints one PASS/FAIL line per check. playwright-core is loaded from PLAYWRIGHT_CORE_DIR, or
-// from the software factory cache (~/.cache/fabrica-software/playwright-core@1.63.0). Chrome is
-// taken from CHROME_PATH or the default macOS / Linux locations.
+// Serves the repo with tests/browser/static-server.mjs (127.0.0.1, a free port), drives system Chrome
+// headless with playwright-core and prints one PASS/FAIL line per check. playwright-core is loaded from
+// PLAYWRIGHT_CORE_DIR, or from the software factory cache (~/.cache/fabrica-software/playwright-core@1.63.0).
+// Chrome is taken from CHROME_PATH or the default macOS / Linux locations.
 //
 // With --demo, the demo sheet also sends through the app (error, then success: one row), and a replaced
 // version opened from an old email shows its fixed notice with a link to the newer one and still sends.
@@ -25,14 +25,14 @@
 // portalGeometryChecks): every screen at 320, 672, 1056 and 1440, light and dark, and the piece screen's
 // iframe against the factory's piece-host.mjs.
 
-import { spawn, spawnSync } from "node:child_process";
-import { createServer } from "node:http";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, extname, join, normalize, resolve, sep } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
+import { serveDir } from "./static-server.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const args = Object.fromEntries(
@@ -61,21 +61,8 @@ function chromePath() {
 }
 
 async function startServer() {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const port = 8700 + Math.floor(Math.random() * 200);
-    const child = spawn("python3", ["-m", "http.server", String(port), "--bind", "127.0.0.1"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-    const ok = await new Promise((done) => {
-      const timer = setTimeout(() => done(true), 800);
-      child.once("exit", () => { clearTimeout(timer); done(false); });
-    });
-    if (ok) {
-      // http.server logs every request to stderr: an unread pipe fills up and the server stops answering mid-run.
-      child.stdout.resume();
-      child.stderr.resume();
-      return { child, base: `http://127.0.0.1:${port}` };
-    }
-  }
-  throw new Error("could not start http.server");
+  const server = await serveDir(root);
+  return { server, base: `http://127.0.0.1:${server.address().port}` };
 }
 
 // Saves the screen as it is now: the rendered DOM without scripts (nothing re-renders it), with the
@@ -3063,16 +3050,6 @@ function listColumnChecks(name, width, scheme, rows) {
         (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
   }
 }
-function serveDir(dir) {
-  const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
-  const server = createServer((req, res) => {
-    const path = normalize(join(dir, decodeURIComponent(new URL(req.url, "http://x").pathname)));
-    if (!path.startsWith(dir + sep) || !existsSync(path) || statSync(path).isDirectory()) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "content-type": types[extname(path)] || "application/octet-stream" });
-    res.end(readFileSync(path));
-  });
-  return new Promise((done) => server.listen(0, "127.0.0.1", () => done(server)));
-}
 async function portalGeometryChecks(browser, base, html, factory) {
   const assets = join(resolve(factory), "design-system", "assets");
   const { MEDIR_GEOMETRIA, evaluaAncho, evaluaConjunto, revisaMedia } = await import(pathToFileURL(join(assets, "geometria.mjs")).href);
@@ -3160,7 +3137,7 @@ async function portalGeometryChecks(browser, base, html, factory) {
 }
 
 const { chromium } = loadPlaywright();
-const { child, base } = await startServer();
+const { server, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
 const read = (path) => (path ? readFileSync(path, "utf8") : null);
 try {
@@ -3182,7 +3159,7 @@ try {
   if (args.questions && args.factory) await portalGeometryChecks(browser, base, read(args.questions), args.factory);
 } finally {
   await browser.close();
-  child.kill();
+  server.close();
 }
 // Every snapshot through the factory's verifier, at the three review widths, light and dark.
 if (args.factory) {

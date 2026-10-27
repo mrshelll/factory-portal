@@ -287,14 +287,15 @@ pause again a week later.
 ## Tests
 
 ```sh
-npm test   # node --test: bridge, message validation, draft queue, errors, i18n, closure, project routes and states, sync-brand
+npm test   # node --test: bridge, message validation, draft queue, errors, i18n, closure, project routes and states, sync-brand, the browser checks' server
 node tests/browser/run-checks.mjs --questions <questions-piece.html> --flow <flow-review-piece.html> \
   --demo <demo-sheet.html> --out <dir> --factory <path to the software factory repo>
 node scripts/sync-brand.mjs --from <path to the software factory repo> --check
 ```
 
-The browser checks start `python3 -m http.server`, drive Chrome headless with `playwright-core`
-(from `PLAYWRIGHT_CORE_DIR`, or the software factory cache) and cover: the sign-in screen at 320,
+The browser checks serve the repo with `tests/browser/static-server.mjs` (Node, on 127.0.0.1 and a
+free port), drive Chrome headless with `playwright-core` (from `PLAYWRIGHT_CORE_DIR`, or the software
+factory cache) and cover: the sign-in screen at 320,
 360, 768 and 1440 px (no console errors, no horizontal scroll, axe, the brand's logo, colour and
 font), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
