@@ -399,7 +399,8 @@ begin
 
   -- (6) owner_piece as Olga returns Ana's newest non-partial response with its storage, even with a
   --     newer partial that has a storage. After a newer send without storage, response is null and
-  --     readable is false, although an older send had a storage. Opening someone's piece as the owner
+  --     readable is false, although an older send had a storage; so is a storage that is not a JSON
+  --     object (a JSON null, set by hand), the portal's own test. Opening someone's piece as the owner
   --     never records an opening. An assignment that does not exist gives P0002.
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_olga)::text, true);
@@ -455,6 +456,23 @@ begin
   if (v_elem ->> 'sent_at')::timestamptz is distinct from now()
      or v_elem -> 'readable' is distinct from 'false'::jsonb then
     raise exception 'project-page (6): after a send without storage, Ana''s assignment is %', v_elem;
+  end if;
+
+  update public.piece_responses set storage = 'null'::jsonb where id = v_r2;
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_olga)::text, true);
+  v_res := public.owner_piece(v_qa, v_ana_id);
+  v_elem := public.owner_project(v_project_id);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  update public.piece_responses set storage = null where id = v_r2;
+  select t.ae into v_elem
+  from jsonb_array_elements(v_elem -> 'pieces') as p(pe)
+  cross join lateral jsonb_array_elements(p.pe -> 'assignments') as t(ae)
+  where p.pe ->> 'id' = v_qa::text and t.ae ->> 'member_id' = v_ana_id::text;
+  if v_res -> 'response' is distinct from 'null'::jsonb or v_elem -> 'readable' is distinct from 'false'::jsonb then
+    raise exception 'project-page (6): a send whose storage is a JSON null reads as readable: % / %',
+      v_res -> 'response', v_elem;
   end if;
 
   perform set_config('role', 'authenticated', true);

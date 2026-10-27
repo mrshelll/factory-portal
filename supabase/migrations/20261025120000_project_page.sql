@@ -116,8 +116,9 @@ $function$;
 -- owner_project: one owned project with its members, its pieces (newest first, without the html)
 -- and, per piece, every assignment with its dates. sent_at is the date of the assignment's newest
 -- send (newest by (submitted_at, id), partial responses excluded) and readable says whether that
--- send kept its storage, so the piece can open read-only with it. change_requests carry the text
--- the person wrote and whether it was a late send, never its payload nor its storage.
+-- send kept its storage as a JSON object (what the portal can open), so the piece can open read-only
+-- with it. change_requests carry the text the person wrote and whether it was a late send, never its
+-- payload nor its storage.
 -- 42501 when the caller is not the owner of the project.
 -- ---------------------------------------------------------------------------------------------
 
@@ -168,7 +169,7 @@ begin
                     order by a.assigned_at, a.member_id), '[]'::jsonb)
              from public.piece_assignments a
              left join lateral (
-               select r.submitted_at, r.storage is not null as readable
+               select r.submitted_at, jsonb_typeof(r.storage) = 'object' as readable
                from public.piece_responses r
                where r.piece_id = a.piece_id and r.member_id = a.member_id and not r.partial
                order by r.submitted_at desc, r.id desc
@@ -203,9 +204,10 @@ $function$;
 -- ---------------------------------------------------------------------------------------------
 -- owner_piece: one person's piece in an owned project, to open it read-only. response is the
 -- person's newest send (newest by (submitted_at, id), partial responses excluded) when it kept its
--- storage, else null: an older send is never shown in its place, it would pass an outdated send as
--- what the person sent. 42501 when the caller is not the owner of the piece's project (or the
--- piece does not exist); P0002 when that member has no assignment on that piece.
+-- storage as a JSON object (the same test as readable), else null: an older send is never shown in
+-- its place, it would pass an outdated send as what the person sent. 42501 when the caller is not the
+-- owner of the piece's project (or the piece does not exist); P0002 when that member has no
+-- assignment on that piece.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function public.owner_piece(p_piece_id uuid, p_member_id uuid)
@@ -243,7 +245,7 @@ begin
   from public.pieces p
   where p.id = p_piece_id;
 
-  select case when r.storage is not null
+  select case when jsonb_typeof(r.storage) = 'object'
               then jsonb_build_object('id', r.id, 'submitted_at', r.submitted_at, 'storage', r.storage)
          end
   into v_response
