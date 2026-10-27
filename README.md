@@ -259,7 +259,9 @@ stays on the row's right, and below 672 px the rows keep their phone layout.
   **The owner's part**): `first_opened_at` on assignments (the first
   time the assigned person opens the piece in the portal; null for assignments from before it),
   `mark_piece_opened` for the person (only the first open counts; status and `updated_at` are not
-  touched), the owner's read-only functions `owner_projects`, `owner_project` and `owner_piece`
+  touched), `save_draft` moving `updated_at` on every save while the piece is in progress (before, only
+  the first save did; that date is the owner's «Último cambio el …»), the owner's read-only functions
+  `owner_projects`, `owner_project` and `owner_piece`
   (execute for `authenticated`; each checks first that the caller is the project's `owner`, and none
   returns a draft: nothing from `piece_drafts`, no partial response, no storage of a change request)
   and the factory-only `factory_set_owner` (execute for `service_role` only). No policy is added: a

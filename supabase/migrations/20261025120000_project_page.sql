@@ -6,6 +6,8 @@
 -- Adds: first_opened_at on assignments, private.owned_project_ids, mark_piece_opened for the person,
 -- the owner's read-only functions owner_projects, owner_project and owner_piece (execute for
 -- authenticated only), and the factory-only factory_set_owner (execute for service_role only).
+-- Changes: save_draft also moves updated_at on every save while the piece is in progress (it moved
+-- only on the first one), so the owner's «Último cambio el …» is the person's last change.
 -- Drafts never reach the owner: nothing from piece_drafts, no partial response, no storage of a
 -- change request. Safe to re-run: every step is idempotent.
 
@@ -52,6 +54,29 @@ begin
   where piece_id = p_piece_id
     and member_id = v_member_id
     and first_opened_at is null;
+end;
+$function$;
+
+-- ---------------------------------------------------------------------------------------------
+-- save_draft: the baseline's function, unchanged except that a save on an assignment already in
+-- progress moves updated_at too (the baseline set it only on pending -> in_progress). Only those two
+-- statuses: a submitted, received or replaced assignment keeps its status and its updated_at.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.save_draft(p_piece_id uuid, p_storage jsonb)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO ''
+AS $function$
+declare
+  v_member_id uuid := private.assigned_member_id(p_piece_id);
+begin
+  insert into public.piece_drafts (piece_id, member_id, storage, updated_at)
+  values (p_piece_id, v_member_id, p_storage, now())
+  on conflict (piece_id, member_id)
+  do update set storage = excluded.storage, updated_at = now();
+
+  update public.piece_assignments
+  set status = 'in_progress', updated_at = now()
+  where piece_id = p_piece_id and member_id = v_member_id and status in ('pending', 'in_progress');
 end;
 $function$;
 
@@ -284,6 +309,7 @@ $function$;
 
 revoke all on function private.owned_project_ids() from public, anon, authenticated, service_role;
 revoke all on function public.mark_piece_opened(uuid) from public, anon, authenticated, service_role;
+revoke all on function public.save_draft(uuid, jsonb) from public, anon, authenticated, service_role;
 revoke all on function public.owner_projects() from public, anon, authenticated, service_role;
 revoke all on function public.owner_project(uuid) from public, anon, authenticated, service_role;
 revoke all on function public.owner_piece(uuid, uuid) from public, anon, authenticated, service_role;
@@ -291,6 +317,7 @@ revoke all on function public.factory_set_owner(text, text, text) from public, a
 
 grant execute on function private.owned_project_ids() to authenticated;
 grant execute on function public.mark_piece_opened(uuid) to authenticated;
+grant execute on function public.save_draft(uuid, jsonb) to authenticated;
 grant execute on function public.owner_projects() to authenticated;
 grant execute on function public.owner_project(uuid) to authenticated;
 grant execute on function public.owner_piece(uuid, uuid) to authenticated;

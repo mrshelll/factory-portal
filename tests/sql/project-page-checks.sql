@@ -196,7 +196,8 @@ begin
   --     with people = 2: the members with an assignment (Ana and Beto), not Olga (the owner, with none)
   --     nor a stakeholder added without any (Idle, removed again at the end of this check);
   --     last_response_at follows Ana's send. As Ana it is []. As Pía, pp-check-other counts 2: Olga
-  --     and Pía herself, the owner, who has an assignment there.
+  --     and Pía herself, the owner, who has an assignment there. Ana's first save moves her piece to
+  --     in_progress, and a second save moves its updated_at again (save_draft, redefined here).
   insert into public.project_members (project_id, email, role, display_name)
   values (v_project_id, v_idle, 'stakeholder', 'Idle')
   returning id into v_idle_id;
@@ -221,6 +222,22 @@ begin
      or v_elem -> 'people' is distinct from '2'::jsonb
      or v_elem -> 'last_response_at' is distinct from 'null'::jsonb then
     raise exception 'project-page (4): before the send, Olga''s project is %', v_elem;
+  end if;
+
+  -- now() does not move inside the transaction: updated_at is set back by hand before the second save.
+  update public.piece_assignments set updated_at = now() - interval '30 minutes'
+  where piece_id = v_qa and member_id = v_ana_id and status = 'in_progress';
+  if not found then
+    raise exception 'project-page (4): Ana''s first save did not move her piece to in_progress';
+  end if;
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
+  perform public.save_draft(v_qa, v_ana_draft);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  if not exists (select 1 from public.piece_assignments
+                 where piece_id = v_qa and member_id = v_ana_id and status = 'in_progress' and updated_at = now()) then
+    raise exception 'project-page (4): a second save while in progress did not move updated_at';
   end if;
 
   perform set_config('role', 'authenticated', true);
@@ -518,13 +535,27 @@ begin
   v_checks := v_checks + 1;
 
   -- (8) change_requests in owner_project carry text and late and never payload nor storage, even when
-  --     the request was made with a storage. Ana's piece is closed first (fetched and received).
+  --     the request was made with a storage. Ana's piece is closed first (fetched and received); a save
+  --     on it then keeps its status and its updated_at, so the owner's «Recibida el» does not move.
   perform set_config('role', 'service_role', true);
   perform public.factory_mark_fetched(array[v_r1, v_r2]);
   v_res := public.factory_mark_received(array[v_r2]);
   perform set_config('role', v_admin, true);
   if v_res is distinct from jsonb_build_array(v_r2) then
     raise exception 'project-page (8): Ana''s piece did not close: %', v_res;
+  end if;
+  update public.piece_assignments set updated_at = now() - interval '20 minutes'
+  where piece_id = v_qa and member_id = v_ana_id
+  returning updated_at into v_updated_at;
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
+  perform public.save_draft(v_qa, v_ana_draft);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  if not exists (select 1 from public.piece_assignments
+                 where piece_id = v_qa and member_id = v_ana_id and status = 'received'
+                   and updated_at = v_updated_at) then
+    raise exception 'project-page (8): a save on a received piece moved its status or its updated_at';
   end if;
 
   perform set_config('role', 'authenticated', true);
@@ -702,7 +733,8 @@ begin
 
   -- (12) grants: authenticated cannot execute factory_set_owner; anon cannot execute any of the five
   --      new functions (each call would succeed with execute, so only the grant stops it); all six
-  --      are security definer with an empty search_path and only the expected caller has execute.
+  --      are security definer with an empty search_path and only the expected caller has execute;
+  --      save_draft, redefined here, keeps the baseline's: definer, empty search_path, authenticated only.
   begin
     perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_olga)::text, true);
@@ -759,6 +791,17 @@ begin
     and not has_function_privilege('authenticated', p.oid, 'execute');
   if v_count <> 1 then
     raise exception 'project-page (12): factory_set_owner is not definer, empty search_path and service_role-only';
+  end if;
+  select count(*) into v_count
+  from pg_proc p
+  where p.oid = to_regprocedure('public.save_draft(uuid, jsonb)')
+    and p.prosecdef
+    and p.proconfig @> array['search_path=""']
+    and has_function_privilege('authenticated', p.oid, 'execute')
+    and not has_function_privilege('anon', p.oid, 'execute')
+    and not has_function_privilege('service_role', p.oid, 'execute');
+  if v_count <> 1 then
+    raise exception 'project-page (12): save_draft is not definer, empty search_path and authenticated-only';
   end if;
   if to_regprocedure('private.owned_project_ids()') is null
      or to_regprocedure('public.mark_piece_opened(uuid)') is null
