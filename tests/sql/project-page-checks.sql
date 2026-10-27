@@ -41,6 +41,7 @@ declare
   v_status text;
   v_res jsonb;
   v_elem jsonb;
+  v_rows jsonb;
   v_count integer;
   v_updated_at timestamptz;
   v_opened_at timestamptz;
@@ -283,6 +284,7 @@ begin
   --     send with storage. Beto's draft, collected as a partial response by a new version with
   --     p_replace_in_progress (and given a storage and the newest date by hand), is never sent_at and
   --     makes nothing readable; neither does a partial on Ana's piece. No draft text comes back.
+  --     owner_projects still counts 2 people: Beto's two assignments (fb and fb2) are one person.
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_beto)::text, true);
   perform public.save_draft(v_fb, v_beto_draft);
@@ -394,6 +396,14 @@ begin
   perform set_config('request.jwt.claims', '', true);
   if (v_res -> 0 ->> 'last_response_at')::timestamptz is distinct from v_r1_at then
     raise exception 'project-page (5): a partial response moved last_response_at to %', v_res -> 0 -> 'last_response_at';
+  end if;
+  if (select count(*) from public.piece_assignments where piece_id in (v_qa, v_fb, v_fb2)) <> 3
+     or (select count(*) from public.piece_assignments where member_id = v_beto_id) <> 2 then
+    raise exception 'project-page (5): the project should have 3 assignments, 2 of them Beto''s';
+  end if;
+  if v_res -> 0 -> 'people' is distinct from '2'::jsonb then
+    raise exception 'project-page (5): owner_projects counts % people, expected 2 (Ana and Beto)',
+      v_res -> 0 -> 'people';
   end if;
   v_checks := v_checks + 1;
 
@@ -707,8 +717,10 @@ begin
   v_checks := v_checks + 1;
 
   -- (11) isolation unchanged: Beto reads none of Ana's assignments, responses, drafts and change
-  --      requests (he still reads his own); Ana, now an owner, still reads only her own rows. No
-  --      policy reads through the owner.
+  --      requests (he still reads his own); Ana, now an owner, still reads only her own rows. Olga,
+  --      the owner, cannot save, send, ask for a change nor record an opening on Ana's piece (each call
+  --      raises 42501 and Ana's rows stay as they were), and reads none of Ana's drafts or change
+  --      requests. No policy reads through the owner.
   if (select count(*) from public.piece_assignments where member_id = v_ana_id) = 0
      or (select count(*) from public.piece_responses where member_id = v_ana_id) = 0
      or (select count(*) from public.piece_drafts where member_id = v_ana_id) = 0
@@ -740,6 +752,50 @@ begin
   end if;
   perform set_config('role', v_admin, true);
   perform set_config('request.jwt.claims', '', true);
+
+  -- Ana's rows, read as the admin, before and after Olga's calls.
+  v_rows := jsonb_build_object(
+       'assignments', (select jsonb_agg(to_jsonb(a) order by a.piece_id)
+                       from public.piece_assignments a where a.member_id = v_ana_id),
+       'drafts', (select jsonb_agg(to_jsonb(d) order by d.piece_id)
+                  from public.piece_drafts d where d.member_id = v_ana_id),
+       'responses', (select jsonb_agg(to_jsonb(r) order by r.id)
+                     from public.piece_responses r where r.member_id = v_ana_id),
+       'change_requests', (select jsonb_agg(to_jsonb(c) order by c.id)
+                           from public.piece_change_requests c where c.member_id = v_ana_id));
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_olga)::text, true);
+  foreach v_fn in array array['save_draft', 'submit_response', 'request_change', 'mark_piece_opened'] loop
+    begin
+      case v_fn
+        when 'save_draft' then perform public.save_draft(v_qa, v_olga_draft);
+        when 'submit_response' then perform public.submit_response(v_qa, v_olga_payload, v_olga_storage);
+        when 'request_change' then perform public.request_change(v_qa, 'Olga pide un cambio por Ana', v_olga_draft);
+        when 'mark_piece_opened' then perform public.mark_piece_opened(v_qa);
+      end case;
+      raise exception 'project-page (11): Olga, the owner, could call % on Ana''s piece', v_fn;
+    exception when insufficient_privilege then
+      null;
+    end;
+  end loop;
+  if (select count(*) from public.piece_drafts where member_id = v_ana_id) <> 0
+     or (select count(*) from public.piece_change_requests where member_id = v_ana_id) <> 0 then
+    raise exception 'project-page (11): Olga, the owner, reads Ana''s drafts or change requests';
+  end if;
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  if jsonb_build_object(
+       'assignments', (select jsonb_agg(to_jsonb(a) order by a.piece_id)
+                       from public.piece_assignments a where a.member_id = v_ana_id),
+       'drafts', (select jsonb_agg(to_jsonb(d) order by d.piece_id)
+                  from public.piece_drafts d where d.member_id = v_ana_id),
+       'responses', (select jsonb_agg(to_jsonb(r) order by r.id)
+                     from public.piece_responses r where r.member_id = v_ana_id),
+       'change_requests', (select jsonb_agg(to_jsonb(c) order by c.id)
+                           from public.piece_change_requests c where c.member_id = v_ana_id))
+     is distinct from v_rows then
+    raise exception 'project-page (11): Olga''s calls on Ana''s piece changed Ana''s rows';
+  end if;
   if exists (select 1 from pg_policies
              where schemaname = 'public'
                and tablename in ('projects', 'project_members', 'pieces', 'piece_assignments', 'piece_drafts',
