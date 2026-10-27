@@ -39,10 +39,11 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
 2. **Home** («Tus proyectos»): the projects the person belongs to, one row each, with what is left to
    answer; a project the person owns says so (with its people and the last response).
    The lists never fetch `pieces.html`; it is fetched only when a piece is opened.
-3. **A project's page** (`#/project/<id>`): the person's own items under «Lo que se te pidió», grouped
-   as before, with status (not started, in progress, sent, received) and date, and a line saying that
-   the project's owner can see when they open what was shared and what they send. Every item opens
-   at `#/piece/<id>`. See **The owner's part** below.
+3. **A project's page** (`#/project/<id>`): first, under the title band, the line «El responsable del
+   proyecto ve cuándo abres lo que te compartimos y lo que envías.» (`projectOwnerSees`; an owner with
+   nothing asked of them does not get it); then the person's own items under «Lo que se te pidió», grouped
+   as before, with status (not started, in progress, sent, received) and date. Every item opens
+   at `#/piece/<id>`. The owner's part comes last. See **The owner's part** below.
 4. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
@@ -363,10 +364,9 @@ screens save, send and ask nothing and never read a draft.
 **Visual manual.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
 `sign-in-code.html` (pattern `formulario`) and `home-empty.html` (pattern `lista`); with `--questions`, also
 `home-projects.html` and `project-page.html` (`lista`) and `project-received.html` (`lista`, a project with closed
-pieces), which goes through `verifica-pantalla.mjs` only; with `--questions`, `--flow` and `--demo`, also
-`project-owner.html` (`lista`, an owned project with the owner's part). That is six screens measured, seven
-snapshots in all. Each one is the rendered DOM without scripts, next to a copy of `css/` and `brand/`, so it
-looks exactly as in the app. With `--factory`, every screen goes through the factory's
+pieces); with `--questions`, `--flow` and `--demo`, also `project-owner.html` (`lista`, an owned project with the
+owner's part). That is seven snapshots, and all seven are measured. Each one is the rendered DOM without scripts,
+next to a copy of `css/` and `brand/`, so it looks exactly as in the app. With `--factory`, every screen goes through the factory's
 `design-system/assets/verifica-pantalla.mjs` (the visual manual's checks and axe) at 320, 768 and
 1440 px, in light and dark, and each run is one check (its JSON is saved next to the screen). To
 re-run one by hand:
@@ -376,10 +376,11 @@ node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/h
   --patron lista --ancho 768 --color-scheme dark
 ```
 
-**The portal's frame.** With `--factory`, the same six screens also go through the factory's
+**The portal's frame.** With `--factory`, the same seven screens (`sign-in-email`, `sign-in-code`, `home-projects`,
+`project-page`, `home-empty`, `project-owner` and `project-received`) also go through the factory's
 `design-system/assets/geometria.mjs`, the frame measure the factory's pieces are held to, at 320, 672, 1056 and
 1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
-parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the six screens (MAR-02), and
+parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the seven screens (MAR-02), and
 every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
 names what fails. The piece screen, and the owner's read-only piece screen, are checked at the same widths and at 1600: its frame on the other screens' edges
 with the page margin on both sides, and its iframe over the frame's box, as wide as the factory's

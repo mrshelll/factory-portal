@@ -923,10 +923,11 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   await snapshot(emptyPage, "home-empty", "lista");
   // anatomia-del-patron and accion (home-empty): the empty home is the list it replaces, with one row. The list's own top
   // rule (the base's .rows), never a rule of the empty state's own; its title, message and notice on the title's edge as
-  // every other screen's body; its way out right after the notice that explains it, in the same column and at every width,
-  // as on sign-in the action goes under its field: the main action as wide as the body up to the form measure like the
-  // sign-in buttons, «Actualizar» under it on the same edge. Nothing of the row sits apart on its right. The main action is
-  // a 44 px target at every width (FUN-18). The view does not reach FUN-43's 60 %: its exception is in GEOMETRY_EXCEPTIONS.
+  // every other screen's body. «Entrar con otro correo» lives inside the notice that explains it, as the notice's own
+  // action (the base's link action in its .notice-actions); «Actualizar», the page's primary action, comes right after the
+  // notice, in the same column and at every width, as on sign-in the action goes under its field: as wide as the body up to
+  // the form measure like the sign-in buttons, on the same edge. Nothing of the row sits apart on its right. Both are 44 px
+  // targets at every width (FUN-18). The view does not reach FUN-43's 60 %: its exception is in GEOMETRY_EXCEPTIONS.
   for (const width of [320, 768, 1440]) {
     await emptyPage.setViewportSize({ width, height: width < 672 ? 640 : 900 });
     const g = await emptyPage.evaluate(() => {
