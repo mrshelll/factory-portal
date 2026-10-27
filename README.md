@@ -209,9 +209,11 @@ anything. `index.html` loads `brand/ninben.css`, then `brand/ninben-components.c
 Font License texts travel with them). The logo is read once from `brand/logo.svg` and placed inline,
 so its stroke follows the brand's signal colour in light and dark. `brand/ninben-components.css` is the
 base the portal and the three pieces share: the three text sizes, the 4/8 spacing scale, the frame, and
-the notices, fields, buttons, actions, rows and status (`.status--active` while a piece is in progress,
-`.status--done` once it is sent). `css/portal.css` keeps only the portal's own: the masthead, the page
-head, the sign-in form and its code field, the list rows' link and the piece view.
+the notices, fields, buttons, actions, rows and status (`.status--done` once a piece is received). `css/portal.css`
+keeps only the portal's own: the masthead, the page head, the sign-in form and its code field, the list rows' link,
+the piece view and the rest of the state dots. The portal never uses the base's ink-filled `.status--active`: inside
+the pieces that dot means «Con observaciones» or «Pidió un cambio», so «En curso» is the portal's ink ring
+(`.status--in-progress`).
 
 The sign-in screens follow the visual manual's `formulario` pattern and home follows `lista`; their
 `data-rol` marks (`marco`, `cabecera`, `avisos`, `cuerpo`, `accion-principal`, `marca-producto`,
@@ -221,9 +223,9 @@ stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="mar
 notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
 after the form). The empty home has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top
 rule, and one row, its title and message at the reading measure, under them the base's section notice that asks to
-check the email they were invited with and, right after it in the same column at every width, its way out
-«Entrar con otro correo», the view's `accion-principal`, as wide as the body up to the form measure like the sign-in
-buttons, with «Actualizar» under it, as MAR-06 asks of an empty state. It does not reach FUN-43's 60 % from 1056 px and
+check the email they were invited with, carrying its own action «Entrar con otro correo» (the base's link action) and,
+right after it in the same column at every width, «Actualizar», the view's `accion-principal`, as wide as the body up
+to the form measure like the sign-in buttons, as MAR-06 asks of an empty state. It does not reach FUN-43's 60 % from 1056 px and
 carries that rule's empty-view exception, with its reason, in the geometry check. From 1056 px the rows of every list
 (home's projects, a project's pieces, the owner's entries) are three equal columns: the title, the meta line and the
 state or aside, each on the same x down the list (FUN-43, «el grupo tabular como tabla»); from 672 to 1056 px the state

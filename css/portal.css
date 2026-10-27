@@ -65,11 +65,11 @@ main { padding-block: var(--space-6) var(--space-7); }
 .loading { color: var(--muted); }
 /* Nothing shared yet: the empty state takes the shape of the list it replaces (the manual's «lista»): the list with its own
    top rule (the base's .rows) and one row (.row-item, below): its title and message at the reading measure, then what asks
-   the person to check the email they were invited with, the base's section notice (information, aviso-de-seccion), and
-   right after it, in the same column at every width, its way out, next to what explains it as on sign-in the action goes
-   under its field. The main action is the base's primary button, as on sign-in (a 48 px target): as wide as the body up to
-   the form measure, like the sign-in buttons. «Actualizar» follows it in the same group, so nothing of the block comes
-   after them (MAR-06). */
+   the person to check the email they were invited with, the base's section notice (information, aviso-de-seccion), which
+   carries its own action, «Entrar con otro correo», as every notice does (the base's link action in .notice-actions). Right
+   after the notice, in the same column at every width, the view's main action, «Actualizar»: what to do while nothing has
+   arrived is to look again. It is the base's primary button, as on sign-in (a 48 px target): as wide as the body up to the
+   form measure, like the sign-in buttons, and nothing of the block comes after it (MAR-06). */
 .empty .row-main { max-width: var(--measure-text); }
 .empty .notice { margin-top: var(--space-2); }
 .empty .row-title { font-size: var(--text-body); line-height: 1.4; }
@@ -109,9 +109,12 @@ main { padding-block: var(--space-6) var(--space-7); }
 .row-aside { color: var(--muted); font-size: var(--text-small); }
 
 /* One mark per state, all in the base's dot family (COM-13) and the same wherever the state shows; the word says it, the
-   dot repeats it: «Por empezar» the base's hollow grey; «La abrió» half filled in ink; «En curso» filled ink (base);
-   «Enviada» the green ring; «Recibida» filled green (base); «Reemplazada» the grey ring struck through. */
+   dot repeats it: «Por empezar» the base's hollow grey; «La abrió» half filled in ink; «En curso» the ink ring, hollow;
+   «Enviada» the green ring; «Recibida» filled green (base); «Reemplazada» the grey ring struck through. The portal never
+   draws a state with the base's ink-filled dot (.status--active): inside the pieces that dot means «Con observaciones» or
+   «Pidió un cambio», so along the owner's path one colour keeps one meaning. */
 .status--opened .status-dot { --dot: var(--ink); --dot-fill: linear-gradient(90deg, var(--ink) 50%, transparent 50%); }
+.status--in-progress .status-dot { --dot: var(--ink); }
 .status--sent .status-dot { --dot: var(--ok); }
 .status--replaced .status-dot { --dot-fill: linear-gradient(135deg, transparent 40%, var(--muted) 40%, var(--muted) 60%, transparent 60%); }
 

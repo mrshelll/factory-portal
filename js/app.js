@@ -458,8 +458,9 @@ async function sessionEnded() {
 
 const STATUS_KEYS = { pending: "statusPending", in_progress: "statusInProgress", submitted: "statusSubmitted", received: "statusReceived" };
 // The base's status dots (brand/ninben-components.css), one mark per state, the same wherever the state shows (COM-13):
-// pending is the plain hollow dot; sent is the green ring (portal.css), received the filled green.
-const STATUS_CLASSES = { pending: "status", in_progress: "status status--active", submitted: "status status--sent", received: "status status--done" };
+// pending is the plain hollow dot; in progress the ink ring and sent the green ring (portal.css), received the filled
+// green. Never the base's ink-filled .status--active: the pieces draw «Con observaciones» with it.
+const STATUS_CLASSES = { pending: "status", in_progress: "status status--in-progress", submitted: "status status--sent", received: "status status--done" };
 const KIND_KEYS = { questions: "kindQuestions", flow_review: "kindFlowReview", demo_review: "kindDemoReview" };
 // Nothing left to answer: sent, received, or a replaced version (the list only keeps the ones the person had sent).
 const DONE = new Set(["submitted", "received", "replaced"]);
@@ -549,18 +550,19 @@ async function showHome(viewId) {
   if (!rows.length) {
     // An empty state (EST-01) with the shape of the list it replaces: the list (its own top rule) with one row: the message,
     // the base's section notice (information) that asks the person to check the email they were invited with
-    // (aviso-de-seccion) and, right after it in the same column at every width, its direct way out, the view's primary
-    // action, with «Actualizar» under it in the same group, so nothing of the block follows them (MAR-06). Divs, not a list:
-    // there is nothing to enumerate.
+    // (aviso-de-seccion), carrying its own action, «Entrar con otro correo», as the base's notices do; and, right after it
+    // in the same column at every width, the view's primary action, «Actualizar», so nothing of the block follows it
+    // (MAR-06). Divs, not a list: there is nothing to enumerate.
     layout.body.append(h("section", { class: "rows empty", "data-rol": "vacio", "aria-labelledby": "empty-title" },
       h("div", { class: "row" }, h("div", { class: "row-item" },
         h("div", { class: "row-main" },
           h("h2", { id: "empty-title", class: "row-title" }, t("emptyTitle")),
           h("p", {}, t("emptyBody", { email: user.email })),
-          h("div", { class: "notice" }, h("p", {}, t("emptyHint"))),
+          h("div", { class: "notice" }, h("p", {}, t("emptyHint")),
+            h("div", { class: "notice-actions" },
+              h("button", { type: "button", class: "link-button", onclick: () => signOut(layout.notices) }, t("emptyAction")))),
           h("div", { class: "empty-actions" },
-            h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: () => signOut(layout.notices) }, t("emptyAction")),
-            h("button", { type: "button", class: "link-button", onclick: route }, t("refresh"))))))));
+            h("button", { type: "button", class: "button button--primary", "data-rol": "accion-principal", onclick: route }, t("refresh"))))))));
     return;
   }
   layout.body.append(h("ul", { class: "rows" }, rows.map(projectRow)));
@@ -577,9 +579,10 @@ async function showHome(viewId) {
 const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusOpened", in_progress: "ownerStatusInProgress",
   submitted: "ownerStatusSubmitted", received: "ownerStatusReceived", replaced: "ownerStatusReplaced" };
 // The base's status dots (COM-13), one mark per state and the same as in the person's list: «Por empezar» hollow grey,
-// «La abrió» half filled, «En curso» filled, «Enviada» the green ring, «Recibida» filled green, «Reemplazada» the grey
-// ring struck through (the modifiers are in portal.css, with base tokens only).
-const OWNER_STATUS_CLASSES = { pending: "status", opened: "status status--opened", in_progress: "status status--active",
+// «La abrió» half filled, «En curso» the ink ring, «Enviada» the green ring, «Recibida» filled green, «Reemplazada» the
+// grey ring struck through (the modifiers are in portal.css, with base tokens only). Never the ink-filled dot, which in
+// the pieces the owner opens from here means «Con observaciones» or «Pidió un cambio».
+const OWNER_STATUS_CLASSES = { pending: "status", opened: "status status--opened", in_progress: "status status--in-progress",
   submitted: "status status--sent", received: "status status--done", replaced: "status status--replaced" };
 
 // The date next to the state, saying which one it is (latestActivityKind).

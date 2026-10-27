@@ -912,8 +912,12 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   const empty = await emptyPage.evaluate(() => ({
     title: document.querySelector(".empty h2")?.textContent,
     action: document.querySelector(".empty [data-rol=accion-principal]")?.textContent,
+    otherEmail: [...document.querySelectorAll(".empty .notice .notice-actions button")].map((b) => b.textContent),
   }));
-  check("app: empty state explains and offers another email", empty.title === "Aquí verás lo que te compartan" && empty.action === "Entrar con otro correo", JSON.stringify(empty));
+  // accion (home-empty, judges round 5): what to do while nothing has arrived is to look again, so «Actualizar» is the view's
+  // main action; signing in with another email is the notice's own action, next to what explains it.
+  check("app: empty state explains, its main action is «Actualizar», and its notice offers another email", empty.title === "Aquí verás lo que te compartan" &&
+    empty.action === "Actualizar" && JSON.stringify(empty.otherEmail) === JSON.stringify(["Entrar con otro correo"]), JSON.stringify(empty));
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
   await snapshot(emptyPage, "home-empty", "lista");
@@ -937,25 +941,32 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       const bodyBox = body.getBoundingClientRect(), cs = getComputedStyle(body);
       const vacio = document.querySelector("[data-rol=vacio]");
       const action = document.querySelector("[data-rol=vacio] [data-rol=accion-principal]");
-      const refresh = [...document.querySelectorAll("[data-rol=vacio] button")].find((b) => b.textContent === "Actualizar");
+      const other = [...document.querySelectorAll("[data-rol=vacio] button")].find((b) => b.textContent === "Entrar con otro correo");
       const group = action && action.closest(".empty-actions");
       const ruled = (el) => { const s = getComputedStyle(el); return parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"; };
       const list = vacio && (vacio.matches(".rows") ? vacio : vacio.querySelector(".rows"));
       const notice = document.querySelector("[data-rol=vacio] .notice");
+      const hint = notice && notice.querySelector(":scope > p");
       return { h1: textBox(document.querySelector("h1"))?.x ?? null, title: textBox(document.querySelector("[data-rol=vacio] h2")),
         message: textBox(document.querySelector("[data-rol=vacio] .row-main > p")), messageText: document.querySelector("[data-rol=vacio] .row-main > p")?.textContent ?? null,
-        notice: notice ? { box: box(notice), text: notice.textContent, className: notice.className, inMain: Boolean(notice.parentElement && notice.parentElement.matches(".row-main")),
+        notice: notice ? { box: box(notice), text: hint ? hint.textContent : null, textBox: textBox(hint), className: notice.className, inMain: Boolean(notice.parentElement && notice.parentElement.matches(".row-main")),
           afterMessage: Boolean(notice.previousElementSibling && notice.previousElementSibling.matches("p")), stripe: getComputedStyle(notice).borderInlineStartWidth,
           accent: getComputedStyle(notice).borderInlineStartColor, muted: (() => { const el = document.createElement("span"); el.style.color = "var(--muted)"; body.append(el);
             const c = getComputedStyle(el).color; el.remove(); return c; })() } : null,
-        action: box(action), refresh: box(refresh),
+        action: box(action), actionText: action ? action.textContent : null, actionPrimary: Boolean(action && action.matches(".button.button--primary")),
+        // «Entrar con otro correo»: the notice's own action, as every notice carries its actions (the base's .notice-actions),
+        // drawn as the base's link action, never the primary button.
+        other: other ? { box: box(other), inNotice: Boolean(notice && other.closest(".notice-actions") && notice.contains(other)),
+          link: other.matches(".link-button") && !other.matches(".button") } : null,
         body: { x: Math.round(bodyBox.left + parseFloat(cs.paddingLeft)), der: Math.round(bodyBox.right - parseFloat(cs.paddingRight)),
           w: Math.round(bodyBox.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) }, measure,
         list: Boolean(list), rows: list ? list.querySelectorAll(":scope > .row").length : 0, listRule: Boolean(list && ruled(list)),
         // The way out: one group, the last thing in the row's main column and right after the notice; no aside in the row.
         afterNotice: Boolean(group && notice && group.parentElement === notice.parentElement && group.previousElementSibling === notice &&
           !group.nextElementSibling && group.parentElement.matches(".row-main") && list && list.contains(group)),
-        refreshInGroup: Boolean(group && refresh && group.contains(refresh)),
+        // The group holds the main action only; the row has no other control outside the notice.
+        groupOnly: Boolean(group && group.querySelectorAll("button, a").length === 1),
+        loose: vacio ? [...vacio.querySelectorAll("button, a")].filter((el) => el !== action && !(notice && notice.contains(el))).map((el) => el.textContent) : null,
         asides: vacio ? vacio.querySelectorAll(".row-aside").length : null,
         // Only the list draws a top rule: the empty state, the row and what holds its text, none. A control's own border and the
         // base's section notice (its sheet, the component's own) are not rules of the empty state.
@@ -964,7 +975,8 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
     });
     const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
     check(`home-empty ${width}px: the empty home is the list it replaces: one row of the base's list, its top rule the list's, its way out right after the notice in the row's main column, no aside`,
-      g.list && g.rows === 1 && g.listRule && g.afterNotice && g.refreshInGroup && g.asides === 0 && Array.isArray(g.otherRules) && g.otherRules.length === 0,
+      g.list && g.rows === 1 && g.listRule && g.afterNotice && g.groupOnly && Array.isArray(g.loose) && g.loose.length === 0 && g.asides === 0 &&
+      Array.isArray(g.otherRules) && g.otherRules.length === 0,
       JSON.stringify(g));
     check(`home-empty ${width}px: its title and its message start on the title's edge, not centred`,
       g.h1 !== null && g.title && near(g.title.x, g.h1) && g.message && near(g.message.x, g.h1), JSON.stringify(g));
@@ -974,13 +986,17 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       g.notice && g.notice.text === EMPTY.hint && g.notice.className === "notice" && g.notice.inMain && g.notice.afterMessage &&
       parseFloat(g.notice.stripe) > 1 && g.notice.accent === g.notice.muted && near(g.notice.box.x, g.h1) &&
       g.messageText === EMPTY.body(USER.email) && !g.messageText.includes(EMPTY.hint), JSON.stringify({ notice: g.notice, message: g.messageText }));
-    check(`home-empty ${width}px: its main action is a 44 px target (FUN-18)`, g.action && g.action.h >= 44, JSON.stringify(g.action));
-    // accion (home-empty): right under the notice, at most a gap of the scale's 16 px, on the title's edge; never on the
-    // row's right.
-    check(`home-empty ${width}px: right under the notice, the main action takes the body's width up to the form measure as the sign-in buttons do, «Actualizar» under it on the same edge`,
-      g.action && g.notice && g.action.top >= g.notice.box.bottom && g.action.top - g.notice.box.bottom <= 16 && near(g.action.x, g.h1) &&
-      near(g.action.w, Math.min(g.body.w, g.measure)) && g.refresh && g.refresh.top >= g.action.bottom && near(g.refresh.x, g.h1) &&
-      g.refresh.der < g.body.x + g.body.w / 2, JSON.stringify(g));
+    check(`home-empty ${width}px: its main action and the notice's «Entrar con otro correo» are 44 px targets (FUN-18)`,
+      g.action && g.action.h >= 44 && g.other && g.other.box.h >= 44, JSON.stringify({ action: g.action, other: g.other }));
+    // accion (home-empty, judges round 5): «Actualizar» is the view's primary button, right under the notice, at most a gap
+    // of the scale's 16 px, on the title's edge, never on the row's right; «Entrar con otro correo» is the notice's own
+    // action, the base's link action inside it, on its text's edge.
+    check(`home-empty ${width}px: right under the notice, «Actualizar» is the primary button, as wide as the body up to the form measure as the sign-in buttons are`,
+      g.action && g.notice && g.actionText === "Actualizar" && g.actionPrimary && g.action.top >= g.notice.box.bottom &&
+      g.action.top - g.notice.box.bottom <= 16 && near(g.action.x, g.h1) && near(g.action.w, Math.min(g.body.w, g.measure)), JSON.stringify(g));
+    check(`home-empty ${width}px: «Entrar con otro correo» is the notice's own action, the base's link action, under its text on its edge`,
+      g.other && g.other.inNotice && g.other.link && g.notice && g.notice.textBox && near(g.other.box.x, g.notice.textBox.x) &&
+      g.other.box.top >= g.notice.textBox.bottom && g.other.box.bottom <= g.notice.box.bottom, JSON.stringify({ other: g.other, notice: g.notice }));
     if (width >= 672) await emptyPage.screenshot({ path: join(outDir, `home-empty-${width}.png`) });
   }
   await emptyContext.close();
@@ -2335,6 +2351,21 @@ async function projectPageChecks(browser, base, html) {
     check("old-email-link: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
+
+  // color-con-un-significado (judges, round 5): in the person's own list a piece with a saved draft reads «En curso» with the
+  // same mark as in the owner's part, the ink ring, never the ink-filled dot the pieces keep for «Con observaciones».
+  {
+    const backend = newBackend(html);
+    backend.draft = { other: "x" };
+    const { context, page } = await open(backend, `#/project/${IDS.project}`);
+    await page.waitForSelector(`a[href="#/piece/${IDS.questions}"] .status`, { timeout: 10000 }).catch(() => {});
+    const drawn = await portalDots(page);
+    check("project-page: a piece in progress in the person's list is «En curso» with the ink ring (hollow, its border the ink)",
+      drawn.dots.some((d) => d.word === "En curso") && drawn.rings.length === 1 && drawn.rings[0], JSON.stringify(drawn));
+    check("project-page: no state of the person's list is drawn with the ink-filled dot", drawn.dots.length > 0 && drawn.inkFilled.length === 0,
+      JSON.stringify(drawn));
+    await context.close();
+  }
 }
 
 // ---- the owner's part of the project page and the owner's read-only piece ----------------------------------
@@ -2497,6 +2528,23 @@ const ownerDots = (page) => page.evaluate(() => Object.fromEntries([...document.
   const cs = getComputedStyle(s.querySelector(".status-dot"));
   return [s.textContent, [cs.borderTopColor, cs.borderTopStyle, cs.backgroundColor, cs.backgroundImage].join(" | ")];
 })));
+// Every state dot in the body as drawn, by its word (the person's list and the owner's part alike), and the page's ink and
+// muted colours read off probes. An ink-filled dot is one whose fill is the ink: the pieces' mark for «Con observaciones» and
+// «Pidió un cambio», so the portal never draws a state with it (one colour, one meaning along the owner's path).
+const portalDots = (page) => page.evaluate(() => {
+  const body = document.querySelector("[data-rol=cuerpo]");
+  const probe = (css) => { const el = document.createElement("span"); el.style.color = css; body.append(el); const c = getComputedStyle(el).color; el.remove(); return c; };
+  const ink = probe("var(--ink)"), muted = probe("var(--muted)");
+  const dots = [...body.querySelectorAll(".status")].map((s) => {
+    const cs = getComputedStyle(s.querySelector(".status-dot"));
+    return { word: s.textContent.trim(), border: cs.borderTopColor, style: cs.borderTopStyle, width: parseFloat(cs.borderTopWidth),
+      fill: cs.backgroundColor, image: cs.backgroundImage };
+  });
+  const clear = (d) => d.fill === "rgba(0, 0, 0, 0)" && d.image === "none";
+  return { ink, muted, dots, inkFilled: dots.filter((d) => d.fill === ink).map((d) => d.word),
+    // «En curso»: the ink ring, hollow (no fill at all), its border the ink.
+    rings: dots.filter((d) => d.word === "En curso").map((d) => d.border === ink && d.style === "solid" && d.width > 0 && clear(d)) };
+});
 // Each entry of the owner's part as laid out: its name line (name and link), its state word, its date line, the link's box,
 // the line heights and the row's content height (without its padding).
 const ownerEntries = (page) => page.evaluate(() => [...document.querySelectorAll("[data-rol=cuerpo] .owner-piece li.row")].map((li) => {
@@ -2692,6 +2740,16 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const marks = Object.values(S).map((word) => dots[word]);
     check("owner-project: each state has its own dot (no two states drawn alike), in the base's dot family", marks.every(Boolean) &&
       new Set(marks).size === marks.length, JSON.stringify(dots));
+    // color-con-un-significado (judges, round 5): inside the pieces the ink-filled dot means «Con observaciones» or «Pidió un
+    // cambio»; the portal's «En curso» is the ink ring instead, hollow, apart from «Por empezar»'s grey ring and «La abrió»'s
+    // half fill, and no state of the owner's part is ink-filled.
+    const drawn = await portalDots(page);
+    const mark = (word) => dots[word] || null;
+    check("owner-project: «En curso» is the ink ring (hollow, its border the ink), not «Por empezar»'s grey ring nor «La abrió»'s half fill",
+      drawn.rings.length === 1 && drawn.rings[0] && mark(S.in_progress) !== mark(S.pending) && mark(S.in_progress) !== mark(S.opened),
+      JSON.stringify({ ink: drawn.ink, muted: drawn.muted, dots }));
+    check("owner-project: no state of the owner's part is drawn with the ink-filled dot (the pieces' «Con observaciones» and «Pidió un cambio»)",
+      drawn.dots.length > 0 && drawn.inkFilled.length === 0, JSON.stringify(drawn));
     check("owner-project: the page reads the owner's part through owner_project, for this project", backend.ownerCalls.some((c) => c.rpc === "owner_project" &&
       c.p_project_id === IDS.ownedProject && c.sub === USER.id), JSON.stringify(backend.ownerCalls));
     check("owner-project: 360px no horizontal scroll", await noHorizontalScroll(page));
