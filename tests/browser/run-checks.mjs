@@ -676,6 +676,7 @@ async function mockedContext(browser, { width = 360, height = 780, locale = "en-
           if (delay) await sleep(delay);
         }
         if (rpc === "my_decisions" && backend.myDecisionsFails) return route.abort("internetdisconnected");
+        if (rpc === "my_decisions" && backend.myDecisionsDelayMs) await sleep(backend.myDecisionsDelayMs);
         // ownerDecisionsFails: "error" (the server answers 500) or "network" (it cannot be reached).
         if (rpc === "owner_decisions" && backend.ownerDecisionsFails === "network") return route.abort("internetdisconnected");
         if (rpc === "owner_decisions" && backend.ownerDecisionsFails === "error") return json({ code: "XX000", message: "boom", details: null, hint: null }, 500);
@@ -3975,6 +3976,27 @@ async function decisionsChecks(browser, base, html) {
       landed.mark === DECISIONS.marks.confirmed && landed.answered === today && (await liveText(page)) === today &&
       decisionCalls(backend, "my_decisions").length === 3, JSON.stringify({ sends, landed, live: await liveText(page), loads: decisionCalls(backend, "my_decisions").length }));
     check("decisions: in-flight-send-survives-reload: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  // no-second-send-while-reading-again: d's answer lands after the section was drawn again, so the page reads the section
+  // once more (slow here). Until that read and the confirmation are done, d's send stays off: a second send of its form in
+  // that window does not go.
+  {
+    const { context, page, errors, backend } = await sendingWhileReloaded();
+    backend.myDecisionsDelayMs = 1500;
+    const reading = await waitFor(() => decisionCalls(backend, "my_decisions").length === 3, 6000);
+    await sleep(200);
+    const during = pointOf(await decisionsSection(page), DKEY.d);
+    await page.$eval(`.decision[data-key="${DKEY.d}"] form`, (form) => form.requestSubmit()).catch(() => {});
+    const landed = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.answered && q.button && !q.button.disabled ? q : null; }, 6000);
+    await sleep(500);
+    const sends = decisionCalls(backend, "answer_decision").filter((c) => c.p_key === DKEY.d);
+    check("decisions: no-second-send-while-reading-again: while the section is read again after d's answer landed, d's send stays off and says so",
+      reading && during && during.button && during.button.disabled && during.button.text === DECISIONS.sending, JSON.stringify({ reading, during }));
+    check("decisions: no-second-send-while-reading-again: a second send of d's form in that window does not go; d is confirmed once the read is done",
+      landed && landed.mark === DECISIONS.marks.confirmed && landed.button.text === DECISIONS.send && sends.length === 1 &&
+      backend.decisions[IDS.project].answers.filter((x) => x.key === DKEY.d).length === 1, JSON.stringify({ landed, sends }));
+    check("decisions: no-second-send-while-reading-again: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
   {

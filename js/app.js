@@ -992,24 +992,29 @@ function decisionsSection({ projectId, viewId, points, live }) {
       sending.add(key);
       setSending(true);
       const result = await answerDecision(supabase, projectId, key, point.version, value, text);
-      sending.delete(key);
-      if (viewId !== state.viewId) return;
+      if (viewId !== state.viewId) { sending.delete(key); return; }
       // The point as shown now (a reload of the section may have drawn it again meanwhile), or null when it is gone.
       const current = () => shown.get(key) || null;
-      if (current()) current().setSending(false);
+      const doneSending = () => {
+        sending.delete(key);
+        if (current()) current().setSending(false);
+      };
       if (result.ok) {
         stale.delete(key);
         drafts.delete(key);
         const answer = { value, comment: text, version: point.version, created_at: result.createdAt || new Date().toISOString() };
-        if (current() && current().item === item) { confirm(answer); return; }
+        if (current() && current().item === item) { doneSending(); confirm(answer); return; }
         // The section was read again while this was sent: read it once more, so it shows this answer. Read or not (offline),
-        // the point as shown then says it was answered, announced, when it is still the version she answered (COM-16).
+        // the point as shown then says it was answered, announced, when it is still the version she answered (COM-16). Its
+        // send stays off until then (the reload draws it sending): there is no window to send the same answer twice.
         await reload();
-        if (viewId !== state.viewId) return;
+        if (viewId !== state.viewId) { sending.delete(key); return; }
+        doneSending();
         const now = current();
         if (now && now.item.isConnected && now.point.version === answer.version) now.confirm(answer);
         return;
       }
+      doneSending();
       const sayFailure = (text) => (current() || { showFailure }).showFailure(text);
       // The point changed while she read it: the section again, the point marked as changed, her choice and comment kept.
       if (result.error === "stale") {
