@@ -163,6 +163,89 @@ export async function markPieceOpened(client, pieceId) {
   }
 }
 
+// The «Decisiones» section. Its functions answer 42501 when the person is not in the list (or not the owner), and
+// PGRST202 on a database that does not have them yet; both mean «nothing for this person» rather than a failure.
+const NO_SECTION_CODES = new Set(["42501", "PGRST202"]);
+
+// The projects whose list has the person: [{ project_id, slug, name }]. [] on a database without the function; any other
+// error throws, as loadProjects' reads do.
+export async function loadDecisionProjects(client) {
+  const { data, error } = await client.rpc("decision_projects");
+  if (error) {
+    if (error.code === "PGRST202") return [];
+    throw error;
+  }
+  return Array.isArray(data) ? data.filter(isPlainObject) : [];
+}
+
+// The section for the person (my_decisions): { last_opened_at, points: [{ key, version, position, title, decided, basis,
+// mark, answer }] }, only their own answers. null when the person is not in the list or the database has no function.
+export async function loadMyDecisions(client, projectId) {
+  const { data, error } = await client.rpc("my_decisions", { p_project_id: projectId });
+  if (error) {
+    if (NO_SECTION_CODES.has(error.code)) return null;
+    throw error;
+  }
+  if (!isPlainObject(data)) return null;
+  return { last_opened_at: data.last_opened_at || null, points: Array.isArray(data.points) ? data.points.filter(isPlainObject) : [] };
+}
+
+// What a failed send is, by the server's code: PT409 the point changed while the person read it («stale»), 22023 the
+// value or the comment is not valid, P0002 the point is no longer published, 42501 the person is not in the list. Any
+// other failure (offline, ended session) is «network».
+const SEND_ERRORS = { PT409: "stale", "22023": "invalid", P0002: "gone", "42501": "denied" };
+const sendError = (error) => (error && Object.hasOwn(SEND_ERRORS, error.code) ? SEND_ERRORS[error.code] : "network");
+
+// The person answers one point, on the version the page showed. Never throws.
+// -> { ok: true, id, createdAt } | { ok: false, error: "stale" | "invalid" | "gone" | "denied" | "network" }
+export async function answerDecision(client, projectId, key, version, value, comment) {
+  try {
+    const { data, error } = await client.rpc("answer_decision", {
+      p_project_id: projectId, p_key: key, p_version: version, p_value: value, p_comment: comment ?? null,
+    });
+    if (error) return { ok: false, error: sendError(error) };
+    if (!isPlainObject(data)) return { ok: false, error: "network" };
+    return { ok: true, id: data.id, createdAt: data.created_at };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// The person writes something that is missing from the section. Never throws.
+// -> { ok: true, id } | { ok: false, error: "invalid" | "denied" | "network" }
+export async function proposeDecision(client, projectId, text) {
+  try {
+    const { data, error } = await client.rpc("propose_decision", { p_project_id: projectId, p_text: text });
+    if (error) return { ok: false, error: sendError(error) };
+    return { ok: true, id: data };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// «Abrió la sección»: the person opened it (the server keeps the last time). Never throws: offline, an ended session or a
+// database without the function must not stop the section.
+export async function markDecisionsOpened(client, projectId) {
+  try {
+    await client.rpc("mark_decisions_opened", { p_project_id: projectId });
+  } catch {
+    /* the section opens anyway */
+  }
+}
+
+// How each person answered, for the project's owner (owner_decisions): { points, people, proposals }. null when the
+// person is not its owner or the database has no function; any other error throws.
+export async function loadOwnerDecisions(client, projectId) {
+  const { data, error } = await client.rpc("owner_decisions", { p_project_id: projectId });
+  if (error) {
+    if (NO_SECTION_CODES.has(error.code)) return null;
+    throw error;
+  }
+  if (!isPlainObject(data)) return null;
+  const list = (value) => (Array.isArray(value) ? value.filter(isPlainObject) : []);
+  return { points: list(data.points), people: list(data.people), proposals: list(data.proposals) };
+}
+
 // A replaced version's newer one: the newest piece of the same kind in the same project that this person
 // has a current (not replaced) assignment for. null when there is none or it cannot be read.
 async function newerVersion(client, members, piece) {
