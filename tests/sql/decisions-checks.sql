@@ -2,7 +2,7 @@
 --
 -- Run as ONE request against the `factory` database (Supabase MCP execute_sql, or psql as postgres).
 -- Everything happens inside `begin; ... rollback;`: no data is left behind. Every failure raises an
--- exception; success prints NOTICE "decisions: ok 12 checks" and returns one row with the same text.
+-- exception; success prints NOTICE "decisions: ok 13 checks" and returns one row with the same text.
 -- People are simulated with JWT claims that carry an email and no `sub`, so auth.uid() is null. All
 -- names start with dc-check (point keys and versions with dc, which are hex digits) so nothing
 -- collides with real data. Inside one transaction now() does not move, so where the order of two
@@ -10,8 +10,9 @@
 -- authenticated, so every direct read of them happens back in the admin role.
 --
 -- People: Olga owns dc-check-project and is never in its list; Ana (A) and Beto (B) are its list;
--- Carla (C) is the list of dc-check-other, whose owner Pía is also in that list (to prove a publish
--- never demotes an owner).
+-- Carla (C) is the list of dc-check-other, whose owner is Pía; Dora is a client of dc-check-other who
+-- is published to (to prove a publish never changes an existing role). An owner in a list stops the
+-- publish (check 13).
 
 begin;
 
@@ -26,6 +27,7 @@ declare
   v_beto constant text := 'dc-check-beto@example.invalid';
   v_carla constant text := 'dc-check-carla@example.invalid';
   v_pia constant text := 'dc-check-pia@example.invalid';
+  v_dora constant text := 'dc-check-dora@example.invalid';
   v_k1 constant text := 'dc00000000a1';
   v_k2 constant text := 'dc00000000a2';
   v_k3 constant text := 'dc00000000a3';
@@ -59,6 +61,7 @@ declare
   v_beto_id uuid;
   v_carla_id uuid;
   v_pia_id uuid;
+  v_dora_id uuid;
   v_a1 uuid;
   v_a2 uuid;
   v_a3 uuid;
@@ -82,8 +85,10 @@ begin
 
   -- (1) A dry run writes nothing and reports what a real publish would do; invalid input gives 22023
   --     before anything is written. The real publish creates the project, the points (positions in
-  --     display order, active, both dates now()), the list and the members as stakeholder. On
-  --     dc-check-other, publishing to its owner Pía keeps her owner (only display_name changes).
+  --     display order, active, both dates now()), the list and the members as stakeholder. A publish
+  --     never changes an existing role: Olga and Pía, owners left out of the lists, stay owners, and
+  --     Dora, a client of dc-check-other who is published to, stays a client (only display_name
+  --     changes).
   perform set_config('role', 'service_role', true);
   v_res := public.factory_publish_decisions(v_slug, 'DC Check Project', v_points, v_people, true);
   perform set_config('role', v_admin, true);
@@ -214,7 +219,8 @@ begin
   perform set_config('role', 'service_role', true);
   v_res := public.factory_set_owner(v_slug, v_olga, 'Olga');
   v_olga_id := (v_res ->> 'member_id')::uuid;
-  -- dc-check-other: Carla, then Pía becomes its owner and is published to: she stays owner.
+  -- dc-check-other: Carla; then Pía becomes its owner and Dora is added by hand as a client; the
+  -- republish goes to Carla and Dora, never to Pía.
   v_res := public.factory_publish_decisions(v_other_slug, 'DC Check Other',
     jsonb_build_array(jsonb_build_object('key', v_ko, 'version', v_vo, 'title', 'Otro punto',
                                          'decided', 'Se decidió otro.', 'basis', '[]'::jsonb)),
@@ -223,22 +229,32 @@ begin
   v_carla_id := (v_res -> 'people' -> 0 ->> 'member_id')::uuid;
   v_res := public.factory_set_owner(v_other_slug, v_pia, 'Pía');
   v_pia_id := (v_res ->> 'member_id')::uuid;
+  perform set_config('role', v_admin, true);
+  insert into public.project_members (project_id, email, role, display_name)
+  values (v_other_id, v_dora, 'client', 'Dora')
+  returning id into v_dora_id;
+  perform set_config('role', 'service_role', true);
   v_res := public.factory_publish_decisions(v_other_slug, 'DC Check Other',
     jsonb_build_array(jsonb_build_object('key', v_ko, 'version', v_vo, 'title', 'Otro punto',
                                          'decided', 'Se decidió otro.', 'basis', '[]'::jsonb)),
     jsonb_build_array(jsonb_build_object('display_name', 'Carla', 'email', v_carla),
-                      jsonb_build_object('display_name', 'Pía Nueva', 'email', v_pia)), false);
+                      jsonb_build_object('display_name', 'Dora Nueva', 'email', v_dora)), false);
   perform set_config('role', v_admin, true);
-  if v_olga_id is null or v_other_id is null or v_carla_id is null or v_pia_id is null
+  if v_olga_id is null or v_other_id is null or v_carla_id is null or v_pia_id is null or v_dora_id is null
      or (select role from public.project_members where id = v_olga_id) is distinct from 'owner'
-     or v_res -> 'people' -> 1 ->> 'member_id' is distinct from v_pia_id::text
+     or (select role || '/' || display_name from public.project_members where id = v_pia_id)
+        is distinct from 'owner/Pía'
+     or v_res -> 'people' -> 1 ->> 'member_id' is distinct from v_dora_id::text
      or v_res -> 'people' -> 1 -> 'added' is distinct from 'true'::jsonb
      or v_res -> 'people' -> 0 -> 'added' is distinct from 'false'::jsonb
      or v_res -> 'points' -> 'same' is distinct from jsonb_build_array(v_ko)
-     or (select role || '/' || display_name from public.project_members where id = v_pia_id)
-        is distinct from 'owner/Pía Nueva'
+     or (select role || '/' || display_name from public.project_members where id = v_dora_id)
+        is distinct from 'client/Dora Nueva'
      or (select role from public.project_members where id = v_carla_id) is distinct from 'stakeholder' then
-    raise exception 'decisions (1): publishing to the owner of dc-check-other changed her role, or %', v_res;
+    raise exception 'decisions (1): a publish changed an existing role, or returned %', v_res;
+  end if;
+  if exists (select 1 from public.decision_audience where member_id in (v_olga_id, v_pia_id)) then
+    raise exception 'decisions (1): an owner is in the list of her project';
   end if;
   if exists (select 1 from public.decision_audience where member_id = v_olga_id) then
     raise exception 'decisions (1): Olga, the owner, is in the list of her project';
@@ -1078,13 +1094,74 @@ begin
   end if;
   v_checks := v_checks + 1;
 
-  if v_checks <> 12 then
-    raise exception 'decisions: only % of 12 checks ran', v_checks;
+  -- (13) The owner never answers: a publish (dry run or real) whose list has an owner of the project
+  --      (her own email, in capitals and with spaces too, or among other people) raises 22023 without
+  --      echoing any address, and writes nothing: list, points, members and projects stay as they were.
+  v_before := jsonb_build_object(
+    'audience', (select jsonb_agg(to_jsonb(a) order by a.project_id, a.member_id) from public.decision_audience a
+                 where a.project_id in (v_project_id, v_other_id)),
+    'points', (select jsonb_agg(to_jsonb(dp) order by dp.project_id, dp.key) from public.decision_points dp
+               where dp.project_id in (v_project_id, v_other_id)),
+    'members', (select jsonb_agg(to_jsonb(m) order by m.id) from public.project_members m
+                where m.project_id in (v_project_id, v_other_id)),
+    'projects', (select count(*) from public.projects where slug like 'dc-check-%'));
+  perform set_config('role', 'service_role', true);
+  foreach v_fn in array array['olga-dry', 'olga-real', 'olga-spaced', 'olga-among', 'pia-other'] loop
+    begin
+      case v_fn
+        when 'olga-dry' then
+          perform public.factory_publish_decisions(v_slug, null, v_points_last,
+            jsonb_build_array(jsonb_build_object('display_name', 'Olga', 'email', v_olga)), true);
+        when 'olga-real' then
+          perform public.factory_publish_decisions(v_slug, null, v_points_last,
+            jsonb_build_array(jsonb_build_object('display_name', 'Olga', 'email', v_olga)), false);
+        when 'olga-spaced' then
+          perform public.factory_publish_decisions(v_slug, null, v_points_last,
+            jsonb_build_array(jsonb_build_object('display_name', 'Olga', 'email', '  ' || upper(v_olga) || ' ')), false);
+        when 'olga-among' then
+          perform public.factory_publish_decisions(v_slug, null, v_points_last,
+            jsonb_build_array(jsonb_build_object('display_name', 'Ana', 'email', v_ana),
+                              jsonb_build_object('display_name', 'Beto', 'email', v_beto),
+                              jsonb_build_object('display_name', 'Olga', 'email', v_olga)), false);
+        when 'pia-other' then
+          perform public.factory_publish_decisions(v_other_slug, null,
+            jsonb_build_array(jsonb_build_object('key', v_ko, 'version', v_vo, 'title', 'Otro punto',
+                                                 'decided', 'Se decidió otro.', 'basis', '[]'::jsonb)),
+            jsonb_build_array(jsonb_build_object('display_name', 'Carla', 'email', v_carla),
+                              jsonb_build_object('display_name', 'Pía', 'email', v_pia)), true);
+      end case;
+      raise exception 'decisions (13): a list with an owner was accepted (%)', v_fn;
+    exception when invalid_parameter_value then
+      if position('@' in sqlerrm) <> 0 then
+        raise exception 'decisions (13): the refusal echoes an address (%)', v_fn;
+      end if;
+    end;
+  end loop;
+  perform set_config('role', v_admin, true);
+  if jsonb_build_object(
+       'audience', (select jsonb_agg(to_jsonb(a) order by a.project_id, a.member_id) from public.decision_audience a
+                    where a.project_id in (v_project_id, v_other_id)),
+       'points', (select jsonb_agg(to_jsonb(dp) order by dp.project_id, dp.key) from public.decision_points dp
+                  where dp.project_id in (v_project_id, v_other_id)),
+       'members', (select jsonb_agg(to_jsonb(m) order by m.id) from public.project_members m
+                   where m.project_id in (v_project_id, v_other_id)),
+       'projects', (select count(*) from public.projects where slug like 'dc-check-%'))
+     is distinct from v_before then
+    raise exception 'decisions (13): a refused publish wrote something';
+  end if;
+  if (select role from public.project_members where id = v_olga_id) is distinct from 'owner'
+     or (select role from public.project_members where id = v_pia_id) is distinct from 'owner' then
+    raise exception 'decisions (13): a refused publish changed an owner';
+  end if;
+  v_checks := v_checks + 1;
+
+  if v_checks <> 13 then
+    raise exception 'decisions: only % of 13 checks ran', v_checks;
   end if;
   raise notice 'decisions: ok % checks', v_checks;
 end
 $check$;
 
-select 'decisions: ok 12 checks' as result;
+select 'decisions: ok 13 checks' as result;
 
 rollback;

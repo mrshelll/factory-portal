@@ -472,11 +472,12 @@ $function$;
 -- would do and writes nothing (the same result either way).
 -- p_points: [{key, version, title, decided, basis}] in display order (key and version: 12 hex
 -- digits; title and decided: text that is not blank; basis: a JSON array; keys unique).
--- p_people: [{display_name, email}], validated as factory_publish does. Every error is 22023 and comes
--- before the first write.
+-- p_people: [{display_name, email}], validated as factory_publish does, and never with an owner of the
+-- project (the owner reads the section and never answers it). Every error is 22023, comes before the
+-- first write and never echoes an address.
 -- Writes, when not a dry run: the project (created when missing, as factory_publish); each person as
--- a stakeholder member, an existing member keeping their role (only display_name is updated, when
--- given); the list replaced by p_people (a removed person keeps membership and answers); the points
+-- a stakeholder member, an existing member (a client) keeping their role (only display_name is
+-- updated, when given); the list replaced by p_people (a removed person keeps membership and answers); the points
 -- upserted in order (version_published_at moves only when the version changes; a point that was
 -- removed and comes back enters again: active and first_published_at now()); every active point
 -- missing from p_points becomes inactive.
@@ -579,6 +580,17 @@ begin
     select pr.id into v_project_id from public.projects pr where pr.slug = p_project_slug;
   else
     select pr.id into v_project_id from public.projects pr where pr.slug = p_project_slug for update;
+  end if;
+  -- The owner never answers: an owner of the project in the list stops the publish.
+  if v_project_id is not null and exists (
+    select 1
+    from jsonb_array_elements(p_people) as t(e)
+    join public.project_members m
+      on m.project_id = v_project_id and m.email = lower(btrim(t.e ->> 'email'))
+    where m.role = 'owner'
+  ) then
+    raise exception 'factory_publish_decisions: the owner of the project cannot be in the list'
+      using errcode = '22023';
   end if;
   if v_project_id is null then
     if p_project_name is null or btrim(p_project_name) = '' then
