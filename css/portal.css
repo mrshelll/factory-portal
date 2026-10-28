@@ -193,6 +193,29 @@ main.context-wide { padding-top: var(--space-4); }
 .decisions-propose { display: grid; gap: var(--space-3); margin-top: var(--space-5); }
 .decisions-propose h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
 
+/* The owner's view of the section (app.js ownerDecisionsPart, showOwnerDecision: the manual's «lista»). On the project's
+   page, after the pieces' part, its title and lead, then one row per point as the pieces' rows read: the point's title,
+   its counts in muted text, and «Ver respuestas» on the row's right (the owner's link, a 44 px target); then what people
+   proposed, each by name and date over its text. A point's screen lists each person: the name in the text colour and the
+   answer that counts on its right in the same weight, the dates and «Ya no está en la lista» under them in muted text, the
+   comment set off by a rule on its start edge (as a quote of what the person wrote), and the earlier answers folded as
+   «En qué se apoya» is. Texts keep the reading measure and break anywhere (a long word or address never widens the page). */
+.owner-decisions .owner-lead { margin-bottom: var(--space-3); }
+.owner-proposals { margin-top: var(--space-5); }
+.owner-proposals h3 { margin: 0 0 var(--space-3); font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
+.owner-proposal { display: grid; gap: var(--space-1); padding-block: var(--space-4); }
+.owner-decision-decided { max-width: var(--measure-text); }
+.owner-answers { margin-top: var(--space-between-blocks); }
+.owner-answer { display: grid; gap: var(--space-1); padding-block: var(--space-4); }
+.owner-answer-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: var(--space-3); }
+.owner-answer .row-title { color: var(--ink); }
+.owner-answer-value { font-weight: 600; }
+.owner-proposal-text, .owner-answer-comment, .owner-decision-decided, .owner-answer-head { overflow-wrap: anywhere; }
+.owner-proposal-text, .owner-answer-comment { max-width: var(--measure-text); white-space: pre-line; }
+.owner-answer-comment { margin: var(--space-1) 0 0; padding-inline-start: var(--space-4); border-inline-start: var(--mark) solid var(--line); }
+.owner-history-list { list-style: none; margin: 0; padding: 0 0 var(--space-2); display: grid; gap: var(--space-3); }
+.owner-history-line { color: var(--muted); font-size: var(--text-small); }
+
 /* From 1056 px a list row is a row of a table: its title (a person's name with «Ver lo que envió» in the owner's part), its
    meta line (people, dates) and its state or aside, in three equal columns of the row (FUN-43: «reparte el ancho con lo que
    ya existe, el grupo tabular como tabla»). Every row of a screen is as wide as the body, so each column falls on the same

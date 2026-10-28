@@ -7,12 +7,12 @@ import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
 import { loadProjects, loadProjectItems, loadOwnerProject, loadOwnerPiece, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired,
-  loadDecisionProjects, loadMyDecisions, answerDecision, proposeDecision, markDecisionsOpened } from "./api.js";
-import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref } from "./project.js";
+  loadDecisionProjects, loadMyDecisions, answerDecision, proposeDecision, markDecisionsOpened, loadOwnerDecisions } from "./api.js";
+import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref, ownerDecisionHref } from "./project.js";
 import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
-import { ANSWER_VALUES, needsComment, validateAnswer, markKey, mergeProjectRows } from "./decisions.js";
+import { ANSWER_VALUES, needsComment, validateAnswer, markKey, mergeProjectRows, countsLine } from "./decisions.js";
 
 const root = document.getElementById("app");
 const browserLanguage = pickLanguage(navigator.languages && navigator.languages.length ? navigator.languages : navigator.language);
@@ -157,6 +157,7 @@ async function route() {
   if (target.name === "piece") return showPiece(target.pieceId, viewId);
   if (target.name === "project") return showProject(target.projectId, viewId);
   if (target.name === "owner-piece") return showOwnerPiece(target, viewId);
+  if (target.name === "owner-decision") return showOwnerDecision(target, viewId);
   // Anything else is home.
   if (location.hash && location.hash !== "#/") history.replaceState(null, "", `${location.pathname}${location.search}#/`);
   return showHome(viewId);
@@ -663,9 +664,92 @@ function ownerPart(projectId, view) {
     groups);
 }
 
+// ---- the owner's view of the «Decisiones» section ---------------------------------------------
+//
+// Manual pattern: «lista» (the project page's, and the point's screen). The owner reads, never answers: no form, choice or
+// send anywhere here, and nothing is recorded (no «abrió la sección»). Silence is said as «Sin respuesta» and never counted
+// as «Va» (spec §4.3): the counts are the server's (owner_decisions), over the people in the list, on the point's current
+// version. Every text from the server (points, names, comments, proposals) goes through text nodes (h()), never as markup.
+
+const POINT_KEY = /^[0-9a-f]{12}$/;
+// The points the people see now, in their order (owner_decisions lists the removed ones after them, active false).
+const publishedPoints = (view) => view.points.filter((p) => p.active === true && typeof p.key === "string" && POINT_KEY.test(p.key));
+const textOr = (value, fallbackKey) => (typeof value === "string" && value.trim() ? value : t(fallbackKey));
+const personName = (value) => (typeof value === "string" && value.trim() ? value.trim() : t("ownerUnnamed"));
+// «Va: 2 · No va: 1 · Sin respuesta: 3»: a count of 0 is not said.
+const countsText = (counts) => countsLine(counts).map(({ key, n }) => `${t(key)}: ${n}`).join(" · ");
+
+// The owner's part of the section on the project's page: each published point with its counts and «Ver respuestas»,
+// then what people proposed adding, oldest first. null before the factory published any point (an empty section is of
+// no use to anyone).
+function ownerDecisionsPart(projectId, view) {
+  const points = publishedPoints(view);
+  if (!points.length) return null;
+  const rows = points.map((point) => {
+    const title = textOr(point.title, "untitled");
+    const counts = countsText(point.counts);
+    return h("li", { class: "row owner-decision-row" }, h("div", { class: "row-item" },
+      h("span", { class: "row-main" },
+        h("span", { class: "row-title" }, title),
+        counts ? h("span", { class: "row-meta" }, counts) : null),
+      h("span", { class: "row-aside" },
+        h("a", { class: "owner-open", href: ownerDecisionHref(projectId, point.key), "aria-label": t("ownerSeeAnswersLabel", { title }) },
+          h("span", {}, t("ownerSeeAnswers"))))));
+  });
+  const proposals = view.proposals.filter((x) => typeof x.text === "string" && x.text.trim());
+  return h("section", { class: "section owner-decisions", "aria-labelledby": "owner-decisions-title" },
+    h("h2", { id: "owner-decisions-title" }, t("decisionsTitle")),
+    h("p", { class: "owner-lead" }, t("ownerDecisionsLead")),
+    h("ul", { class: "rows" }, rows),
+    proposals.length ? h("div", { class: "owner-proposals" },
+      h("h3", {}, t("ownerProposalsTitle")),
+      h("ul", { class: "rows" }, proposals.map((x) => h("li", { class: "row owner-proposal" },
+        h("p", { class: "row-meta" }, t("ownerProposalBy", { name: personName(x.display_name), date: formatDate(state.lang, x.created_at) })),
+        h("p", { class: "owner-proposal-text" }, x.text))))) : null);
+}
+
+// One answer as the owner reads it: the answer's word and its date, with «Respondió antes de que cambiara» when it was
+// given on an older version of the point.
+function historyEntry(entry, version) {
+  const parts = [t(ANSWER_KEYS[entry.value] || "ownerNoAnswer")];
+  const date = formatDate(state.lang, entry.created_at);
+  if (date) parts.push(date);
+  if (entry.version !== version) parts.push(t("ownerOlderVersion"));
+  return h("li", {},
+    h("p", { class: "owner-history-line" }, parts.join(" · ")),
+    typeof entry.comment === "string" && entry.comment.trim() ? h("blockquote", { class: "owner-answer-comment" }, entry.comment) : null);
+}
+
+// One person on one point: the answer that counts (their latest, when it is on the current version; «Sin respuesta»
+// otherwise, as the counts say), when it was given or that it was given before the point changed, whether they are no
+// longer on the list, when they last opened the section, its comment, and their earlier answers folded.
+function ownerAnswer(person, version, openedAt) {
+  const latest = person.latest && typeof person.latest === "object" ? person.latest : null;
+  const counts = latest && latest.current === true && ANSWER_KEYS[latest.value] ? latest : null;
+  const meta = [];
+  const answeredOn = counts ? formatDate(state.lang, counts.created_at) : "";
+  if (answeredOn) meta.push(t("ownerAnsweredOn", { date: answeredOn }));
+  else if (latest && !counts) meta.push(t("ownerOlderVersion"));
+  if (person.in_audience !== true) meta.push(t("ownerLeftList"));
+  const opened = formatDate(state.lang, openedAt);
+  if (opened) meta.push(t("ownerOpenedSection", { date: opened }));
+  const history = (Array.isArray(person.history) ? person.history : []).filter((x) => x && typeof x === "object");
+  // What is not shown above: every answer but the one that counts.
+  const earlier = counts ? history.slice(0, -1) : history;
+  return h("li", { class: "row" }, h("div", { class: "owner-answer" },
+    h("p", { class: "owner-answer-head" },
+      h("span", { class: "row-title" }, personName(person.display_name)),
+      h("span", { class: "owner-answer-value" }, t(counts ? ANSWER_KEYS[counts.value] : "ownerNoAnswer"))),
+    meta.length ? h("p", { class: "row-meta" }, meta.join(" · ")) : null,
+    counts && typeof counts.comment === "string" && counts.comment.trim() ? h("blockquote", { class: "owner-answer-comment" }, counts.comment) : null,
+    earlier.length ? h("details", { class: "decision-basis owner-history" },
+      h("summary", {}, chevron(), h("span", {}, t("ownerHistory"))),
+      h("ol", { class: "owner-history-list" }, earlier.map((entry) => historyEntry(entry, version)))) : null));
+}
+
 // The line that says what the project's owner sees, then what was asked of the person in this project (the list home
 // used to have), the «Decisiones» section when the person is in its list (decisionsSection) and, for its owner, how it is
-// going for everyone. The line is for the people asked: it shows with their own items or the section, and to someone who is not the owner and has nothing here (the page is not left empty); never to an owner
+// going for everyone: the pieces (ownerPart), then the section's points (ownerDecisionsPart). The line is for the people asked: it shows with their own items or the section, and to someone who is not the owner and has nothing here (the page is not left empty); never to an owner
 // with nothing asked, whose part opens with its own line (or says nothing was shared yet). It goes first and is short, so on a phone what follows it shows within the first screen however long the
 // lists are (FUN-42). A project that is not the person's says it is not available, as a piece does.
 async function showProject(projectId, viewId) {
@@ -678,12 +762,16 @@ async function showProject(projectId, viewId) {
 
   let loaded;
   let owner;
+  let ownerDecisions;
   let decisions;
   try {
     let listed;
     [loaded, listed] = await Promise.all([loadProjectItems(supabase, user, projectId), loadDecisionProjects(supabase)]);
-    // Only the project's owner asks how it is going for everyone; the server still checks it (null when it refuses).
-    owner = loaded.owner ? await loadOwnerProject(supabase, projectId) : null;
+    // Only the project's owner asks how it is going for everyone, pieces and section; the server still checks it (null
+    // when it refuses).
+    [owner, ownerDecisions] = loaded.owner
+      ? await Promise.all([loadOwnerProject(supabase, projectId), loadOwnerDecisions(supabase, projectId)])
+      : [null, null];
     // The «Decisiones» section is for the people in its list, never for the owner: only a project decision_projects() names
     // (the person is in its list and it has points) asks for it, so nobody else gets a refusal. null when the server refuses.
     decisions = !loaded.owner && listed.some((entry) => entry.project_id === projectId) ? await loadMyDecisions(supabase, projectId) : null;
@@ -727,6 +815,8 @@ async function showProject(projectId, viewId) {
     markDecisionsOpened(supabase, projectId);
   }
   if (ownerSection) layout.body.append(ownerSection);
+  const ownerDecisionsSection = ownerDecisions ? ownerDecisionsPart(projectId, ownerDecisions) : null;
+  if (ownerDecisionsSection) layout.body.append(ownerDecisionsSection);
 }
 
 // ---- the «Decisiones» section of a project's page --------------------------------------------
@@ -741,6 +831,9 @@ async function showProject(projectId, viewId) {
 // comments) goes through text nodes (h()), never as markup.
 
 const ANSWER_KEYS = { yes: "answerYes", change: "answerChange", no: "answerNo", unsure: "answerUnsure" };
+// What the comment asks for, by the answer that needs it: what she would change, why it does not go, or what she is
+// missing to decide.
+const COMMENT_PROMPT_KEYS = { change: "commentRequired", no: "commentRequiredNo", unsure: "commentRequiredUnsure" };
 // The server refuses a comment or a proposal over 4000 characters. A textarea's maxlength counts UTF-16 units, never fewer
 // than characters, so with it a text the server would refuse for its length cannot be typed.
 const DECISION_TEXT_MAX = 4000;
@@ -777,10 +870,13 @@ function basisFold(basis) {
 // The section: its title and lead, the points (my_decisions, by position) and the proposal form. What the person chose and
 // typed and has not sent is kept per point (drafts) while the page is open, so a reload of the section never loses it. A
 // point the server refused because it changed while she read it (PT409) shows as changed for the rest of the visit, until
-// she answers it again.
+// she answers it again. A point whose answer is on its way stays sending through a reload (sending), and what comes back
+// is said on the point as it is shown then (shown): the one sent, or the one a reload put in its place.
 function decisionsSection({ projectId, viewId, points, live }) {
   const drafts = new Map(); // point key -> { value, comment }
   const stale = new Set();  // point keys refused as changed on this visit
+  const sending = new Set(); // point keys whose answer is on its way
+  const shown = new Map();  // point key -> the point as shown now ({ point, item, setSending, confirm, showFailure })
   const list = h("ol", { class: "rows decisions-points" });
 
   // The section again as the server has it. false when it could not be read (the caller says so in the point); a person no
@@ -805,6 +901,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
   }
 
   function render(rows) {
+    shown.clear();
     replaceChildren(list, rows.filter((p) => typeof p.key === "string" && p.key && typeof p.version === "string" && p.version)
       .map((point, index) => decisionPoint(point, index)));
   }
@@ -837,9 +934,25 @@ function decisionsSection({ projectId, viewId, points, live }) {
     const commentError = fieldError(`${id}-comment-error`);
     const commentField = h("div", { class: "field" }, h("label", { for: comment.id }, t("commentLabel")), comment, commentError);
     const failure = h("div", { class: "decision-notice" });
-    const button = h("button", { type: "submit", class: "button button--secondary" }, t("sendAnswer"));
+    const button = h("button", { type: "submit", class: "button button--secondary" });
+    // Off and saying so while its answer is on its way, also when a reload of the section drew it again meanwhile.
+    function setSending(on) {
+      button.disabled = on;
+      button.textContent = t(on ? "sending" : "sendAnswer");
+    }
+    setSending(sending.has(key));
     if (stale.has(key)) showNotice(failure, { tone: "warning", text: t("answerStale"), dismissible: false });
     const showFailure = (text) => showNotice(failure, { tone: "error", text, dismissible: false });
+    // Her answer went: the point says so in place, announced, without moving the focus (COM-16).
+    function confirm(answer) {
+      point.answer = answer;
+      point.mark = answer.value === "yes" ? "confirmed" : "none";
+      clearNotice(failure);
+      showStatus(point.mark, point.answer);
+      live.textContent = answered.textContent;
+      // The button was off while sending, which drops the focus: give it back where it was.
+      if (!document.activeElement || document.activeElement === document.body) button.focus();
+    }
 
     // The comment only once the choice needs it, and the send only once there is a choice (FOR-05).
     function reveal() {
@@ -860,56 +973,56 @@ function decisionsSection({ projectId, viewId, points, live }) {
       if (!commentError.hidden) setFieldError(comment, commentError, "");
     });
 
-    let busy = false;
     async function onSubmit(event) {
       event.preventDefault();
-      if (busy || !chosen) return;
+      if (sending.has(key) || !chosen) return;
       const value = chosen;
       // A hidden comment (she chose «Va» after typing one) is not sent: only what she sees goes.
       const text = needsComment(value) ? comment.value : null;
       const problem = validateAnswer(value, text);
-      if (problem === "comment-required") return setFieldError(comment, commentError, t("commentRequired"));
+      if (problem === "comment-required") return setFieldError(comment, commentError, t(COMMENT_PROMPT_KEYS[value]));
       if (problem) return showFailure(t("unknownError"));
       setFieldError(comment, commentError, "");
       clearNotice(failure);
-      busy = true;
-      button.disabled = true;
-      button.textContent = t("sending");
+      sending.add(key);
+      setSending(true);
       const result = await answerDecision(supabase, projectId, key, point.version, value, text);
-      busy = false;
-      button.disabled = false;
-      button.textContent = t("sendAnswer");
+      sending.delete(key);
       if (viewId !== state.viewId) return;
+      // The point as shown now (a reload of the section may have drawn it again meanwhile), or null when it is gone.
+      const current = () => shown.get(key) || null;
+      if (current()) current().setSending(false);
       if (result.ok) {
         stale.delete(key);
         drafts.delete(key);
-        point.answer = { value, comment: text, version: point.version, created_at: result.createdAt || new Date().toISOString() };
-        point.mark = value === "yes" ? "confirmed" : "none";
-        // The section was read again while this was sent: read it once more, so it shows this answer.
-        if (!item.isConnected) { reload(); return; }
-        showStatus(point.mark, point.answer);
-        live.textContent = answered.textContent;
-        // The button was off while sending, which drops the focus: give it back where it was.
-        if (!document.activeElement || document.activeElement === document.body) button.focus();
+        const answer = { value, comment: text, version: point.version, created_at: result.createdAt || new Date().toISOString() };
+        if (current() && current().item === item) { confirm(answer); return; }
+        // The section was read again while this was sent: read it once more, so it shows this answer. Read or not (offline),
+        // the point as shown then says it was answered, announced, when it is still the version she answered (COM-16).
+        await reload();
+        if (viewId !== state.viewId) return;
+        const now = current();
+        if (now && now.item.isConnected && now.point.version === answer.version) now.confirm(answer);
         return;
       }
+      const sayFailure = (text) => (current() || { showFailure }).showFailure(text);
       // The point changed while she read it: the section again, the point marked as changed, her choice and comment kept.
       if (result.error === "stale") {
         stale.add(key);
         remember();
         if (await reload(key)) live.textContent = t("answerStale");
-        else showFailure(t("networkError"));
+        else sayFailure(t("networkError"));
         return;
       }
       // The point is no longer published: the section again, without it.
       if (result.error === "gone") {
         drafts.delete(key);
-        if (!(await reload())) showFailure(t("networkError"));
+        if (!(await reload())) sayFailure(t("networkError"));
         return;
       }
       // She is no longer in the list: the page as it is now.
       if (result.error === "denied") { route(); return; }
-      showFailure(t(result.error === "invalid" ? "unknownError" : "networkError"));
+      sayFailure(t(result.error === "invalid" ? "unknownError" : "networkError"));
     }
 
     const item = h("li", { class: "row decision", "data-key": key },
@@ -924,6 +1037,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
           radios.map((radio) => h("div", { class: "choice" }, radio, h("label", { for: radio.id }, t(ANSWER_KEYS[radio.value]))))),
         commentField, failure, button));
     reveal();
+    shown.set(key, { point, item, setSending, confirm, showFailure });
     return item;
   }
 
@@ -1418,6 +1532,59 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
       showNotice(layout.notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });
     },
   });
+}
+
+// ---- the owner's read-only point of the «Decisiones» section -----------------------------------
+
+// One point as the project's owner reads it (owner_decisions): its title and counts, the way back to the project, what was
+// decided, then each person (ownerAnswer). Only the project's owner asks for it, and the server checks it too; anyone else,
+// a point no longer published or a key that is not there gets the not-available notice of the owner's piece screen.
+async function showOwnerDecision({ projectId, key }, viewId) {
+  state.view = "owner-decision";
+  const user = state.session.user;
+  const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
+  setTitle(t("opening"));
+  let layout = frameLayout({ title: t("opening"), headerActions: [signOutButton()], back: homeBack() });
+  layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
+
+  let loaded;
+  let view;
+  try {
+    loaded = await loadProjectItems(supabase, user, projectId);
+    view = loaded.owner ? await loadOwnerDecisions(supabase, projectId) : null;
+  } catch (error) {
+    if (viewId !== state.viewId) return;
+    if (isAuthExpired(error)) return sessionEnded();
+    setTitle(t("pieceLoadErrorTitle"));
+    layout = frameLayout({ title: t("pieceLoadErrorTitle"), headerActions: [signOutButton()], back: homeBack() });
+    showNotice(layout.notices, { tone: "error", text: t("pieceLoadError"), actions: [{ label: t("retry"), onClick: route }], dismissible: false });
+    return;
+  }
+  if (viewId !== state.viewId) return;
+  const project = loaded.project;
+  setLanguage((project && project.language) || browserLanguage);
+  const projectName = project && (project.name || project.slug);
+  const back = view && projectName ? { href: projectHref(projectId), text: projectName, label: t("backToProjectLabel", { name: projectName }) } : homeBack();
+  const point = view ? publishedPoints(view).find((p) => p.key === key) || null : null;
+  if (!point) {
+    setTitle(t("pieceNotFoundTitle"));
+    layout = frameLayout({ title: t("pieceNotFoundTitle"), headerActions: [signOutButton()], back });
+    showNotice(layout.notices, { tone: "info", text: t("pieceNotFound"), dismissible: false });
+    return;
+  }
+
+  const title = textOr(point.title, "untitled");
+  setTitle(title);
+  layout = frameLayout({ title, meta: [countsText(point.counts)], headerActions: [signOutButton()], back });
+  const openedAt = new Map(view.people.map((p) => [p.member_id, p.last_opened_at]));
+  const people = (Array.isArray(point.people) ? point.people : []).filter((p) => p && typeof p === "object");
+  layout.body.append(
+    h("p", { class: "owner-decision-decided" }, typeof point.decided === "string" ? point.decided : ""),
+    h("section", { class: "section owner-answers", "aria-labelledby": "owner-answers-title" },
+      h("h2", { id: "owner-answers-title" }, t("ownerDecisionsTitle")),
+      people.length
+        ? h("ul", { class: "rows" }, people.map((person) => ownerAnswer(person, point.version, openedAt.get(person.member_id))))
+        : h("p", { class: "owner-lead" }, t("ownerNoPeople"))));
 }
 
 // ---- boot -----------------------------------------------------------------------------------

@@ -10,15 +10,19 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const PROJECT_ROUTE = new RegExp(`^#/project/(${UUID})$`, "i");
 const PIECE_ROUTE = new RegExp(`^#/piece/(${UUID})$`, "i");
 const OWNER_PIECE_ROUTE = new RegExp(`^#/project/(${UUID})/piece/(${UUID})/person/(${UUID})$`, "i");
+// One point of the «Decisiones» section, as the project's owner reads it: its key is 12 hex digits (decision_points).
+const OWNER_DECISION_ROUTE = new RegExp(`^#/project/(${UUID})/decisions/([0-9a-f]{12})$`, "i");
 
 const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const isDate = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
 
-// The screen a location hash opens. Anything that is not one of the four routes is home.
+// The screen a location hash opens. Anything that is not one of the five routes is home.
 export function parseRoute(hash) {
   if (typeof hash !== "string") return { name: "home" };
   let match = OWNER_PIECE_ROUTE.exec(hash);
   if (match) return { name: "owner-piece", projectId: match[1].toLowerCase(), pieceId: match[2].toLowerCase(), memberId: match[3].toLowerCase() };
+  match = OWNER_DECISION_ROUTE.exec(hash);
+  if (match) return { name: "owner-decision", projectId: match[1].toLowerCase(), key: match[2].toLowerCase() };
   match = PROJECT_ROUTE.exec(hash);
   if (match) return { name: "project", projectId: match[1].toLowerCase() };
   match = PIECE_ROUTE.exec(hash);
@@ -32,6 +36,10 @@ export function projectHref(projectId) {
 
 export function ownerPieceHref(projectId, pieceId, memberId) {
   return `#/project/${projectId}/piece/${pieceId}/person/${memberId}`;
+}
+
+export function ownerDecisionHref(projectId, key) {
+  return `#/project/${projectId}/decisions/${key}`;
 }
 
 // The state the owner reads: the assignment's status, with «opened» (la abrió) for a pending one whose person

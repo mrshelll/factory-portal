@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRoute, projectHref, ownerPieceHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE } from "../../js/project.js";
+import { parseRoute, projectHref, ownerPieceHref, ownerDecisionHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE } from "../../js/project.js";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333";
 
-test("parseRoute: the four routes, ids lowercased", () => {
+test("parseRoute: the routes, ids lowercased", () => {
   assert.deepEqual(parseRoute("#/"), { name: "home" });
   assert.deepEqual(parseRoute(`#/project/${A}`), { name: "project", projectId: A });
   assert.deepEqual(parseRoute(`#/piece/${B}`), { name: "piece", pieceId: B });
@@ -27,6 +27,18 @@ test("hrefs round trip through parseRoute", () => {
   assert.equal(ownerPieceHref(A, B, C), `#/project/${A}/piece/${B}/person/${C}`);
   assert.deepEqual(parseRoute(projectHref(A)), { name: "project", projectId: A });
   assert.deepEqual(parseRoute(ownerPieceHref(A, B, C)), { name: "owner-piece", projectId: A, pieceId: B, memberId: C });
+  assert.equal(ownerDecisionHref(A, "0123456789ab"), `#/project/${A}/decisions/0123456789ab`);
+  assert.deepEqual(parseRoute(ownerDecisionHref(A, "0123456789ab")), { name: "owner-decision", projectId: A, key: "0123456789ab" });
+});
+
+test("parseRoute: the owner's view of one decision point, key of 12 hex digits lowercased", () => {
+  assert.deepEqual(parseRoute("#/project/p/decisions/0123456789ab"), { name: "home" }); // the project must be a uuid
+  assert.deepEqual(parseRoute(`#/project/${A}/decisions/0123456789ab`), { name: "owner-decision", projectId: A, key: "0123456789ab" });
+  assert.deepEqual(parseRoute(`#/project/${A.toUpperCase()}/decisions/0123456789AB`), { name: "owner-decision", projectId: A, key: "0123456789ab" });
+  for (const junk of [`#/project/${A}/decisions/`, `#/project/${A}/decisions/0123456789a`, `#/project/${A}/decisions/0123456789abc`,
+    `#/project/${A}/decisions/0123456789ag`, `#/project/${A}/decisions/0123456789ab/x`, `#/project/${A}/decision/0123456789ab`]) {
+    assert.deepEqual(parseRoute(junk), { name: "home" }, junk);
+  }
 });
 
 test("ownerStatus: opened only for pending with a readable opening date", () => {
