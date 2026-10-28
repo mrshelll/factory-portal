@@ -2,7 +2,7 @@
 --
 -- Run as ONE request against the `factory` database (Supabase MCP execute_sql, or psql as postgres).
 -- Everything happens inside `begin; ... rollback;`: no data is left behind. Every failure raises an
--- exception; success prints NOTICE "decisions: ok 14 checks" and returns one row with the same text.
+-- exception; success prints NOTICE "decisions: ok 15 checks" and returns one row with the same text.
 -- People are simulated with JWT claims that carry an email and no `sub`, so auth.uid() is null. All
 -- names start with dc-check (point keys and versions with dc, which are hex digits) so nothing
 -- collides with real data. Inside one transaction now() does not move, so where the order of two
@@ -12,7 +12,8 @@
 -- People: Olga owns dc-check-project and is never in its list; Ana (A) and Beto (B) are its list;
 -- Carla (C) is the list of dc-check-other, whose owner is Pía; Dora is a client of dc-check-other who
 -- is published to (to prove a publish never changes an existing role). An owner in a list stops the
--- publish (check 13); a member of a list promoted to owner afterwards no longer answers (check 14).
+-- publish (check 13); a member of a list promoted to owner afterwards no longer answers (check 14); a
+-- point whose version returns to an earlier one counts each person by their latest answer (check 15).
 
 begin;
 
@@ -39,6 +40,7 @@ declare
   v_v3 constant text := 'dc000000c003';
   v_v4 constant text := 'dc000000c004';
   v_vo constant text := 'dc000000c0b1';
+  v_vo2 constant text := 'dc000000c0b2';
   v_stale constant text := 'dc000000ffff';
   v_ana_marker constant text := 'dc-check-ana-private';
   v_basis1 constant jsonb := '[{"text": "dc-check basis one", "quote": {"file": "docs/a.md", "text": "una cita"}}]';
@@ -1209,13 +1211,70 @@ begin
   end if;
   v_checks := v_checks + 1;
 
-  if v_checks <> 14 then
-    raise exception 'decisions: only % of 14 checks ran', v_checks;
+  -- (15) A point whose version returns to an earlier one: Carla said yes on dc-check-other's point on
+  --      v_vo, then no on v_vo2, and the point goes back to v_vo. Her latest answer overall is the no on
+  --      v_vo2, not on the current version, so the counts take her as none (never her older yes on
+  --      v_vo), as her entry in people (latest no, current false) and her own my_decisions (changed)
+  --      say. Dora, in the list, never answered: none too.
+  update public.decision_answers set created_at = now() - interval '9 minutes' where id = v_c1;
+  perform set_config('role', 'service_role', true);
+  perform public.factory_publish_decisions(v_other_slug, null,
+    jsonb_build_array(jsonb_build_object('key', v_ko, 'version', v_vo2, 'title', 'Otro punto',
+                                         'decided', 'Se decidió otro, de otra forma.', 'basis', '[]'::jsonb)),
+    jsonb_build_array(jsonb_build_object('display_name', 'Carla', 'email', v_carla),
+                      jsonb_build_object('display_name', 'Dora Nueva', 'email', v_dora)), false);
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_carla)::text, true);
+  v_res := public.answer_decision(v_other_id, v_ko, v_vo2, 'no', 'dc-check Carla ya no está de acuerdo');
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  update public.decision_answers set created_at = now() - interval '5 minutes' where id = (v_res ->> 'id')::uuid;
+  perform set_config('role', 'service_role', true);
+  perform public.factory_publish_decisions(v_other_slug, null,
+    jsonb_build_array(jsonb_build_object('key', v_ko, 'version', v_vo, 'title', 'Otro punto',
+                                         'decided', 'Se decidió otro.', 'basis', '[]'::jsonb)),
+    jsonb_build_array(jsonb_build_object('display_name', 'Carla', 'email', v_carla),
+                      jsonb_build_object('display_name', 'Dora Nueva', 'email', v_dora)), false);
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_pia)::text, true);
+  v_res := public.owner_decisions(v_other_id);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_carla)::text, true);
+  v_before := public.my_decisions(v_other_id);
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  if (select version from public.decision_points where project_id = v_other_id and key = v_ko)
+       is distinct from v_vo
+     or (select count(*) from public.decision_answers where member_id = v_carla_id and point_key = v_ko) <> 2 then
+    raise exception 'decisions (15): the point did not go back to its earlier version, or Carla''s two answers are not kept';
+  end if;
+  v_elem := v_res -> 'points' -> 0;
+  if jsonb_array_length(v_res -> 'points') <> 1
+     or v_elem ->> 'version' is distinct from v_vo
+     or v_elem -> 'counts' is distinct from '{"yes": 0, "change": 0, "no": 0, "unsure": 0, "none": 2}'::jsonb then
+    raise exception 'decisions (15): back on an earlier version, the counts take an older answer: %', v_elem;
+  end if;
+  select t.e into v_elem from jsonb_array_elements(v_res -> 'points' -> 0 -> 'people') as t(e)
+  where t.e ->> 'member_id' = v_carla_id::text;
+  if v_elem -> 'latest' ->> 'value' is distinct from 'no'
+     or v_elem -> 'latest' ->> 'version' is distinct from v_vo2
+     or v_elem -> 'latest' -> 'current' is distinct from 'false'::jsonb
+     or jsonb_array_length(v_elem -> 'history') <> 2 then
+    raise exception 'decisions (15): Carla''s entry in owner_decisions is %', v_elem;
+  end if;
+  if v_before -> 'points' -> 0 ->> 'mark' is distinct from 'changed'
+     or v_before -> 'points' -> 0 -> 'answer' ->> 'value' is distinct from 'no'
+     or v_before -> 'points' -> 0 -> 'answer' ->> 'version' is distinct from v_vo2 then
+    raise exception 'decisions (15): Carla sees %', v_before -> 'points' -> 0;
+  end if;
+  v_checks := v_checks + 1;
+
+  if v_checks <> 15 then
+    raise exception 'decisions: only % of 15 checks ran', v_checks;
   end if;
   raise notice 'decisions: ok % checks', v_checks;
 end
 $check$;
 
-select 'decisions: ok 14 checks' as result;
+select 'decisions: ok 15 checks' as result;
 
 rollback;

@@ -356,8 +356,11 @@ $function$;
 -- ---------------------------------------------------------------------------------------------
 -- owner_decisions: how everyone answered, for the owner of the project. Read-only.
 -- points: every point (the active ones in display order, then the removed ones), each with
---   counts   over the current list, by each person's newest answer on the current version; a person
---            with no answer on it counts as none (silence is never yes);
+--   counts   over the current list, by each person's newest answer on the point (any version), counted
+--            only when it is on the current version; a person with no answer, or whose newest answer is
+--            on another version, counts as none (silence is never yes). So the counts say what the
+--            person's entry (latest, current) and their own my_decisions say, also when a version
+--            returns to an earlier one;
 --   people   the people in the list and anyone who answered the point, each with their newest answer
 --            on it (any version; current says whether it is on the current version) or null, and
 --            their whole history on it, oldest first.
@@ -390,17 +393,17 @@ begin
            'active', p.active,
            'counts', (
              select jsonb_build_object(
-                      'yes', count(*) filter (where c.value = 'yes'),
-                      'change', count(*) filter (where c.value = 'change'),
-                      'no', count(*) filter (where c.value = 'no'),
-                      'unsure', count(*) filter (where c.value = 'unsure'),
-                      'none', count(*) filter (where c.value is null))
+                      'yes', count(*) filter (where c.point_version = p.version and c.value = 'yes'),
+                      'change', count(*) filter (where c.point_version = p.version and c.value = 'change'),
+                      'no', count(*) filter (where c.point_version = p.version and c.value = 'no'),
+                      'unsure', count(*) filter (where c.point_version = p.version and c.value = 'unsure'),
+                      'none', count(*) filter (where c.point_version is distinct from p.version))
              from public.decision_audience a
              left join lateral (
-               select d.value
+               select d.value, d.point_version
                from public.decision_answers d
                where d.project_id = p.project_id and d.member_id = a.member_id
-                 and d.point_key = p.key and d.point_version = p.version
+                 and d.point_key = p.key
                order by d.created_at desc, d.id desc
                limit 1
              ) c on true

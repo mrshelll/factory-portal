@@ -724,9 +724,11 @@ function decisionsServer(backend, rpc, body, sub) {
       .sort((a, b) => (b.active !== false) - (a.active !== false) || a.position - b.position || a.key.localeCompare(b.key))
       .map((p) => {
         const counts = { yes: 0, change: 0, no: 0, unsure: 0, none: 0 };
+        // Each person's newest answer on the point, whatever its version, counts only when it is on the current one: a
+        // version that returns to an earlier one never brings back an answer the person later replaced.
         for (const memberId of entry.audience) {
-          const current = answersOf(memberId, p.key).filter((d) => d.version === p.version).at(-1);
-          counts[current ? current.value : "none"] += 1;
+          const latest = answersOf(memberId, p.key).at(-1);
+          counts[latest && latest.version === p.version ? latest.value : "none"] += 1;
         }
         const people = members.filter((m) => inAudience(m.id) || answersOf(m.id, p.key).length).map((m) => {
           const history = answersOf(m.id, p.key);
@@ -4193,6 +4195,27 @@ async function ownerDecisionsChecks(browser, base, html) {
     await goTo(page, `#/project/${IDS.ownedProject}`, async () => { const s = await ownerDecisionsSummary(page); return s && s.points.length ? s : null; });
     check("owner-decisions 320px: the summary has no horizontal scroll", await noHorizontalScroll(page));
     check("owner-decisions 320px: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-decisions-version-returns: «phones» went to another version and came back to this one. Pedro said «Va» on this
+  // version, then «No va» on the other: his newest answer is not on the version shown, so he counts as «Sin respuesta»,
+  // never as his older «Va», as his own entry says.
+  {
+    const backend = ownerDecisionsBackend(html);
+    backend.decisions[IDS.ownedProject].answers.push(
+      { id: randomUUID(), member_id: pedro.id, key: OKEY.phones, version: "e40000000001", value: "yes", comment: null, created_at: OAT.before },
+      { id: randomUUID(), member_id: pedro.id, key: OKEY.phones, version: "e40000000002", value: "no", comment: "Mejor la web primero.", created_at: OAT.first });
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`);
+    const summary = await waitFor(async () => { const s = await ownerDecisionsSummary(page); return s && s.points.length ? s : null; }, 10000);
+    const phones = summary && summary.points.find((x) => x.title === OTITLE.phones);
+    const point = await goTo(page, detailHref(OKEY.phones), () => detailShown(page, OTITLE.phones));
+    const entry = point && point.people.find((x) => x.name === pedro.name);
+    check("owner-decisions-version-returns: back on an earlier version, the counts take Pedro's newest answer (on another version) as «Sin respuesta», never his older «Va», as his entry says",
+      phones && phones.counts === "Sin respuesta: 3" && point && JSON.stringify(point.meta) === JSON.stringify(["Sin respuesta: 3"]) && entry &&
+      entry.answer === OWNER_DECISIONS.noAnswer && entry.meta === OWNER_DECISIONS.older && entry.history && entry.history.entries.length === 2,
+      JSON.stringify({ phones, meta: point && point.meta, entry }));
+    check("owner-decisions-version-returns: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
 
