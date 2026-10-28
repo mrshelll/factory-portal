@@ -265,8 +265,9 @@ stays on the row's right, and below 672 px the rows keep their phone layout.
   (execute for `authenticated`; each checks first that the caller is the project's `owner`, and none
   returns a draft: nothing from `piece_drafts`, no partial response, no storage of a change request)
   and the factory-only `factory_set_owner` (execute for `service_role` only). No policy is added: a
-  person still reads only their own rows. **Not applied to `factory` yet**; when it is, the file is
-  renamed to the version Supabase registers. It is idempotent.
+  person still reads only their own rows. Applied to `factory` on 2026-10-28, by hand from the SQL
+  editor; its history row was inserted by hand with the file's version (`20261025120000`), so the name
+  stays. It is idempotent.
 
 `tests/sql/factory-connection-checks.sql` checks the factory connection migration,
 `tests/sql/piece-closure-checks.sql` checks the piece closure and `tests/sql/project-page-checks.sql`
