@@ -6,11 +6,13 @@ import { EMAIL_OTP_LENGTH } from "../config.js";
 import { h, replaceChildren } from "./dom.js";
 import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
-import { loadProjects, loadProjectItems, loadOwnerProject, loadOwnerPiece, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired } from "./api.js";
+import { loadProjects, loadProjectItems, loadOwnerProject, loadOwnerPiece, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired,
+  loadDecisionProjects, loadMyDecisions, answerDecision, proposeDecision, markDecisionsOpened } from "./api.js";
 import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref } from "./project.js";
 import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
+import { ANSWER_VALUES, needsComment, validateAnswer, markKey, mergeProjectRows } from "./decisions.js";
 
 const root = document.getElementById("app");
 const browserLanguage = pickLanguage(navigator.languages && navigator.languages.length ? navigator.languages : navigator.language);
@@ -507,9 +509,11 @@ const countOf = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 
 // piece's state. For the person, what is left to answer (or that everything was sent); for an owner with nothing to
 // answer, that they are the owner. Under the name, for its owner: that they are (when the right says what is left to
 // answer), its people and the last response, when there is one; the count is the one its page shows (owner_projects()
-// counts as owner_project lists), and a count of 0 is not said. What is left to answer is said once, on the right.
-function projectRow({ project, toAnswer, owned, summary }) {
-  const aside = toAnswer > 0 ? t("projectToAnswer", { count: toAnswer }) : owned ? t("projectOwner") : t("projectAllSent");
+// counts as owner_project lists), and a count of 0 is not said. What is left to answer is said once, on the right. A project
+// where the person has only the «Decisiones» section (onlyDecisions) says that on the right: nothing was sent there.
+function projectRow({ project, toAnswer, owned, summary, onlyDecisions }) {
+  const aside = toAnswer > 0 ? t("projectToAnswer", { count: toAnswer }) : owned ? t("projectOwner")
+    : onlyDecisions ? t("decisionsTitle") : t("projectAllSent");
   const meta = [];
   if (owned && toAnswer > 0) meta.push(t("projectOwner"));
   if (owned && summary) {
@@ -540,8 +544,12 @@ async function showHome(viewId) {
 
   let rows;
   try {
-    const { groups, owned } = await loadProjects(supabase, user);
-    rows = projectRows(groups, owned);
+    // The projects with something asked of the person or owned by them, plus those where they are only in the list of the
+    // «Decisiones» section (decision_projects), each once.
+    const [{ groups, owned }, decisionProjects] = await Promise.all([loadProjects(supabase, user), loadDecisionProjects(supabase)]);
+    const withItems = new Set(groups.map((group) => group.project.id));
+    rows = mergeProjectRows(projectRows(groups, owned), decisionProjects)
+      .map((row) => ({ ...row, onlyDecisions: Boolean(row.decisions) && !row.owned && !withItems.has(row.project.id) }));
   } catch (error) {
     if (viewId !== state.viewId) return;
     if (isAuthExpired(error)) return sessionEnded();
@@ -551,8 +559,9 @@ async function showHome(viewId) {
   }
   if (viewId !== state.viewId) return;
 
-  // Text follows the projects' language when they all share one; otherwise the browser's.
-  const languages = [...new Set(rows.map((row) => pickLanguage(row.project.language)))];
+  // Text follows the projects' language when they all share one; otherwise the browser's. A project known only from the
+  // section's list (decision_projects) carries no language, so it does not count.
+  const languages = [...new Set(rows.filter((row) => !row.onlyDecisions).map((row) => pickLanguage(row.project.language)))];
   setLanguage(languages.length === 1 ? languages[0] : browserLanguage);
   setTitle(t("projectsTitle"));
   const count = !rows.length ? null : rows.length === 1 ? t("projectsCountOne") : t("projectsCount", { count: rows.length });
@@ -655,8 +664,8 @@ function ownerPart(projectId, view) {
 }
 
 // The line that says what the project's owner sees, then what was asked of the person in this project (the list home
-// used to have) and, for its owner, how it is going for everyone. The line is for the people asked: it shows with their
-// own items, and to someone who is not the owner and has nothing here (the page is not left empty); never to an owner
+// used to have), the «Decisiones» section when the person is in its list (decisionsSection) and, for its owner, how it is
+// going for everyone. The line is for the people asked: it shows with their own items or the section, and to someone who is not the owner and has nothing here (the page is not left empty); never to an owner
 // with nothing asked, whose part opens with its own line (or says nothing was shared yet). It goes first and is short, so on a phone what follows it shows within the first screen however long the
 // lists are (FUN-42). A project that is not the person's says it is not available, as a piece does.
 async function showProject(projectId, viewId) {
@@ -669,10 +678,15 @@ async function showProject(projectId, viewId) {
 
   let loaded;
   let owner;
+  let decisions;
   try {
-    loaded = await loadProjectItems(supabase, user, projectId);
+    let listed;
+    [loaded, listed] = await Promise.all([loadProjectItems(supabase, user, projectId), loadDecisionProjects(supabase)]);
     // Only the project's owner asks how it is going for everyone; the server still checks it (null when it refuses).
     owner = loaded.owner ? await loadOwnerProject(supabase, projectId) : null;
+    // The «Decisiones» section is for the people in its list, never for the owner: only a project decision_projects() names
+    // (the person is in its list and it has points) asks for it, so nobody else gets a refusal. null when the server refuses.
+    decisions = !loaded.owner && listed.some((entry) => entry.project_id === projectId) ? await loadMyDecisions(supabase, projectId) : null;
   } catch (error) {
     if (viewId !== state.viewId) return;
     if (isAuthExpired(error)) return sessionEnded();
@@ -697,14 +711,276 @@ async function showProject(projectId, viewId) {
   layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
   unsavedWarning(layout.notices);
   const ownerSection = owner ? ownerPart(projectId, owner) : null;
-  if (items.length || !owner) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
+  // Only once the factory published points for the project: an empty section is of no use to anyone.
+  const points = decisions ? decisions.points : [];
+  if (items.length || points.length || !owner) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
   if (items.length) {
     const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },
       h("h2", { id: "asked-title" }, t("askedOfYou")),
       h("ul", { class: "rows" }, sorted.map(pieceRow))));
   }
+  if (points.length) {
+    layout.body.append(decisionsSection({ projectId, viewId, points, live: layout.live }));
+    // «Abrió la sección», once per visit, after the section was read (the marks «Nuevo» count from the previous opening).
+    // Not awaited, and it never throws: the section works whatever happens to that call.
+    markDecisionsOpened(supabase, projectId);
+  }
   if (ownerSection) layout.body.append(ownerSection);
+}
+
+// ---- the «Decisiones» section of a project's page --------------------------------------------
+//
+// Manual pattern: «formulario» (patrones/formulario.md) inside the project page's «lista»: each point is a group under its
+// title (FOR-05) with what was decided, «En qué se apoya» folded (FOR-13) and its mark for this person; its answer is one
+// choice of four in one group, «No sé» among them (FOR-11), the comment shown and required only when the choice is not «Va»
+// (FOR-05), and the send shown once there is a choice; a point answered on its current version comes back with that answer
+// (FOR-12). Each point sends on its own, its button off while sending; the result is the change in the point («Respondiste
+// el …», the mark), announced without moving the focus (COM-16), and a failure is said in the point (COM-17); no native
+// dialog (COM-18). The proposal form closes the section, always. Every text from the server (points, the person's own
+// comments) goes through text nodes (h()), never as markup.
+
+const ANSWER_KEYS = { yes: "answerYes", change: "answerChange", no: "answerNo", unsure: "answerUnsure" };
+// The server refuses a comment or a proposal over 4000 characters. A textarea's maxlength counts UTF-16 units, never fewer
+// than characters, so with it a text the server would refuse for its length cannot be typed.
+const DECISION_TEXT_MAX = 4000;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// The fold's chevron, as the pieces draw theirs (a «more» fold): it turns when the fold opens.
+function chevron() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const path = document.createElementNS(SVG_NS, "path");
+  for (const [name, value] of [["d", "M6 3l5 5-5 5"], ["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "2"]]) path.setAttribute(name, value);
+  svg.append(path);
+  return svg;
+}
+
+// «En qué se apoya», folded: each item's text and, under it, its literal quote (never the file it comes from). null when
+// there is nothing to show.
+function basisFold(basis) {
+  const parts = (Array.isArray(basis) ? basis : []).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const text = typeof item.text === "string" && item.text.trim() ? h("p", {}, item.text) : null;
+    const quote = item.quote && typeof item.quote.text === "string" && item.quote.text.trim()
+      ? h("blockquote", {}, h("p", {}, item.quote.text)) : null;
+    return [text, quote].filter(Boolean);
+  });
+  if (!parts.length) return null;
+  return h("details", { class: "decision-basis" },
+    h("summary", {}, chevron(), h("span", {}, t("basisToggle"))),
+    h("div", { class: "decision-basis-body" }, parts));
+}
+
+// The section: its title and lead, the points (my_decisions, by position) and the proposal form. What the person chose and
+// typed and has not sent is kept per point (drafts) while the page is open, so a reload of the section never loses it. A
+// point the server refused because it changed while she read it (PT409) shows as changed for the rest of the visit, until
+// she answers it again.
+function decisionsSection({ projectId, viewId, points, live }) {
+  const drafts = new Map(); // point key -> { value, comment }
+  const stale = new Set();  // point keys refused as changed on this visit
+  const list = h("ol", { class: "rows decisions-points" });
+
+  // The section again as the server has it. false when it could not be read (the caller says so in the point); a person no
+  // longer in the list, or a section left without points, gets the page as it is now.
+  async function reload(focusKey = null) {
+    let next;
+    try {
+      next = await loadMyDecisions(supabase, projectId);
+    } catch (error) {
+      if (viewId !== state.viewId) return true;
+      if (isAuthExpired(error)) { sessionEnded(); return true; }
+      return false;
+    }
+    if (viewId !== state.viewId) return true;
+    if (!next || !next.points.length) { route(); return true; }
+    render(next.points);
+    if (focusKey) {
+      const title = [...list.querySelectorAll(".decision")].find((el) => el.dataset.key === focusKey)?.querySelector(".decision-title");
+      if (title) title.focus();
+    }
+    return true;
+  }
+
+  function render(rows) {
+    replaceChildren(list, rows.filter((p) => typeof p.key === "string" && p.key && typeof p.version === "string" && p.version)
+      .map((point, index) => decisionPoint(point, index)));
+  }
+
+  function decisionPoint(point, index) {
+    const key = point.key;
+    const id = `decision-${index}`;
+    const title = typeof point.title === "string" && point.title.trim() ? point.title : t("untitled");
+    // Her answer on the version shown comes back chosen (FOR-12); one on an older version does not: the text changed.
+    const current = point.answer && point.answer.version === point.version ? point.answer : null;
+    const draft = drafts.get(key);
+    let chosen = draft ? draft.value : current ? current.value : null;
+
+    const mark = h("p", { class: "decision-mark" });
+    const answered = h("p", { class: "decision-answered" });
+    function showStatus(markValue, answer) {
+      const markText = markKey(markValue) ? t(markKey(markValue)) : "";
+      mark.textContent = markText;
+      mark.hidden = !markText;
+      const date = answer ? formatDate(state.lang, answer.created_at) : "";
+      answered.textContent = date ? t("answerSent", { date }) : "";
+      answered.hidden = !date;
+    }
+    showStatus(stale.has(key) ? "changed" : point.mark, point.answer);
+
+    const radios = ANSWER_VALUES.map((value) => h("input", { type: "radio", id: `${id}-${value}`, name: `${id}-answer`, value, checked: chosen === value }));
+    const comment = h("textarea", { id: `${id}-comment`, name: `${id}-comment`, rows: "3", maxlength: String(DECISION_TEXT_MAX),
+      "aria-describedby": `${id}-comment-error` });
+    comment.value = draft ? draft.comment : current && typeof current.comment === "string" ? current.comment : "";
+    const commentError = fieldError(`${id}-comment-error`);
+    const commentField = h("div", { class: "field" }, h("label", { for: comment.id }, t("commentLabel")), comment, commentError);
+    const failure = h("div", { class: "decision-notice" });
+    const button = h("button", { type: "submit", class: "button button--secondary" }, t("sendAnswer"));
+    if (stale.has(key)) showNotice(failure, { tone: "warning", text: t("answerStale"), dismissible: false });
+    const showFailure = (text) => showNotice(failure, { tone: "error", text, dismissible: false });
+
+    // The comment only once the choice needs it, and the send only once there is a choice (FOR-05).
+    function reveal() {
+      commentField.hidden = !chosen || !needsComment(chosen);
+      button.hidden = !chosen;
+    }
+    const remember = () => drafts.set(key, { value: chosen, comment: comment.value });
+    for (const radio of radios) {
+      radio.addEventListener("change", () => {
+        chosen = radio.value;
+        remember();
+        if (!commentError.hidden) setFieldError(comment, commentError, "");
+        reveal();
+      });
+    }
+    comment.addEventListener("input", () => {
+      remember();
+      if (!commentError.hidden) setFieldError(comment, commentError, "");
+    });
+
+    let busy = false;
+    async function onSubmit(event) {
+      event.preventDefault();
+      if (busy || !chosen) return;
+      const value = chosen;
+      // A hidden comment (she chose «Va» after typing one) is not sent: only what she sees goes.
+      const text = needsComment(value) ? comment.value : null;
+      const problem = validateAnswer(value, text);
+      if (problem === "comment-required") return setFieldError(comment, commentError, t("commentRequired"));
+      if (problem) return showFailure(t("unknownError"));
+      setFieldError(comment, commentError, "");
+      clearNotice(failure);
+      busy = true;
+      button.disabled = true;
+      button.textContent = t("sending");
+      const result = await answerDecision(supabase, projectId, key, point.version, value, text);
+      busy = false;
+      button.disabled = false;
+      button.textContent = t("sendAnswer");
+      if (viewId !== state.viewId) return;
+      if (result.ok) {
+        stale.delete(key);
+        drafts.delete(key);
+        point.answer = { value, comment: text, version: point.version, created_at: result.createdAt || new Date().toISOString() };
+        point.mark = value === "yes" ? "confirmed" : "none";
+        // The section was read again while this was sent: read it once more, so it shows this answer.
+        if (!item.isConnected) { reload(); return; }
+        showStatus(point.mark, point.answer);
+        live.textContent = answered.textContent;
+        // The button was off while sending, which drops the focus: give it back where it was.
+        if (!document.activeElement || document.activeElement === document.body) button.focus();
+        return;
+      }
+      // The point changed while she read it: the section again, the point marked as changed, her choice and comment kept.
+      if (result.error === "stale") {
+        stale.add(key);
+        remember();
+        if (await reload(key)) live.textContent = t("answerStale");
+        else showFailure(t("networkError"));
+        return;
+      }
+      // The point is no longer published: the section again, without it.
+      if (result.error === "gone") {
+        drafts.delete(key);
+        if (!(await reload())) showFailure(t("networkError"));
+        return;
+      }
+      // She is no longer in the list: the page as it is now.
+      if (result.error === "denied") { route(); return; }
+      showFailure(t(result.error === "invalid" ? "unknownError" : "networkError"));
+    }
+
+    const item = h("li", { class: "row decision", "data-key": key },
+      h("h3", { id: `${id}-title`, class: "decision-title", tabindex: "-1" }, title),
+      mark,
+      h("p", { class: "decision-decided" }, typeof point.decided === "string" ? point.decided : ""),
+      basisFold(point.basis),
+      answered,
+      h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+        h("fieldset", { class: "choices" },
+          h("legend", { class: "visually-hidden" }, title),
+          radios.map((radio) => h("div", { class: "choice" }, radio, h("label", { for: radio.id }, t(ANSWER_KEYS[radio.value]))))),
+        commentField, failure, button));
+    reveal();
+    return item;
+  }
+
+  // «¿Falta algo?»: what the person would add and is in no point. Always at the end of the section. Sent, the form empties
+  // and says it arrived (COM-16); it stays for another one.
+  function proposeForm() {
+    const input = h("textarea", { id: "decisions-propose-text", name: "proposal", rows: "4", maxlength: String(DECISION_TEXT_MAX),
+      "aria-describedby": "decisions-propose-error" });
+    const error = fieldError("decisions-propose-error");
+    const failure = h("div", { class: "decision-notice" });
+    const button = h("button", { type: "submit", class: "button button--secondary" }, t("proposeSend"));
+    const sent = h("p", { class: "decisions-propose-sent", hidden: true }, t("proposeSent"));
+    let busy = false;
+    input.addEventListener("input", () => { if (!error.hidden) setFieldError(input, error, ""); });
+
+    async function onSubmit(event) {
+      event.preventDefault();
+      if (busy) return;
+      const text = input.value.trim();
+      if (!text) return setFieldError(input, error, t("proposeEmpty"));
+      setFieldError(input, error, "");
+      clearNotice(failure);
+      busy = true;
+      button.disabled = true;
+      button.textContent = t("sending");
+      const result = await proposeDecision(supabase, projectId, text);
+      busy = false;
+      button.disabled = false;
+      button.textContent = t("proposeSend");
+      if (viewId !== state.viewId) return;
+      if (result.ok) {
+        // What she typed after sending stays.
+        if (input.value.trim() === text) input.value = "";
+        sent.hidden = false;
+        live.textContent = t("proposeSent");
+        if (!document.activeElement || document.activeElement === document.body) button.focus();
+        return;
+      }
+      if (result.error === "denied") { route(); return; }
+      if (result.error === "invalid") return setFieldError(input, error, t("proposeEmpty"));
+      showNotice(failure, { tone: "error", text: t("networkError"), dismissible: false });
+    }
+
+    return h("div", { class: "decisions-propose" },
+      h("h3", { id: "decisions-propose-title" }, t("proposeTitle")),
+      h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit, "aria-labelledby": "decisions-propose-title" },
+        h("div", { class: "field" }, h("label", { for: input.id }, t("proposeLead")), input, error),
+        failure, button),
+      sent);
+  }
+
+  render(points);
+  return h("section", { class: "section decisions", "aria-labelledby": "decisions-title" },
+    h("h2", { id: "decisions-title" }, t("decisionsTitle")),
+    h("p", { class: "decisions-lead" }, t("decisionsLead")),
+    list,
+    proposeForm());
 }
 
 // ---- piece ----------------------------------------------------------------------------------

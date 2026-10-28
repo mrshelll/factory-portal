@@ -165,6 +165,34 @@ main.context-wide { padding-top: var(--space-4); }
 .owner-open:focus-visible { outline: none; }
 .owner-open:focus-visible > span { outline: 2px solid var(--signal); outline-offset: 2px; }
 
+/* The «Decisiones» section (app.js decisionsSection: the manual's «formulario» inside the page's «lista»). Its lead at the
+   reading measure, then the points as rows of a list (the base's rule between rows), each holding its title in the
+   section-title type, its mark, what was decided, the fold «En qué se apoya», when she answered and the answer's form;
+   then the proposal form, last. The four choices sit side by side and wrap, each a 48 px target, its words in regular
+   weight (they are answers, not field labels). The fold is the pieces' «more» fold: a signal chevron that turns, only the
+   words underlined, a 44 px summary; a quote inside it is set off by a rule on its start edge. */
+.decisions-lead { margin-bottom: var(--space-4); }
+.decision { display: grid; gap: var(--space-2); padding-block: var(--space-4); }
+.decision-title { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
+.decision-title:focus { outline: none; } /* it takes the focus after a reload of the section; it is not a control */
+.decision-mark { font-size: var(--text-small); font-weight: 600; }
+.decision-answered { color: var(--muted); font-size: var(--text-small); }
+.decision-form { margin-top: var(--space-2); }
+.choices { display: flex; flex-wrap: wrap; column-gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
+.choice { display: flex; align-items: center; gap: var(--space-2); }
+.choice input { flex: none; width: var(--space-5); height: var(--space-5); min-height: 0; margin: 0; padding: 0; accent-color: var(--signal); }
+.choice label { display: flex; align-items: center; min-height: var(--target-min); font-weight: 400; cursor: pointer; }
+.decision-notice:empty { display: none; }
+.decision-basis summary { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; color: var(--signal); cursor: pointer; list-style: none; }
+.decision-basis summary::-webkit-details-marker { display: none; }
+.decision-basis summary span { text-decoration: underline; text-underline-offset: 3px; }
+.decision-basis summary svg { flex: none; width: var(--space-4); height: var(--space-4); }
+.decision-basis[open] summary svg { transform: rotate(90deg); }
+.decision-basis-body { display: grid; gap: var(--space-2); padding-bottom: var(--space-2); }
+.decision-basis blockquote { max-width: var(--measure-text); margin: 0; padding-inline-start: var(--space-4); border-inline-start: var(--mark) solid var(--line); }
+.decisions-propose { display: grid; gap: var(--space-3); margin-top: var(--space-5); }
+.decisions-propose h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
+
 /* From 1056 px a list row is a row of a table: its title (a person's name with «Ver lo que envió» in the owner's part), its
    meta line (people, dates) and its state or aside, in three equal columns of the row (FUN-43: «reparte el ancho con lo que
    ya existe, el grupo tabular como tabla»). Every row of a screen is as wide as the body, so each column falls on the same

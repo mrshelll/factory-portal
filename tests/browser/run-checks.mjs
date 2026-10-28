@@ -654,10 +654,92 @@ async function mockedContext(browser, { width = 360, height = 780, locale = "en-
         backend.openedCalls.push({ ...request.postDataJSON(), sub });
         return route.fulfill({ status: 204 });
       }
+      // The «Decisiones» section (decisions migration), answered from backend.decisions (decisionsServer): a project
+      // there with active points has the person in its list; any other project answers 42501, as the server.
+      case "rpc/decision_projects":
+      case "rpc/my_decisions":
+      case "rpc/answer_decision":
+      case "rpc/propose_decision":
+      case "rpc/mark_decisions_opened":
+      case "rpc/owner_decisions": {
+        const rpc = table.slice(4);
+        const body = request.method() === "POST" ? request.postDataJSON() || {} : {};
+        backend.decisionCalls.push({ rpc, ...body, sub });
+        if (rpc === "mark_decisions_opened") {
+          if (backend.decisionsOpenedFails === "network") return route.abort("internetdisconnected");
+          if (backend.decisionsOpenedFails === "missing") return json({ ...NO_FUNCTION, message: "Could not find the function public.mark_decisions_opened(p_project_id) in the schema cache" }, 404);
+          if (backend.decisionsOpenedFails === "expired") return json(EXPIRED, 401);
+        }
+        if (rpc === "answer_decision") {
+          if (backend.answerMode === "network") return route.abort("internetdisconnected");
+          if (backend.answerDelayMs) await sleep(backend.answerDelayMs);
+        }
+        const answer = decisionsServer(backend, rpc, body);
+        if (answer.error) return json(answer.error, answer.status);
+        return answer.empty ? route.fulfill({ status: 204 }) : json(answer.data);
+      }
       default: return json({ message: `unexpected ${table}` }, 404);
     }
   });
   return context;
+}
+
+// The decisions functions as the migration has them (20261028120000_decisions.sql), over backend.decisions: a project
+// there has the person in its list (42501 otherwise); my_decisions works the marks out as the SQL does; answer_decision
+// checks the value, the comment, that the point is published (P0002) and that the version is the current one (PT409),
+// and keeps every answer as a new row; mark_decisions_opened moves the date.
+function decisionsServer(backend, rpc, body) {
+  const refuse = (code, message, status) => ({ error: { code, message: `${rpc}: ${message}`, details: null, hint: null }, status });
+  const activePoints = (entry) => entry.points.filter((p) => p.active !== false).sort((a, b) => a.position - b.position);
+  if (rpc === "decision_projects") {
+    const rows = Object.entries(backend.decisions).filter(([, entry]) => activePoints(entry).length).map(([id]) => {
+      const project = backend.projects.find((p) => p.id === id) || {};
+      return { project_id: id, slug: project.slug, name: project.name };
+    }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return { data: rows };
+  }
+  if (rpc === "owner_decisions") {
+    const view = backend.ownerDecisions[body.p_project_id];
+    return view ? { data: view } : refuse("42501", "not the project owner", 403);
+  }
+  const entry = backend.decisions[body.p_project_id];
+  if (!entry) return refuse("42501", "not in the list of this project", 403);
+  const newest = (key) => entry.answers.filter((a) => a.key === key).sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1) || null;
+  if (rpc === "my_decisions") {
+    const opened = entry.lastOpenedAt || null;
+    const points = activePoints(entry).map((p) => {
+      const mine = newest(p.key);
+      const mark = !mine ? (!opened || Date.parse(p.firstPublishedAt) > Date.parse(opened) ? "new" : "none")
+        : mine.version !== p.version ? "changed" : mine.value === "yes" ? "confirmed" : "none";
+      return { key: p.key, version: p.version, position: p.position, title: p.title, decided: p.decided, basis: p.basis, mark,
+        answer: mine ? { value: mine.value, comment: mine.comment, version: mine.version, created_at: mine.created_at } : null };
+    });
+    return { data: { last_opened_at: opened, points } };
+  }
+  if (rpc === "mark_decisions_opened") {
+    entry.lastOpenedAt = new Date().toISOString();
+    return { empty: true };
+  }
+  if (rpc === "answer_decision") {
+    const comment = typeof body.p_comment === "string" && /\S/.test(body.p_comment) ? body.p_comment.replace(/^ +| +$/g, "") : null;
+    if (!["yes", "change", "no", "unsure"].includes(body.p_value)) return refuse("22023", "unknown value", 400);
+    if (body.p_value !== "yes" && !comment) return refuse("22023", "a comment is required unless the answer is yes", 400);
+    if (comment && [...comment].length > 4000) return refuse("22023", "the comment is over 4000 characters", 400);
+    const point = entry.points.find((p) => p.key === body.p_key);
+    if (!point || point.active === false) return refuse("P0002", "the point is not published", 404);
+    if (body.p_version !== point.version) return refuse("PT409", "the point changed", 409);
+    const row = { id: randomUUID(), key: point.key, version: point.version, value: body.p_value, comment, created_at: new Date().toISOString() };
+    entry.answers.push(row);
+    return { data: { id: row.id, created_at: row.created_at } };
+  }
+  if (rpc === "propose_decision") {
+    const text = typeof body.p_text === "string" ? body.p_text.replace(/^ +| +$/g, "") : "";
+    if (!/\S/.test(text)) return refuse("22023", "the text is required", 400);
+    const id = randomUUID();
+    entry.proposals.push({ id, text });
+    return { data: id };
+  }
+  return refuse("42883", "unknown", 404);
 }
 
 function newBackend(html, flowHtml, demoHtml) {
@@ -672,6 +754,10 @@ function newBackend(html, flowHtml, demoHtml) {
     ownedProjects: [], ownerRpcsMissing: false, ownerRpcsFail: false, openedCalls: [], openedFails: null,
     // The owner's reads: the projects the session owns, what owner_project and owner_piece answer for them, and the calls.
     ownedIds: [], ownerView: {}, ownerPieces: {}, ownerCalls: [],
+    // The «Decisiones» section: projectId -> { lastOpenedAt, points: [{ key, version, position, title, decided, basis,
+    // firstPublishedAt, active }], answers: [{ key, version, value, comment, created_at }], proposals: [] } (decisionsServer);
+    // the calls; answerMode "network" and answerDelayMs for answer_decision; decisionsOpenedFails as openedFails.
+    decisions: {}, decisionCalls: [], answerMode: "ok", answerDelayMs: 0, decisionsOpenedFails: null, ownerDecisions: {},
     // The project of a piece, from every piece the stand-in knows (the person's and the owner's views).
     pieceProject(pieceId) {
       const own = backend.pieces.find((p) => p.id === pieceId);
@@ -2560,7 +2646,7 @@ const PROJECT = {
   name: "Portal de prueba",
   owned: "Biblioteca del barrio",
   askedOfYou: "Lo que se te pidió",
-  ownerSees: "El responsable del proyecto ve cuándo abres lo que te compartimos y lo que envías.",
+  ownerSees: "El responsable del proyecto ve cuándo abres lo que te compartimos o esta sección, y lo que envías.",
   back: "Tus proyectos",
   notFoundTitle: "No está disponible",
   notFound: "No encontramos este proyecto entre los tuyos. Puede que ya no esté disponible.",
@@ -3456,6 +3542,352 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
 // - the piece screen and the owner's read-only piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
 //   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
 //   its pieces at the width the person sees them; also at 1600, past the frame's cap.
+// ---- the «Decisiones» section of a project's page ----------------------------------------------------------
+// A person in the section's list sees, after «Lo que se te pidió», the points the factory published for the project, each
+// with its mark (new, changed since their answer, already confirmed, or none) and «En qué se apoya» folded; answers one of
+// four (va, lo cambiaría, no va, no sé), with a comment required for all but «va», point by point, on the version the
+// page showed; and writes what is missing at the end. Opening the page records the opening once per visit (spec
+// 2026-10-25 página del proyecto §4.1–4.3).
+const DECISIONS = {
+  title: "Decisiones",
+  lead: "Esto ya se decidió. Dinos si va, si lo cambiarías o si no va. Si no respondes, la decisión sigue como está.",
+  choices: ["Va", "Lo cambiaría", "No va", "No sé"],
+  marks: { new: "Nuevo", changed: "Cambió desde tu respuesta", confirmed: "Ya lo confirmaste" },
+  basis: "En qué se apoya",
+  commentLabel: "Comentario",
+  commentRequired: "Cuéntanos qué cambiarías y por qué.",
+  send: "Enviar respuesta",
+  sending: "Enviando…",
+  answered: (date) => `Respondiste el ${date}`,
+  stale: "Este punto cambió mientras lo leías. Míralo de nuevo.",
+  network: "No hay conexión. Revisa tu internet y vuelve a intentarlo.",
+  proposeTitle: "¿Falta algo?",
+  proposeLabel: "Si algo debería estar aquí y no está, escríbelo.",
+  proposeSend: "Enviar",
+  proposeSent: "Gracias. Lo recibimos.",
+  proposeEmpty: "Escribe qué falta.",
+  onlyName: "Huerta del barrio",
+};
+const DIDS = { project: "12121212-1212-4212-8212-121212121212", member: "13131313-1313-4313-8313-131313131313" };
+const DKEY = { a: "0a0a0a0a0a0a", b: "0b0b0b0b0b0b", c: "0c0c0c0c0c0c", d: "0d0d0d0d0d0d" };
+const DAT = { oldPublish: "2026-10-10T12:00:00.000Z", answered: "2026-10-12T12:00:00.000Z", opened: "2026-10-20T12:00:00.000Z", newPublish: "2026-10-25T12:00:00.000Z" };
+const QUOTE = "Un viaje se confirma entre los dos";
+// Four points, one per mark: a, published after the person last opened the section and never answered (new); b, answered
+// «va» on an older version (changed); c, «va» on the current version (confirmed); d, published before the last opening and
+// never answered (none). d's text carries markup, which must read as text.
+function decisionsFixture() {
+  return {
+    lastOpenedAt: DAT.opened,
+    points: [
+      { key: DKEY.a, version: "a00000000001", position: 1, title: "Un viaje cuenta cuando las dos personas lo confirman",
+        decided: "El viaje se registra solo cuando quien conduce y quien viaja dicen que ocurrió.",
+        basis: [{ text: "Así quedó escrito al definir el proyecto.", quote: { file: "01-discovery/vision-brief.md", text: QUOTE } }],
+        firstPublishedAt: DAT.newPublish },
+      { key: DKEY.b, version: "b00000000002", position: 2, title: "En la prueba piloto no hay plata de por medio",
+        decided: "Nadie paga ni cobra durante la prueba.", basis: [], firstPublishedAt: DAT.oldPublish },
+      { key: DKEY.c, version: "c00000000001", position: 3, title: "La empresa ve números, nunca nombres",
+        decided: "La empresa recibe totales por semana, sin datos de cada persona.", basis: [{ text: "Lo pidió el área de personas." }],
+        firstPublishedAt: DAT.oldPublish },
+      { key: DKEY.d, version: "d00000000001", position: 4, title: "La app funciona primero en teléfonos",
+        decided: "La primera versión es para teléfonos <b>solamente</b>; la web viene después.", basis: [], firstPublishedAt: DAT.oldPublish },
+    ],
+    answers: [
+      { id: randomUUID(), key: DKEY.b, version: "b00000000001", value: "yes", comment: null, created_at: DAT.answered },
+      { id: randomUUID(), key: DKEY.c, version: "c00000000001", value: "yes", comment: null, created_at: DAT.answered },
+    ],
+    proposals: [],
+  };
+}
+function decisionsBackend(html) {
+  const backend = newBackend(html);
+  backend.decisions[IDS.project] = decisionsFixture();
+  return backend;
+}
+// Ana is also in the list of a second project, «Huerta del barrio», where nothing was asked of her.
+function withAudienceOnly(backend) {
+  backend.members.push({ id: DIDS.member, project_id: DIDS.project, email: USER.email, user_id: USER.id, role: "stakeholder", display_name: "Ana Pérez" });
+  backend.projects.push({ id: DIDS.project, slug: "huerta", name: DECISIONS.onlyName, language: "es" });
+  backend.decisions[DIDS.project] = decisionsFixture();
+  return backend;
+}
+// The section as the person sees it (only what is shown), or null when the page has none.
+const decisionsSection = (page) => page.evaluate((title) => {
+  const section = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((s) => s.querySelector("h2")?.textContent === title);
+  if (!section) return null;
+  const shown = (el) => Boolean(el) && el.getClientRects().length > 0;
+  const text = (el) => (shown(el) ? el.textContent : null);
+  const field = (el) => (shown(el) ? { value: el.value, invalid: el.getAttribute("aria-invalid") === "true", focused: document.activeElement === el,
+    label: el.labels && el.labels[0] ? el.labels[0].textContent : null } : null);
+  const button = (el) => (shown(el) ? { text: el.textContent, disabled: el.disabled } : null);
+  const propose = section.querySelector(".decisions-propose");
+  return {
+    lead: section.querySelector(".decisions-lead")?.textContent || null,
+    last: section.lastElementChild?.querySelector("h3")?.textContent || null,
+    points: [...section.querySelectorAll(".decision")].map((el) => {
+      const basis = el.querySelector("details");
+      const group = el.querySelector("fieldset");
+      return {
+        key: el.dataset.key, title: el.querySelector("h3")?.textContent || null, decided: el.querySelector(".decision-decided")?.textContent || null,
+        markup: el.querySelectorAll(".decision-decided *").length,
+        mark: text(el.querySelector(".decision-mark")), answered: text(el.querySelector(".decision-answered")),
+        group: group ? { name: group.querySelector("legend")?.textContent || null, radios: group.querySelectorAll("input[type=radio]").length,
+          names: new Set([...group.querySelectorAll("input[type=radio]")].map((r) => r.name)).size } : null,
+        choices: [...el.querySelectorAll("input[type=radio]")].map((r) => (r.labels && r.labels[0] ? r.labels[0].textContent : null)),
+        checked: el.querySelector("input[type=radio]:checked")?.value || null,
+        comment: field(el.querySelector("textarea")), error: text(el.querySelector(".field-error")), notice: text(el.querySelector(".notice p")),
+        button: button(el.querySelector("button[type=submit]")),
+        basis: basis ? { summary: basis.querySelector("summary")?.textContent || null, open: basis.open, text: basis.textContent } : null,
+      };
+    }),
+    propose: propose ? { title: propose.querySelector("h3")?.textContent || null, field: field(propose.querySelector("textarea")),
+      error: text(propose.querySelector(".field-error")), sent: text(propose.querySelector(".decisions-propose-sent")),
+      notice: text(propose.querySelector(".notice p")), button: button(propose.querySelector("button[type=submit]")) } : null,
+  };
+}, DECISIONS.title);
+const pointOf = (section, key) => (section ? section.points.find((p) => p.key === key) || null : null);
+const radioSel = (key, value) => `.decision[data-key="${key}"] input[type=radio][value="${value}"]`;
+const commentSel = (key) => `.decision[data-key="${key}"] textarea`;
+const sendSel = (key) => `.decision[data-key="${key}"] button[type=submit]`;
+const decisionCalls = (backend, rpc) => backend.decisionCalls.filter((c) => c.rpc === rpc);
+const liveText = (page) => page.evaluate(() => document.querySelector("[data-rol=marco] .visually-hidden[role=status]")?.textContent || "");
+
+async function decisionsChecks(browser, base, html) {
+  const sectionShown = (page) => waitFor(async () => { const s = await decisionsSection(page); return s && s.points.length ? s : null; }, 10000);
+
+  // section-after-pieces, owner-sees-line, the marks, the choices, comment-required-for-change, answer-sent-confirmed-in-page,
+  // propose-always-available and opened-once-per-visit, on one visit.
+  {
+    const backend = decisionsBackend(html);
+    backend.answerDelayMs = 600;
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    const dialogs = [];
+    page.on("dialog", (d) => { dialogs.push(d.type()); d.dismiss().catch(() => {}); });
+    const section = await sectionShown(page);
+    const view = await projectView(page);
+    check("decisions: section-after-pieces: «Decisiones» comes after «Lo que se te pidió», with its lead", section && view.pieces.length === 3 &&
+      JSON.stringify(view.sections) === JSON.stringify([PROJECT.askedOfYou, DECISIONS.title]) && section.lead === DECISIONS.lead, JSON.stringify({ sections: view.sections, lead: section && section.lead }));
+    check("decisions: owner-sees-line: the page starts with the line that says the owner sees when she opens what was shared or this section",
+      view.first === PROJECT.ownerSees, JSON.stringify(view.first));
+    const marks = section && section.points.map((p) => [p.key, p.mark]);
+    check("decisions: marks-new-changed-confirmed-none: each point by position with its mark (new, changed since her answer, confirmed, none)", section &&
+      JSON.stringify(marks) === JSON.stringify([[DKEY.a, DECISIONS.marks.new], [DKEY.b, DECISIONS.marks.changed], [DKEY.c, DECISIONS.marks.confirmed], [DKEY.d, null]]),
+      JSON.stringify(marks));
+    const answeredOn = DECISIONS.answered(await formatIn(page, DAT.answered));
+    const [a, b, c, d] = section ? section.points : [];
+    check("decisions: marks-new-changed-confirmed-none: a point she answered says when; the confirmed one comes back with «Va» chosen and the changed one with nothing chosen (FOR-12)",
+      a && !a.answered && !a.checked && b.answered === answeredOn && !b.checked && c.answered === answeredOn && c.checked === "yes" && c.button && !d.answered && !d.checked,
+      JSON.stringify(section && section.points.map(({ key, answered, checked }) => ({ key, answered, checked }))));
+    check("decisions: each point is one radio group named by its title, of four choices with «No sé» among them (FOR-11)", section &&
+      section.points.every((p) => JSON.stringify(p.choices) === JSON.stringify(DECISIONS.choices) && p.group && p.group.radios === 4 && p.group.names === 1 &&
+        p.group.name === p.title), JSON.stringify(section && section.points.map((p) => ({ choices: p.choices, group: p.group, title: p.title }))));
+    check("decisions: «En qué se apoya» is folded, with the quote inside; a point without it has no fold (FOR-13)", a && a.basis && !a.basis.open &&
+      a.basis.summary === DECISIONS.basis && a.basis.text.includes(QUOTE) && !a.basis.text.includes("vision-brief") && b.basis === null && c.basis && !c.basis.open,
+      JSON.stringify({ a: a && a.basis, b: b && b.basis }));
+    check("decisions: a point's text is shown as text, never as markup", d && d.decided.includes("<b>solamente</b>") && d.markup === 0, JSON.stringify(d && d.decided));
+    check("decisions: before a choice there is no comment and no send (FOR-05)", a && !a.comment && !a.button && d && !d.comment && !d.button,
+      JSON.stringify({ a: a && [a.comment, a.button], d: d && [d.comment, d.button] }));
+    check("decisions: opened-once-per-visit: opening the page records the opening once, for that project, after the section was read",
+      await waitFor(() => decisionCalls(backend, "mark_decisions_opened").length === 1, 3000) &&
+      decisionCalls(backend, "mark_decisions_opened")[0].p_project_id === IDS.project &&
+      backend.decisionCalls.findIndex((x) => x.rpc === "my_decisions") < backend.decisionCalls.findIndex((x) => x.rpc === "mark_decisions_opened"),
+      JSON.stringify(backend.decisionCalls.map((x) => x.rpc)));
+    check("decisions: 360px no horizontal scroll", await noHorizontalScroll(page));
+    const axe = await axeViolations(page);
+    if (axe) check("decisions: axe has no violations", axe.length === 0, axe.join(", "));
+    await page.screenshot({ path: join(outDir, "decisions-360.png"), fullPage: true });
+
+    // comment-required-for-change: «Lo cambiaría» shows the comment; sent empty, it says why and takes the focus; «Va» hides it.
+    await page.check(radioSel(DKEY.a, "change")).catch(() => {});
+    let p = pointOf(await decisionsSection(page), DKEY.a);
+    check("decisions: comment-required-for-change: «Lo cambiaría» shows the comment, labelled, and the send", p && p.comment && p.comment.label === DECISIONS.commentLabel &&
+      p.button && p.button.text === DECISIONS.send && !p.button.disabled, JSON.stringify(p));
+    await page.click(sendSel(DKEY.a)).catch(() => {});
+    p = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.a); return q && q.error ? q : null; }, 3000);
+    check("decisions: comment-required-for-change: without a comment nothing is sent; the error says why next to it and the comment takes the focus",
+      p && p.error === DECISIONS.commentRequired && p.comment.invalid && p.comment.focused && decisionCalls(backend, "answer_decision").length === 0, JSON.stringify(p));
+    for (const value of ["no", "unsure"]) {
+      await page.check(radioSel(DKEY.a, value)).catch(() => {});
+      await page.click(sendSel(DKEY.a)).catch(() => {});
+    }
+    await sleep(200);
+    p = pointOf(await decisionsSection(page), DKEY.a);
+    check("decisions: comment-required-for-change: «No va» and «No sé» need it too", p && p.error === DECISIONS.commentRequired &&
+      decisionCalls(backend, "answer_decision").length === 0, JSON.stringify(p));
+    await page.check(radioSel(DKEY.a, "yes")).catch(() => {});
+    p = pointOf(await decisionsSection(page), DKEY.a);
+    check("decisions: comment-required-for-change: «Va» needs no comment and hides it", p && !p.comment && p.button && !p.error, JSON.stringify(p));
+
+    // answer-sent-confirmed-in-page: «No va» with its comment; the button is off while sending, then the point says when she answered.
+    const typed = "Basta con que <b>una</b> persona lo confirme.";
+    await page.check(radioSel(DKEY.a, "no")).catch(() => {});
+    await page.fill(commentSel(DKEY.a), typed).catch(() => {});
+    await page.click(sendSel(DKEY.a)).catch(() => {});
+    const busy = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.a); return q && q.button && q.button.disabled && q.button.text === DECISIONS.sending ? q : null; }, 2000);
+    check("decisions: answer-sent-confirmed-in-page: while it is sent the button is off and says so", busy, JSON.stringify(busy));
+    const done = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.a); return q && q.answered ? q : null; }, 5000);
+    const today = DECISIONS.answered(await formatIn(page, new Date().toISOString()));
+    const call = decisionCalls(backend, "answer_decision")[0];
+    check("decisions: answer-sent-confirmed-in-page: the point says «Respondiste el …» in place, announced, keeps her answer, and no dialog opened (COM-16, COM-18)",
+      done && done.answered === today && (await liveText(page)) === today && done.checked === "no" && done.comment && done.comment.value === typed &&
+      done.button && !done.button.disabled && done.mark === null && dialogs.length === 0, JSON.stringify({ done, live: await liveText(page), dialogs }));
+    check("decisions: answer-sent-confirmed-in-page: it went once, with the point's key, the version the page showed, the value and the comment",
+      decisionCalls(backend, "answer_decision").length === 1 && call && call.p_project_id === IDS.project && call.p_key === DKEY.a &&
+      call.p_version === "a00000000001" && call.p_value === "no" && call.p_comment === typed, JSON.stringify(decisionCalls(backend, "answer_decision")));
+    await page.check(radioSel(DKEY.d, "yes")).catch(() => {});
+    await page.click(sendSel(DKEY.d)).catch(() => {});
+    p = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.mark === DECISIONS.marks.confirmed ? q : null; }, 5000);
+    check("decisions: answer-sent-confirmed-in-page: «Va» marks the point «Ya lo confirmaste» in place", p && p.answered === today &&
+      decisionCalls(backend, "answer_decision").at(-1).p_comment === null, JSON.stringify(p));
+
+    // propose-always-available: last in the section; empty, it says why; sent, it says so and stays for another.
+    let s = await decisionsSection(page);
+    check("decisions: propose-always-available: «¿Falta algo?» closes the section, with its field and its send", s && s.last === DECISIONS.proposeTitle &&
+      s.propose.field && s.propose.field.label === DECISIONS.proposeLabel && s.propose.button && s.propose.button.text === DECISIONS.proposeSend, JSON.stringify(s && s.propose));
+    await page.click(".decisions-propose button[type=submit]").catch(() => {});
+    s = await decisionsSection(page);
+    check("decisions: propose-always-available: empty, nothing is sent; the error says why and the field takes the focus", s && s.propose.error === DECISIONS.proposeEmpty &&
+      s.propose.field.invalid && s.propose.field.focused && decisionCalls(backend, "propose_decision").length === 0, JSON.stringify(s && s.propose));
+    const proposal = "Falta decir quién responde si algo sale mal.";
+    await page.fill(".decisions-propose textarea", `  ${proposal}  `).catch(() => {});
+    await page.click(".decisions-propose button[type=submit]").catch(() => {});
+    s = await waitFor(async () => { const t = await decisionsSection(page); return t && t.propose.sent ? t : null; }, 5000);
+    check("decisions: propose-always-available: sent, the section says so in place, announced, and the empty form stays for another",
+      s && s.propose.sent === DECISIONS.proposeSent && s.propose.field && s.propose.field.value === "" && !s.propose.error && s.last === DECISIONS.proposeTitle &&
+      (await liveText(page)) === DECISIONS.proposeSent && decisionCalls(backend, "propose_decision").length === 1 &&
+      decisionCalls(backend, "propose_decision")[0].p_text === proposal && dialogs.length === 0, JSON.stringify({ propose: s && s.propose, calls: decisionCalls(backend, "propose_decision") }));
+
+    // opened-once-per-visit: answering and proposing record nothing more; coming back is a new visit.
+    check("decisions: opened-once-per-visit: answering and proposing record no other opening", decisionCalls(backend, "mark_decisions_opened").length === 1,
+      String(decisionCalls(backend, "mark_decisions_opened").length));
+    await goTo(page, "#/", () => page.$(`a[href="#/project/${IDS.project}"]`));
+    await page.click(`a[href="#/project/${IDS.project}"]`).catch(() => {});
+    const again = await sectionShown(page);
+    await sleep(300);
+    check("decisions: opened-once-per-visit: coming back is another visit, with one more opening; the points she answered come back answered",
+      again && decisionCalls(backend, "mark_decisions_opened").length === 2 && pointOf(again, DKEY.a).mark === null && pointOf(again, DKEY.a).checked === "no" &&
+      pointOf(again, DKEY.d).mark === DECISIONS.marks.confirmed, JSON.stringify({ calls: decisionCalls(backend, "mark_decisions_opened").length, marks: again && again.points.map((x) => x.mark) }));
+    check("decisions: one visit: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // decisions-stale-version: the point changes on the server while she reads it. Her answer is refused (PT409): the section
+  // reloads, the point shows it changed, with its new text, and what she chose and typed stays, there and on the other points.
+  {
+    const backend = decisionsBackend(html);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    await sectionShown(page);
+    await page.check(radioSel(DKEY.d, "unsure")).catch(() => {});
+    await page.fill(commentSel(DKEY.d), "No conozco ese caso.").catch(() => {});
+    const point = backend.decisions[IDS.project].points.find((x) => x.key === DKEY.a);
+    point.version = "a00000000002";
+    point.decided = "El viaje se registra cuando las dos personas lo confirman en la app.";
+    const typed = "Una sola confirmación basta.";
+    await page.check(radioSel(DKEY.a, "no")).catch(() => {});
+    await page.fill(commentSel(DKEY.a), typed).catch(() => {});
+    const loadsBefore = decisionCalls(backend, "my_decisions").length;
+    await page.click(sendSel(DKEY.a)).catch(() => {});
+    const after = await waitFor(async () => { const s = await decisionsSection(page); const q = pointOf(s, DKEY.a); return q && q.notice === DECISIONS.stale ? s : null; }, 5000);
+    const a = pointOf(after, DKEY.a), d = pointOf(after, DKEY.d);
+    check("decisions: decisions-stale-version: refused (PT409), the section reloads and the point shows it changed, with its new text",
+      a && a.mark === DECISIONS.marks.changed && a.decided === point.decided && decisionCalls(backend, "my_decisions").length === loadsBefore + 1 &&
+      backend.decisions[IDS.project].answers.every((x) => x.key !== DKEY.a), JSON.stringify({ a, loads: decisionCalls(backend, "my_decisions").length - loadsBefore }));
+    check("decisions: decisions-stale-version: the typed comment and the choice are kept, on that point and on the others",
+      a && a.checked === "no" && a.comment && a.comment.value === typed && d && d.checked === "unsure" && d.comment && d.comment.value === "No conozco ese caso.",
+      JSON.stringify({ a, d }));
+    check("decisions: decisions-stale-version: the reload records no other opening", decisionCalls(backend, "mark_decisions_opened").length === 1,
+      String(decisionCalls(backend, "mark_decisions_opened").length));
+    await page.click(sendSel(DKEY.a)).catch(() => {});
+    const sent = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.a); return q && q.answered ? q : null; }, 5000);
+    check("decisions: decisions-stale-version: sent again, it goes with the version the page now shows", sent && !sent.notice &&
+      decisionCalls(backend, "answer_decision").at(-1).p_version === "a00000000002" && backend.decisions[IDS.project].answers.some((x) => x.key === DKEY.a && x.version === "a00000000002"),
+      JSON.stringify({ sent, calls: decisionCalls(backend, "answer_decision") }));
+    // Offline, the point says so where she acted and keeps her answer.
+    backend.answerMode = "network";
+    await page.click(sendSel(DKEY.d)).catch(() => {});
+    const offline = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.notice ? q : null; }, 5000);
+    check("decisions: offline, the point says so in place and keeps the answer, ready to send again", offline && offline.notice === DECISIONS.network &&
+      offline.checked === "unsure" && offline.comment.value === "No conozco ese caso." && offline.button && !offline.button.disabled && !offline.answered, JSON.stringify(offline));
+    check("decisions: stale and offline: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // section-absent-before-publish: not in any list (my_decisions 42501), in a list with nothing published, and the owner's page.
+  {
+    const notListed = newBackend(html);
+    const empty = newBackend(html);
+    empty.decisions[IDS.project] = { lastOpenedAt: null, points: [], answers: [], proposals: [] };
+    for (const [backend, what] of [[notListed, "not in the list"], [empty, "in the list, nothing published"]]) {
+      const { context, page, errors } = await openMocked(browser, base, backend, "");
+      const refusals = [];
+      page.on("response", (r) => { if (r.url().includes("/rest/v1/rpc/") && r.status() >= 400) refusals.push(`${r.status()} ${r.url()}`); });
+      await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+      const rows = await projectRowsOf(page);
+      await openProject(page).catch(() => {});
+      await sleep(400);
+      const view = await projectView(page);
+      // The page asks decision_projects() and, the project not being there, never asks for the section: no refusal is logged.
+      check(`decisions: section-absent-before-publish (${what}): home has only the project with her pieces, and its page no «Decisiones», no opening and no refusal`,
+        rows.length === 1 && rows[0].href === `#/project/${IDS.project}` && JSON.stringify(view.sections) === JSON.stringify([PROJECT.askedOfYou]) &&
+        decisionCalls(backend, "decision_projects").length === 2 && decisionCalls(backend, "my_decisions").length === 0 &&
+        decisionCalls(backend, "mark_decisions_opened").length === 0 && view.notices.length === 0 && refusals.length === 0,
+        JSON.stringify({ rows, sections: view.sections, calls: backend.decisionCalls.map((x) => x.rpc), refusals }));
+      check(`decisions: section-absent-before-publish (${what}): no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+    const owner = ownerBackend(html);
+    const { context, page, errors } = await openMocked(browser, base, owner, `#/project/${IDS.ownedProject}`);
+    await waitFor(() => ownerPart(page), 10000);
+    await sleep(300);
+    const view = await projectView(page);
+    check("decisions: section-absent-before-publish: the owner's page never asks for the section nor shows it (the owner never answers)",
+      !view.sections.includes(DECISIONS.title) && !decisionCalls(owner, "my_decisions").some((x) => x.p_project_id === IDS.ownedProject) &&
+      decisionCalls(owner, "mark_decisions_opened").length === 0, JSON.stringify({ sections: view.sections, calls: owner.decisionCalls }));
+    check("decisions: section-absent-before-publish: owner: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // audience-only-project-listed: home lists the project where she has the section and no pieces; its page has the section only.
+  {
+    const backend = withAudienceOnly(decisionsBackend(html));
+    const { context, page, errors } = await openMocked(browser, base, backend, "");
+    await page.waitForSelector(`a[href="#/project/${DIDS.project}"]`, { timeout: 10000 }).catch(() => {});
+    const rows = await projectRowsOf(page);
+    check("decisions: audience-only-project-listed: home lists the project where she only has the section, by name, saying so on the row's right",
+      rows.length === 2 && rows[0].href === `#/project/${DIDS.project}` && rows[0].title === DECISIONS.onlyName && rows[0].aside === DECISIONS.title &&
+      rows[1].href === `#/project/${IDS.project}` && rows[1].aside === "1 por responder", JSON.stringify(rows));
+    await page.click(`a[href="#/project/${DIDS.project}"]`).catch(() => {});
+    const section = await sectionShown(page);
+    const view = await projectView(page);
+    check("decisions: audience-only-project-listed: its page has the line that says what the owner sees, then the section only",
+      section && view.h1 === DECISIONS.onlyName && JSON.stringify(view.sections) === JSON.stringify([DECISIONS.title]) && view.pieces.length === 0 &&
+      view.first === PROJECT.ownerSees && section.points.length === 4, JSON.stringify(view));
+    await page.check(radioSel(DKEY.b, "yes")).catch(() => {});
+    await page.click(sendSel(DKEY.b)).catch(() => {});
+    const p = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.b); return q && q.mark === DECISIONS.marks.confirmed ? q : null; }, 5000);
+    check("decisions: audience-only-project-listed: she answers there, in that project", p && decisionCalls(backend, "answer_decision").at(-1).p_project_id === DIDS.project &&
+      decisionCalls(backend, "mark_decisions_opened").at(-1).p_project_id === DIDS.project, JSON.stringify(backend.decisionCalls.filter((x) => x.rpc !== "decision_projects")));
+    check("decisions: audience-only-project-listed: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // opened-call-fails: offline, a database without the function, an ended session: the section shows and answers go anyway.
+  for (const mode of ["network", "missing", "expired"]) {
+    const backend = decisionsBackend(html);
+    backend.decisionsOpenedFails = mode;
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    const section = await sectionShown(page);
+    const tried = await waitFor(() => decisionCalls(backend, "mark_decisions_opened").length === 1, 3000);
+    await page.check(radioSel(DKEY.d, "yes")).catch(() => {});
+    await page.click(sendSel(DKEY.d)).catch(() => {});
+    const p = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.mark === DECISIONS.marks.confirmed ? q : null; }, 5000);
+    const notices = await page.$$eval("[data-rol=avisos] .notice", (els) => els.map((n) => n.textContent));
+    check(`decisions: opened-call-fails (${mode}): the section shows and an answer still goes, with no notice`, section && tried && p && notices.length === 0,
+      JSON.stringify({ section: Boolean(section), tried, p, notices }));
+    check(`decisions: opened-call-fails (${mode}): no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 // The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, an
 // owned project's page with the owner's part (captured with --flow and --demo too), and a project's page with a received
@@ -3634,6 +4066,7 @@ try {
   if (args.demo) await demoChecks(browser, base, read(args.demo));
   if (args.questions) await projectPageChecks(browser, base, read(args.questions));
   if (args.questions && args.flow && args.demo) await ownerViewChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
+  if (args.questions) await decisionsChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
