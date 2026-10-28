@@ -27,6 +27,9 @@ test("validateAnswer: every case", () => {
   assert.equal(validateAnswer("no", "a".repeat(4001)), "too-long");
   assert.equal(validateAnswer("yes", "a".repeat(4001)), "too-long");
   assert.equal(validateAnswer("no", `  ${"a".repeat(4000)}  `), null);
+  // btrim trims only spaces: a trailing newline counts toward the limit, as in the server
+  assert.equal(validateAnswer("no", `${"a".repeat(4000)}\n\n`), "too-long");
+  assert.equal(validateAnswer("no", `${"a".repeat(3998)}\n\n`), null);
   assert.equal(validateAnswer("no", "😀".repeat(4000)), null);
 });
 
@@ -71,35 +74,65 @@ test("the new i18n keys exist in es and en", () => {
     "ownerLeftList", "ownerOpenedSection"];
   for (const key of keys) for (const lang of ["es", "en"]) assert.ok(dictionaries[lang][key], `${lang}.${key}`);
   assert.match(dictionaries.es.projectOwnerSees, /esta sección/);
+  assert.doesNotMatch(dictionaries.en.projectOwnerSees, /piece/i);
 });
 
-const fake = (result) => ({ rpc: async () => (typeof result === "function" ? result() : result) });
+const fake = (result) => {
+  const calls = [];
+  return {
+    calls,
+    rpc: async (fn, args) => {
+      calls.push([fn, args]);
+      return typeof result === "function" ? result() : result;
+    },
+  };
+};
 
-test("answerDecision maps the server's codes", async () => {
-  assert.deepEqual(await answerDecision(fake({ data: { id: "i", created_at: "t" }, error: null }), A, "k", "v", "yes", null),
-    { ok: true, id: "i", createdAt: "t" });
+test("answerDecision maps the server's codes and calls answer_decision", async () => {
+  const ok = fake({ data: { id: "i", created_at: "t" }, error: null });
+  assert.deepEqual(await answerDecision(ok, A, "k", "v", "no", "porque"), { ok: true, id: "i", createdAt: "t" });
+  assert.deepEqual(ok.calls, [["answer_decision", { p_project_id: A, p_key: "k", p_version: "v", p_value: "no", p_comment: "porque" }]]);
+  const noComment = fake({ data: { id: "i", created_at: "t" }, error: null });
+  await answerDecision(noComment, A, "k", "v", "yes");
+  assert.equal(noComment.calls[0][1].p_comment, null);
   for (const [code, error] of [["PT409", "stale"], ["22023", "invalid"], ["P0002", "gone"], ["42501", "denied"], ["08006", "network"], [undefined, "network"]]) {
     assert.deepEqual(await answerDecision(fake({ data: null, error: { code } }), A, "k", "v", "yes", null), { ok: false, error }, String(code));
   }
+  assert.deepEqual(await answerDecision(fake({ data: null, error: null }), A, "k", "v", "yes", null), { ok: false, error: "network" });
   assert.deepEqual(await answerDecision(fake(() => { throw new Error("offline"); }), A, "k", "v", "yes", null), { ok: false, error: "network" });
 });
 
-test("proposeDecision and markDecisionsOpened never throw", async () => {
-  assert.deepEqual(await proposeDecision(fake({ data: "p1", error: null }), A, "texto"), { ok: true, id: "p1" });
+test("proposeDecision and markDecisionsOpened never throw and call their RPCs", async () => {
+  const ok = fake({ data: "p1", error: null });
+  assert.deepEqual(await proposeDecision(ok, A, "texto"), { ok: true, id: "p1" });
+  assert.deepEqual(ok.calls, [["propose_decision", { p_project_id: A, p_text: "texto" }]]);
   assert.deepEqual(await proposeDecision(fake({ data: null, error: { code: "22023" } }), A, ""), { ok: false, error: "invalid" });
+  assert.deepEqual(await proposeDecision(fake({ data: null, error: { code: "42501" } }), A, "x"), { ok: false, error: "denied" });
+  assert.deepEqual(await proposeDecision(fake({ data: null, error: null }), A, "x"), { ok: false, error: "network" });
   assert.deepEqual(await proposeDecision(fake(() => { throw new Error("offline"); }), A, "x"), { ok: false, error: "network" });
+  const opened = fake({ data: null, error: null });
+  await markDecisionsOpened(opened, A);
+  assert.deepEqual(opened.calls, [["mark_decisions_opened", { p_project_id: A }]]);
   await markDecisionsOpened(fake(() => { throw new Error("offline"); }), A);
 });
 
-test("the loaders: not-for-this-person is null or [], other errors throw", async () => {
-  assert.deepEqual(await loadDecisionProjects(fake({ data: [{ project_id: A }], error: null })), [{ project_id: A }]);
+test("the loaders call their RPCs: not-for-this-person is null or [], other errors throw", async () => {
+  const projects = fake({ data: [{ project_id: A }], error: null });
+  assert.deepEqual(await loadDecisionProjects(projects), [{ project_id: A }]);
+  assert.deepEqual(projects.calls, [["decision_projects", undefined]]);
   assert.deepEqual(await loadDecisionProjects(fake({ data: null, error: { code: "PGRST202" } })), []);
   await assert.rejects(loadDecisionProjects(fake({ data: null, error: { code: "XX000" } })));
   assert.equal(await loadMyDecisions(fake({ data: null, error: { code: "42501" } }), A), null);
-  assert.deepEqual(await loadMyDecisions(fake({ data: { last_opened_at: null, points: [{ key: "k" }] }, error: null }), A),
-    { last_opened_at: null, points: [{ key: "k" }] });
+  const mine = fake({ data: { last_opened_at: null, points: [{ key: "k" }] }, error: null });
+  assert.deepEqual(await loadMyDecisions(mine, A), { last_opened_at: null, points: [{ key: "k" }] });
+  assert.deepEqual(mine.calls, [["my_decisions", { p_project_id: A }]]);
   await assert.rejects(loadMyDecisions(fake({ data: null, error: { code: "XX000" } }), A));
   assert.equal(await loadOwnerDecisions(fake({ data: null, error: { code: "42501" } }), A), null);
-  assert.deepEqual(await loadOwnerDecisions(fake({ data: { points: [], people: [], proposals: [{ text: "t" }] }, error: null }), A),
-    { points: [], people: [], proposals: [{ text: "t" }] });
+  const owner = fake({ data: { points: [], people: [], proposals: [{ text: "t" }] }, error: null });
+  assert.deepEqual(await loadOwnerDecisions(owner, A), { points: [], people: [], proposals: [{ text: "t" }] });
+  assert.deepEqual(owner.calls, [["owner_decisions", { p_project_id: A }]]);
+});
+
+test("no Spanish string of the portal says «pieza» (a factory word)", () => {
+  for (const [key, value] of Object.entries(dictionaries.es)) assert.doesNotMatch(value, /\bpieza/i, key);
 });

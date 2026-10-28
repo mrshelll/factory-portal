@@ -217,6 +217,7 @@ export async function proposeDecision(client, projectId, text) {
   try {
     const { data, error } = await client.rpc("propose_decision", { p_project_id: projectId, p_text: text });
     if (error) return { ok: false, error: sendError(error) };
+    if (typeof data !== "string" || !data) return { ok: false, error: "network" };
     return { ok: true, id: data };
   } catch {
     return { ok: false, error: "network" };

@@ -14,11 +14,12 @@ export function needsComment(value) {
   return value !== "yes";
 }
 
-// null when the answer can be sent, else why not. Checked in the server's order; the comment counts trimmed and by
-// characters, as the server stores it.
+// null when the answer can be sent, else why not. Checked in the server's order and measured as it does: a comment with
+// no character but whitespace is empty; the length is that of the comment without the spaces at its ends (btrim trims
+// only spaces, so a trailing newline counts), by characters.
 export function validateAnswer(value, comment) {
   if (!ANSWER_VALUES.includes(value)) return "invalid-value";
-  const text = typeof comment === "string" ? comment.trim() : "";
+  const text = typeof comment === "string" && /\S/.test(comment) ? comment.replace(/^ +| +$/g, "") : "";
   if (needsComment(value) && !text) return "comment-required";
   if ([...text].length > COMMENT_MAX) return "too-long";
   return null;
