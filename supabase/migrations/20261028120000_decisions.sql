@@ -119,7 +119,8 @@ to service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- audience_member_id: the caller's member id in the project's list (by the email of the session).
--- 42501 when the caller is not in the list (not a member, removed, or the owner, who is never in it).
+-- 42501 when the caller is not in the list (not a member, or removed) or is an owner of the project:
+-- the owner never answers, even when promoted (factory_set_owner) after being put in the list.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function private.audience_member_id(p_project_id uuid)
@@ -134,8 +135,10 @@ declare
 begin
   select a.member_id into v_member_id
   from public.decision_audience a
+  join public.project_members m on m.id = a.member_id
   where a.project_id = p_project_id
     and a.member_id in (select private.current_member_ids())
+    and m.role <> 'owner'
   limit 1;
   if v_member_id is null then
     raise exception 'decisions: not in the list of this project' using errcode = '42501';
@@ -145,8 +148,8 @@ end;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
--- decision_projects: the projects whose list has the caller and that have at least one active
--- point, by name. [] otherwise.
+-- decision_projects: the projects whose list has the caller (not as an owner of the project: the
+-- same rule as audience_member_id) and that have at least one active point, by name. [] otherwise.
 -- ---------------------------------------------------------------------------------------------
 
 create or replace function public.decision_projects()
@@ -163,8 +166,10 @@ as $function$
          order by pr.name, pr.slug), '[]'::jsonb)
   from public.projects pr
   where exists (select 1 from public.decision_audience a
+                join public.project_members m on m.id = a.member_id
                 where a.project_id = pr.id
-                  and a.member_id in (select private.current_member_ids()))
+                  and a.member_id in (select private.current_member_ids())
+                  and m.role <> 'owner')
     and exists (select 1 from public.decision_points p
                 where p.project_id = pr.id and p.active);
 $function$;

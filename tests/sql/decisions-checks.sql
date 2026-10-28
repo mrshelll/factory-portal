@@ -2,7 +2,7 @@
 --
 -- Run as ONE request against the `factory` database (Supabase MCP execute_sql, or psql as postgres).
 -- Everything happens inside `begin; ... rollback;`: no data is left behind. Every failure raises an
--- exception; success prints NOTICE "decisions: ok 13 checks" and returns one row with the same text.
+-- exception; success prints NOTICE "decisions: ok 14 checks" and returns one row with the same text.
 -- People are simulated with JWT claims that carry an email and no `sub`, so auth.uid() is null. All
 -- names start with dc-check (point keys and versions with dc, which are hex digits) so nothing
 -- collides with real data. Inside one transaction now() does not move, so where the order of two
@@ -12,7 +12,7 @@
 -- People: Olga owns dc-check-project and is never in its list; Ana (A) and Beto (B) are its list;
 -- Carla (C) is the list of dc-check-other, whose owner is Pía; Dora is a client of dc-check-other who
 -- is published to (to prove a publish never changes an existing role). An owner in a list stops the
--- publish (check 13).
+-- publish (check 13); a member of a list promoted to owner afterwards no longer answers (check 14).
 
 begin;
 
@@ -1155,13 +1155,67 @@ begin
   end if;
   v_checks := v_checks + 1;
 
-  if v_checks <> 13 then
-    raise exception 'decisions: only % of 13 checks ran', v_checks;
+  -- (14) A member of the list promoted to owner afterwards (factory_set_owner does not look at the
+  --      list) never answers: Ana, still in the list, gets 42501 on every person function and the
+  --      project leaves her decision_projects; her calls write nothing. Before the promotion she has
+  --      the project, so the check proves something.
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
+  if public.decision_projects() is distinct from jsonb_build_array(jsonb_build_object(
+       'project_id', v_project_id, 'slug', v_slug, 'name', 'DC Check Project')) then
+    raise exception 'decisions (14): before the promotion, Ana does not have the project';
+  end if;
+  perform set_config('role', 'service_role', true);
+  perform set_config('request.jwt.claims', '', true);
+  v_res := public.factory_set_owner(v_slug, v_ana, null);
+  perform set_config('role', v_admin, true);
+  if v_res is distinct from jsonb_build_object('project_exists', true, 'member_id', v_ana_id)
+     or (select role from public.project_members where id = v_ana_id) is distinct from 'owner'
+     or not exists (select 1 from public.decision_audience
+                    where project_id = v_project_id and member_id = v_ana_id) then
+    raise exception 'decisions (14): Ana was not promoted while still in the list: %', v_res;
+  end if;
+  v_before := jsonb_build_object(
+    'answers', (select count(*) from public.decision_answers where member_id = v_ana_id),
+    'proposals', (select count(*) from public.decision_proposals where member_id = v_ana_id),
+    'opens', (select jsonb_agg(to_jsonb(o)) from public.decision_opens o where o.member_id = v_ana_id));
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'email', v_ana)::text, true);
+  foreach v_fn in array array['my_decisions', 'answer_decision', 'mark_decisions_opened', 'propose_decision'] loop
+    begin
+      case v_fn
+        when 'my_decisions' then perform public.my_decisions(v_project_id);
+        when 'answer_decision' then perform public.answer_decision(v_project_id, v_k4, v_v4, 'yes', null);
+        when 'mark_decisions_opened' then perform public.mark_decisions_opened(v_project_id);
+        when 'propose_decision' then perform public.propose_decision(v_project_id, 'Ana, ya responsable, propone');
+      end case;
+      raise exception 'decisions (14): Ana, promoted to owner, could call %', v_fn;
+    exception when insufficient_privilege then
+      null;
+    end;
+  end loop;
+  v_res := public.decision_projects();
+  perform set_config('role', v_admin, true);
+  perform set_config('request.jwt.claims', '', true);
+  if v_res is distinct from '[]'::jsonb then
+    raise exception 'decisions (14): Ana, promoted to owner, still gets decision projects: %', v_res;
+  end if;
+  if jsonb_build_object(
+       'answers', (select count(*) from public.decision_answers where member_id = v_ana_id),
+       'proposals', (select count(*) from public.decision_proposals where member_id = v_ana_id),
+       'opens', (select jsonb_agg(to_jsonb(o)) from public.decision_opens o where o.member_id = v_ana_id))
+     is distinct from v_before then
+    raise exception 'decisions (14): Ana''s refused calls wrote something';
+  end if;
+  v_checks := v_checks + 1;
+
+  if v_checks <> 14 then
+    raise exception 'decisions: only % of 14 checks ran', v_checks;
   end if;
   raise notice 'decisions: ok % checks', v_checks;
 end
 $check$;
 
-select 'decisions: ok 13 checks' as result;
+select 'decisions: ok 14 checks' as result;
 
 rollback;
