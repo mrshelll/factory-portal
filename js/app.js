@@ -804,9 +804,13 @@ async function showProject(projectId, viewId) {
   layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
   unsavedWarning(layout.notices);
   const ownerSection = owner ? ownerPart(projectId, owner) : null;
+  const ownerDecisionsSection = ownerDecisions ? ownerDecisionsPart(projectId, ownerDecisions) : null;
   // Only once the factory published points for the project: an empty section is of no use to anyone.
   const points = decisions ? decisions.points : [];
   if (items.length || points.length || !owner) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
+  // An owner with nothing asked of her reads the pieces' part first and the section's far below it: a short line says the
+  // section is further down, so it is not missed and, on a phone, what follows the line shows within the first screen (FUN-42).
+  else if (ownerSection && ownerDecisionsSection) layout.body.append(h("p", { class: "page-note" }, t("ownerDecisionsBelow")));
   if (items.length) {
     const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },
@@ -820,7 +824,6 @@ async function showProject(projectId, viewId) {
     markDecisionsOpened(supabase, projectId);
   }
   if (ownerSection) layout.body.append(ownerSection);
-  const ownerDecisionsSection = ownerDecisions ? ownerDecisionsPart(projectId, ownerDecisions) : null;
   if (ownerDecisionsSection) layout.body.append(ownerDecisionsSection);
 }
 
@@ -1044,7 +1047,8 @@ function decisionsSection({ projectId, viewId, points, live }) {
       h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
         h("fieldset", { class: "choices" },
           h("legend", { class: "visually-hidden" }, title),
-          radios.map((radio) => h("div", { class: "choice" }, radio, h("label", { for: radio.id }, t(ANSWER_KEYS[radio.value]))))),
+          radios.map((radio) => h("label", { class: "choice", for: radio.id }, radio, h("span", { class: "choice-mark", "aria-hidden": "true" }),
+            h("span", {}, t(ANSWER_KEYS[radio.value]))))),
         commentField, failure, button));
     reveal();
     shown.set(key, { point, item, setSending, confirm, showFailure });

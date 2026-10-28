@@ -179,9 +179,16 @@ main.context-wide { padding-top: var(--space-4); }
 .decision-answered { color: var(--muted); font-size: var(--text-small); }
 .decision-form { margin-top: var(--space-2); }
 .choices { display: flex; flex-wrap: wrap; column-gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
-.choice { display: flex; align-items: center; gap: var(--space-2); }
-.choice input { flex: none; width: var(--space-5); height: var(--space-5); min-height: 0; margin: 0; padding: 0; accent-color: var(--signal); }
-.choice label { display: flex; align-items: center; min-height: var(--target-min); font-weight: 400; cursor: pointer; }
+/* Each choice is a row, as the pieces' options (preguntas.template.html): the whole 44 px row is what you touch and what
+   shows the focus (FUN-18, FUN-16); the real radio lies over it, invisible, so a click anywhere chooses and the keyboard
+   moves through the group; the mark is drawn. */
+.choice { position: relative; display: flex; align-items: center; gap: var(--space-2); min-height: var(--target-min); font-weight: 400; cursor: pointer; }
+.choice input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.choice-mark { flex: none; width: calc(var(--space-4) + var(--space-1)); height: calc(var(--space-4) + var(--space-1));
+  border: 2px solid var(--muted); border-radius: var(--radius-pill); background: var(--sheet); }
+.choice input:checked + .choice-mark { border-color: var(--signal); background: var(--signal); box-shadow: inset 0 0 0 var(--space-1) var(--sheet); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--signal); outline-offset: 2px; }
+@media (hover: hover) { .choice:hover .choice-mark { border-color: var(--signal); } }
 .decision-notice:empty { display: none; }
 .decision-basis summary { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; color: var(--signal); cursor: pointer; list-style: none; }
 .decision-basis summary::-webkit-details-marker { display: none; }
@@ -198,7 +205,7 @@ main.context-wide { padding-top: var(--space-4); }
    its counts in muted text, and «Ver respuestas» on the row's right (the owner's link, a 44 px target); then what people
    proposed, each by name and date over its text. A point's screen lists each person: the name in the text colour and the
    answer that counts on its right in the same weight, the dates and «Ya no está en la lista» under them in muted text, the
-   comment set off by a rule on its start edge (as a quote of what the person wrote), and the earlier answers folded as
+   comment under them in the text colour, on the row's own start line (MAR-10: no indent of its own), and the earlier answers folded as
    «En qué se apoya» is. Texts keep the reading measure and break anywhere (a long word or address never widens the page). */
 .owner-decisions .owner-lead { margin-bottom: var(--space-3); }
 .owner-proposals { margin-top: var(--space-5); }
@@ -212,7 +219,7 @@ main.context-wide { padding-top: var(--space-4); }
 .owner-answer-value { font-weight: 600; }
 .owner-proposal-text, .owner-answer-comment, .owner-decision-decided, .owner-answer-head { overflow-wrap: anywhere; }
 .owner-proposal-text, .owner-answer-comment { max-width: var(--measure-text); white-space: pre-line; }
-.owner-answer-comment { margin: var(--space-1) 0 0; padding-inline-start: var(--space-4); border-inline-start: var(--mark) solid var(--line); }
+.owner-answer-comment { margin: var(--space-1) 0 0; }
 .owner-history-list { list-style: none; margin: 0; padding: 0 0 var(--space-2); display: grid; gap: var(--space-3); }
 .owner-history-line { color: var(--muted); font-size: var(--text-small); }
 

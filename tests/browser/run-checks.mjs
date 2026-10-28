@@ -3732,6 +3732,16 @@ async function decisionsChecks(browser, base, html) {
     check("decisions: each point is one radio group named by its title, of four choices with «No sé» among them (FOR-11)", section &&
       section.points.every((p) => JSON.stringify(p.choices) === JSON.stringify(DECISIONS.choices) && p.group && p.group.radios === 4 && p.group.names === 1 &&
         p.group.name === p.title), JSON.stringify(section && section.points.map((p) => ({ choices: p.choices, group: p.group, title: p.title }))));
+    // FUN-18, as the pieces' options: the whole row of a choice is what a tap hits, its mark included, at least 44 × 44.
+    const targets = await page.$$eval(`.decision[data-key="${DKEY.a}"] .choice`, (rows) => rows.map((row) => {
+      row.scrollIntoView({ block: "center" }); // elementFromPoint sees only what is on the screen
+      const r = row.getBoundingClientRect(), mark = row.querySelector(".choice-mark").getBoundingClientRect();
+      const hit = (x, y) => document.elementFromPoint(x, y) === row.querySelector("input[type=radio]");
+      return { w: Math.round(r.width), h: Math.round(r.height), mark: hit(mark.left + mark.width / 2, mark.top + mark.height / 2),
+        edges: hit(r.left + 1, r.top + 1) && hit(r.right - 1, r.bottom - 1) && hit(r.right - 1, r.top + r.height / 2) };
+    }));
+    check("decisions: each choice is one row a tap anywhere on chooses, mark and words, at least 44 × 44 (FUN-18)", targets.length === 4 &&
+      targets.every((x) => x.w >= 44 && x.h >= 44 && x.mark && x.edges), JSON.stringify(targets));
     check("decisions: «En qué se apoya» is folded, with the quote inside; a point without it has no fold (FOR-13)", a && a.basis && !a.basis.open &&
       a.basis.summary === DECISIONS.basis && a.basis.text.includes(QUOTE) && !a.basis.text.includes("vision-brief") && b.basis === null && c.basis && !c.basis.open,
       JSON.stringify({ a: a && a.basis, b: b && b.basis }));
@@ -4024,6 +4034,7 @@ async function decisionsChecks(browser, base, html) {
 // or records (spec 2026-10-25 página del proyecto §4.3, §4.5).
 const OWNER_DECISIONS = {
   lead: "Cuántas personas respondieron cada punto. Abre uno para ver qué dijo cada una.",
+  below: "Más abajo, en Decisiones, ves cómo respondió cada persona a lo que ya se decidió.",
   see: "Ver respuestas",
   seeLabel: (title) => `Ver respuestas sobre ${title}`,
   peopleTitle: "Cómo respondió cada persona",
@@ -4137,6 +4148,8 @@ async function ownerDecisionsChecks(browser, base, html) {
     const d = Object.fromEntries(await Promise.all(Object.entries(OAT).map(async ([k, v]) => [k, await formatIn(page, v)])));
     check("owner-decisions: the owner's page shows «Decisiones» after the pieces' part, with its lead", summary &&
       JSON.stringify(view.sections) === JSON.stringify([OWNER.section, DECISIONS.title]) && summary.lead === OWNER_DECISIONS.lead, JSON.stringify({ sections: view.sections, lead: summary && summary.lead }));
+    check("owner-decisions: the page opens with a short line that says «Decisiones» is further down (FUN-42: on a phone the pieces' part shows under it)",
+      view.first === OWNER_DECISIONS.below, JSON.stringify(view.first));
     check("owner-decisions-counts: each published point in order, with how many answered each way; silence is «Sin respuesta», never «Va»; a removed point is not listed",
       summary && JSON.stringify(summary.points.map(({ title, counts }) => ({ title, counts }))) === JSON.stringify([
         { title: OTITLE.trips, counts: "Va: 1 · No va: 1 · Sin respuesta: 1" },
