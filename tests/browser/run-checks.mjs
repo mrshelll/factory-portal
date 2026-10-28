@@ -676,6 +676,9 @@ async function mockedContext(browser, { width = 360, height = 780, locale = "en-
           if (delay) await sleep(delay);
         }
         if (rpc === "my_decisions" && backend.myDecisionsFails) return route.abort("internetdisconnected");
+        // ownerDecisionsFails: "error" (the server answers 500) or "network" (it cannot be reached).
+        if (rpc === "owner_decisions" && backend.ownerDecisionsFails === "network") return route.abort("internetdisconnected");
+        if (rpc === "owner_decisions" && backend.ownerDecisionsFails === "error") return json({ code: "XX000", message: "boom", details: null, hint: null }, 500);
         const answer = decisionsServer(backend, rpc, body, sub);
         if (answer.error) return json(answer.error, answer.status);
         return answer.empty ? route.fulfill({ status: 204 }) : json(answer.data);
@@ -4216,6 +4219,22 @@ async function ownerDecisionsChecks(browser, base, html) {
       entry.answer === OWNER_DECISIONS.noAnswer && entry.meta === OWNER_DECISIONS.older && entry.history && entry.history.entries.length === 2,
       JSON.stringify({ phones, meta: point && point.meta, entry }));
     check("owner-decisions-version-returns: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-decisions-fails: owner_decisions answers an error (500) or cannot be reached. The owner's page still shows the
+  // pieces' part; only the «Decisiones» part is left out, with no error page.
+  for (const mode of ["error", "network"]) {
+    const backend = ownerDecisionsBackend(html);
+    backend.ownerDecisionsFails = mode;
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`);
+    const part = await waitFor(() => ownerPart(page), 10000);
+    await sleep(300);
+    const view = await projectView(page);
+    check(`owner-decisions-fails (${mode}): the page shows the pieces' part, leaves out only «Decisiones», and shows no error`, part && view.h1 === PROJECT.owned &&
+      JSON.stringify(view.sections) === JSON.stringify([OWNER.section]) && view.notices.length === 0 && decisionCalls(backend, "owner_decisions").length === 1,
+      JSON.stringify({ view, calls: backend.decisionCalls.map((c) => c.rpc) }));
+    check(`owner-decisions-fails (${mode}): no page errors`, errors.length === 0, errors.join(" | "));
     await context.close();
   }
 

@@ -768,9 +768,14 @@ async function showProject(projectId, viewId) {
     let listed;
     [loaded, listed] = await Promise.all([loadProjectItems(supabase, user, projectId), loadDecisionProjects(supabase)]);
     // Only the project's owner asks how it is going for everyone, pieces and section; the server still checks it (null
-    // when it refuses).
+    // when it refuses). The section's part failing (offline, a server error) leaves out only that part: the pieces' part
+    // still shows. An ended session ends the page as any other read.
+    const ownerDecisionsOrNone = () => loadOwnerDecisions(supabase, projectId).catch((error) => {
+      if (isAuthExpired(error)) throw error;
+      return null;
+    });
     [owner, ownerDecisions] = loaded.owner
-      ? await Promise.all([loadOwnerProject(supabase, projectId), loadOwnerDecisions(supabase, projectId)])
+      ? await Promise.all([loadOwnerProject(supabase, projectId), ownerDecisionsOrNone()])
       : [null, null];
     // The «Decisiones» section is for the people in its list, never for the owner: only a project decision_projects() names
     // (the person is in its list and it has points) asks for it, so nobody else gets a refusal. null when the server refuses.
