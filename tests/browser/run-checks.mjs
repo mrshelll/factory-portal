@@ -16,8 +16,9 @@
 // close. Screenshots <name>-<width>-<scheme>.png at 320, 768 and 1440, light and dark.
 //
 // Screen snapshots: the sign-in screens (email step, code step), home (the projects, empty), a project's page, an owned
-// project's page with the owner's part (with --flow and --demo too) and a project's page with a received piece are
-// saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
+// project's page with the owner's part (with --flow and --demo too), a project's page with a received piece, and the
+// «Decisiones» screens (decisionsScreens: a person's section, its error states, a project with the section only, the owner's
+// summary and one point as the owner reads it) are saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
 // design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and
 // 1440 px, light and dark, and every run is one check. The JSON of each run is in <out>/screens/.
@@ -69,13 +70,24 @@ async function startServer() {
 }
 
 // Saves the screen as it is now: the rendered DOM without scripts (nothing re-renders it), with the
-// same relative links to css/ and brand/.
-async function snapshot(page, name, pattern) {
-  const html = await page.evaluate(() => {
+// same relative links to css/ and brand/. formState: what was chosen and typed (live state, not markup) is written into
+// the copy, so it shows as it did on screen.
+async function snapshot(page, name, pattern, { formState = false } = {}) {
+  const html = await page.evaluate((withForm) => {
     const doc = document.documentElement.cloneNode(true);
+    if (withForm) {
+      const copies = [...doc.querySelectorAll("input, textarea")];
+      [...document.documentElement.querySelectorAll("input, textarea")].forEach((el, i) => {
+        const copy = copies[i];
+        if (!copy) return;
+        if (el.type === "radio" || el.type === "checkbox") copy.toggleAttribute("checked", el.checked);
+        else if (el.tagName === "TEXTAREA") copy.textContent = el.value;
+        else copy.setAttribute("value", el.value);
+      });
+    }
     for (const script of doc.querySelectorAll("script")) script.remove();
     return `<!doctype html>\n${doc.outerHTML}\n`;
-  });
+  }, formState);
   writeFileSync(join(screensDir, `${name}.html`), html);
   screens.set(name, pattern);
 }
@@ -3584,9 +3596,9 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
 // cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
 // FUN-43; and the rest that geometria.mjs measures on the factory's pieces), on every portal screen at the factory's
 // verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
-// - the seven screen snapshots (sign-in email and code steps, home with the projects and empty, a project's page, an owned
-//   project's page with the owner's part, a project's page with a received piece) through
-//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between the seven
+// - the screen snapshots of PORTAL_SCREENS (sign-in email and code steps, home with the projects and empty, a project's page, an owned
+//   project's page with the owner's part, a project's page with a received piece, and the «Decisiones» screens) through
+//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between them all
 //   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
 // - the piece screen and the owner's read-only piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
 //   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
@@ -4025,6 +4037,101 @@ async function decisionsChecks(browser, base, html) {
   }
 }
 
+// ---- the «Decisiones» screens for the visual manual --------------------------------------------------------------
+// Snapshots of the section's screens (PORTAL_SCREENS), each in the state the manual measures and the judges look at, with
+// plain texts: the markup-as-text of the checks above stays in the checks. All «lista», the project page's pattern (the
+// section's forms inside it are marked data-medida="formulario"):
+// - project-decisions: a person's project page, her pieces and the section with the four marks (new, changed since her
+//   answer, confirmed, none), «Lo cambiaría» chosen on the first point with its comment open and typed;
+// - project-decisions-errors: the same section in its error states: a point that changed while she read it, a send that
+//   could not go, a comment missing and an empty proposal;
+// - project-decisions-only: a project where she only has the section, no pieces;
+// - project-owner-decisions: the owner's page, the pieces' part and then the section's counts and what people proposed;
+// - owner-decision: one point as the owner reads it: disagreement, silence, an answer on an older version and a person
+//   no longer on the list.
+const PLAIN = {
+  decidedD: "La primera versión es solo para teléfonos; la web viene después.",
+  comment: "Que baste con que lo confirme quien conduce.",
+  martaComment: "Prefiero que cuente con una sola confirmación.",
+  proposal: "Falta decir quién responde si algo sale mal.",
+  tomas: { id: "a6a6a6a6-a6a6-4a6a-8a6a-a6a6a6a6a6a6", name: "Tomás León" },
+};
+async function decisionsScreens(browser, base, html) {
+  const sectionShown = (page) => waitFor(async () => { const s = await decisionsSection(page); return s && s.points.length ? s : null; }, 10000);
+  const plain = (entry) => { entry.points.find((p) => p.key === DKEY.d).decided = PLAIN.decidedD; return entry; };
+  {
+    const backend = decisionsBackend(html);
+    plain(backend.decisions[IDS.project]);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    await sectionShown(page);
+    await page.check(radioSel(DKEY.a, "change")).catch(() => {});
+    await page.fill(commentSel(DKEY.a), PLAIN.comment).catch(() => {});
+    let s = await decisionsSection(page);
+    check("screens: project-decisions: the four marks, and the first point with «Lo cambiaría» and its comment open", s &&
+      JSON.stringify(s.points.map((p) => p.mark)) === JSON.stringify([DECISIONS.marks.new, DECISIONS.marks.changed, DECISIONS.marks.confirmed, null]) &&
+      s.points[0].checked === "change" && s.points[0].comment && s.points[0].comment.value === PLAIN.comment, JSON.stringify(s && s.points.map(({ mark, checked, comment }) => ({ mark, checked, comment }))));
+    await snapshot(page, "project-decisions", "lista", { formState: true });
+
+    // The errors: b changed on the server while she read it (PT409, the section reloads); d's send cannot go (offline); a,
+    // «No va» without its comment; and the proposal sent empty.
+    backend.decisions[IDS.project].points.find((p) => p.key === DKEY.b).version = "b00000000003";
+    await page.check(radioSel(DKEY.b, "yes")).catch(() => {});
+    await page.click(sendSel(DKEY.b)).catch(() => {});
+    await waitFor(async () => pointOf(await decisionsSection(page), DKEY.b)?.notice === DECISIONS.stale, 5000);
+    backend.answerMode = "network";
+    await page.check(radioSel(DKEY.d, "yes")).catch(() => {});
+    await page.click(sendSel(DKEY.d)).catch(() => {});
+    await waitFor(async () => pointOf(await decisionsSection(page), DKEY.d)?.notice === DECISIONS.network, 5000);
+    await page.check(radioSel(DKEY.a, "no")).catch(() => {});
+    await page.fill(commentSel(DKEY.a), "").catch(() => {});
+    await page.click(sendSel(DKEY.a)).catch(() => {});
+    await page.click(".decisions-propose button[type=submit]").catch(() => {});
+    s = await waitFor(async () => { const t = await decisionsSection(page); return t && pointOf(t, DKEY.a)?.error && t.propose.error ? t : null; }, 3000);
+    check("screens: project-decisions-errors: changed while read, offline, a comment missing and an empty proposal, each said where it happened", s &&
+      pointOf(s, DKEY.b).notice === DECISIONS.stale && pointOf(s, DKEY.d).notice === DECISIONS.network && pointOf(s, DKEY.a).error === DECISIONS.commentRequiredNo &&
+      s.propose.error === DECISIONS.proposeEmpty, JSON.stringify(s && { points: s.points.map(({ key, notice, error }) => ({ key, notice, error })), propose: s.propose }));
+    await snapshot(page, "project-decisions-errors", "lista", { formState: true });
+    check("screens: project-decisions: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  {
+    const backend = withAudienceOnly(decisionsBackend(html));
+    plain(backend.decisions[DIDS.project]);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${DIDS.project}`);
+    const s = await sectionShown(page);
+    const view = await projectView(page);
+    check("screens: project-decisions-only: the section only, no pieces", s && view.h1 === DECISIONS.onlyName && view.pieces.length === 0 &&
+      JSON.stringify(view.sections) === JSON.stringify([DECISIONS.title]), JSON.stringify(view));
+    await snapshot(page, "project-decisions-only", "lista", { formState: true });
+    check("screens: project-decisions-only: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+  {
+    const backend = ownerDecisionsBackend(html);
+    const entry = backend.decisions[IDS.ownedProject];
+    entry.answers.find((a) => a.comment === HTML_COMMENT).comment = PLAIN.martaComment;
+    entry.proposals.find((x) => x.text === HTML_PROPOSAL).text = PLAIN.proposal;
+    // Tomás answered «trips» before it changed.
+    entry.members.push({ id: PLAIN.tomas.id, display_name: PLAIN.tomas.name, role: "stakeholder", created_at: "2026-10-07T12:00:00.000Z" });
+    entry.audience.push(PLAIN.tomas.id);
+    entry.answers.push({ id: randomUUID(), member_id: PLAIN.tomas.id, key: OKEY.trips, version: "e10000000000", value: "yes", comment: null, created_at: OAT.before });
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`);
+    const summary = await waitFor(async () => { const x = await ownerDecisionsSummary(page); return x && x.points.length ? x : null; }, 10000);
+    check("screens: project-owner-decisions: the pieces' part, then the section's counts and the proposals", summary && summary.points.length === 3 &&
+      summary.proposals.length === 2 && JSON.stringify((await projectView(page)).sections) === JSON.stringify([OWNER.section, DECISIONS.title]), JSON.stringify(summary));
+    await snapshot(page, "project-owner-decisions", "lista");
+    await page.click(`a[href="#/project/${IDS.ownedProject}/decisions/${OKEY.trips}"]`).catch(() => {});
+    const point = await waitFor(async () => { const v = await ownerDecisionView(page); return v.h1 === OTITLE.trips && v.people.length ? v : null; }, 10000);
+    const said = point ? Object.fromEntries(point.people.map((x) => [x.name, x])) : {};
+    check("screens: owner-decision: disagreement («Va», «No va»), silence, an answer on an older version and a person no longer on the list", point &&
+      said[PEOPLE.luis.name]?.answer === "Va" && said[PEOPLE.marta.name]?.answer === "No va" && said[PEOPLE.pedro.name]?.answer === OWNER_DECISIONS.noAnswer &&
+      said[PLAIN.tomas.name]?.meta === OWNER_DECISIONS.older && said[PEOPLE.sofia.name]?.meta?.includes(OWNER_DECISIONS.left), JSON.stringify(point && point.people));
+    await snapshot(page, "owner-decision", "lista");
+    check("screens: owner decisions: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+}
+
 // ---- the owner's view of the «Decisiones» section -------------------------------------------------------------
 // The owner of a project sees, on its page after the pieces' part, every point of the section with how many people
 // answered each way, silence said as «Sin respuesta» and never counted as «Va», and what the people proposed; «Ver
@@ -4310,9 +4417,11 @@ async function ownerDecisionsChecks(browser, base, html) {
 
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 // The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, an
-// owned project's page with the owner's part (captured with --flow and --demo too), and a project's page with a received
-// piece, a replaced version that was sent and a change request (the piece closure).
-const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received"];
+// owned project's page with the owner's part (captured with --flow and --demo too), a project's page with a received
+// piece, a replaced version that was sent and a change request (the piece closure), and the «Decisiones» screens
+// (decisionsScreens).
+const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received",
+  "project-decisions", "project-decisions-errors", "project-decisions-only", "project-owner-decisions", "owner-decision"];
 const GRID_CUTS = [320, 672, 1056, 1312, 1584];
 // A screen's exceptions, by rule code, each with its reason in the rule's own words.
 const GEOMETRY_EXCEPTIONS = {
@@ -4396,7 +4505,7 @@ async function portalGeometryChecks(browser, base, html, factory) {
   const passes = (r) => r.ok || Boolean(r.exceptuada);
   const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
   const names = PORTAL_SCREENS;
-  check("geometry: the seven screens were captured", names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+  check(`geometry: the ${names.length} screens were captured`, names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
   const server = await serveDir(screensDir);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const frames = {}; // `${width}-${scheme}` -> the frame's content box on home, the projects (the other screens' reference)
@@ -4488,6 +4597,7 @@ try {
   if (args.questions && args.flow && args.demo) await ownerViewChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await decisionsChecks(browser, base, read(args.questions));
   if (args.questions) await ownerDecisionsChecks(browser, base, read(args.questions));
+  if (args.questions) await decisionsScreens(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
@@ -4516,7 +4626,7 @@ if (args.factory) {
   const verifier = join(resolve(args.factory), "design-system", "assets", "verifica-pantalla.mjs");
   if (!existsSync(verifier)) check("manual: verifica-pantalla.mjs found", false, verifier);
   else {
-    check("manual: the seven screens were captured", PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+    check(`manual: the ${PORTAL_SCREENS.length} screens were captured`, PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
     for (const [name, pattern] of screens) {
       for (const width of [320, 768, 1440]) {
         for (const scheme of ["light", "dark"]) {
