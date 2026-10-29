@@ -3796,6 +3796,7 @@ const liveText = (page) => page.evaluate(() => document.querySelector("[data-rol
 async function decisionsChecks(browser, base, html) {
   const sectionShown = (page) => waitFor(async () => { const s = await decisionsSection(page); return s && s.points.length ? s : null; }, 10000);
 
+
   // section-after-pieces, owner-sees-line, the marks, the choices, comment-required-for-change, answer-sent-confirmed-in-page,
   // propose-always-available and opened-once-per-visit, on one visit.
   {
@@ -4406,6 +4407,50 @@ async function ownerDecisionsChecks(browser, base, html) {
       !backend.decisionCalls.some((c) => OWNER_WRITES.includes(c.rpc)) && backend.decisions[IDS.ownedProject].answers.length === 7 && writesIn(backend.requests).length === 0,
       JSON.stringify(backend.decisionCalls.map((c) => c.rpc)));
     check("owner-decisions: one visit: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // owner-decisions-alignment: every person's row has one anatomy at every width. From 1056 px the row is a list row of three
+  // equal columns, as every list of the portal: the name, then the dates with the comment and the earlier answers under them,
+  // then the answer, each column on the same x down the list. Below, the name on the row's left with the answer on its right
+  // edge, and the dates, the comment and the earlier answers under them on the name's x.
+  for (const width of [320, 768, 1056, 1440]) {
+    const backend = ownerDecisionsBackend(html);
+    // With Tomás, who answered before the point changed: his row carries the earlier answers' fold.
+    const entry = backend.decisions[IDS.ownedProject];
+    entry.members.push({ id: PLAIN.tomas.id, display_name: PLAIN.tomas.name, role: "stakeholder", created_at: "2026-10-07T12:00:00.000Z" });
+    entry.audience.push(PLAIN.tomas.id);
+    entry.answers.push({ id: randomUUID(), member_id: PLAIN.tomas.id, key: OKEY.trips, version: "e10000000000", value: "yes", comment: null, created_at: OAT.before });
+    const { context, page } = await openMocked(browser, base, backend, detailHref(OKEY.trips), width);
+    await detailShown(page, OTITLE.trips);
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".owner-answer")].map((el) => {
+      const text = (sel) => {
+        const node = el.querySelector(sel);
+        if (!node) return null;
+        const range = document.createRange(); range.selectNodeContents(node);
+        const rects = [...range.getClientRects()].filter((r) => r.width > 0);
+        return rects.length ? { x: Math.round(Math.min(...rects.map((r) => r.left))), der: Math.round(Math.max(...rects.map((r) => r.right))), top: Math.round(Math.min(...rects.map((r) => r.top))) } : null;
+      };
+      const box = el.getBoundingClientRect();
+      return { row: { x: Math.round(box.left), der: Math.round(box.right) }, name: text(".row-title"), answer: text(".owner-answer-value"),
+        // The fold by its box: its words start after the chevron.
+        meta: text(":scope > .row-meta"), comment: text(":scope > .owner-answer-comment"),
+        history: el.querySelector(":scope > details > summary") ? { x: Math.round(el.querySelector(":scope > details > summary").getBoundingClientRect().left) } : null };
+    }));
+    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+    const same = (xs) => xs.every((x) => near(x, xs[0]));
+    const under = rows.flatMap((r) => [r.meta, r.comment, r.history].filter(Boolean));
+    let ok = rows.length === 5 && rows.every((r) => r.name && r.answer) && same(rows.map((r) => r.name.x)) && same(under.map((x) => x.x));
+    if (width >= 1056) {
+      const step = (rows[0].row.der - rows[0].row.x + 16) / 3;
+      ok = ok && same(rows.map((r) => r.answer.x)) && rows.every((r) => near(r.name.x, r.row.x) && Math.abs(r.answer.x - r.row.x - 2 * step) <= 2 &&
+        [r.meta, r.comment, r.history].filter(Boolean).every((x) => Math.abs(x.x - r.row.x - step) <= 2) && near(r.answer.top, r.name.top));
+    } else {
+      ok = ok && same(rows.map((r) => r.answer.der)) && rows.every((r) => near(r.name.x, r.row.x) && near(r.answer.der, r.row.der) && near(r.answer.top, r.name.top) &&
+        under.every((x) => near(x.x, r.row.x)));
+    }
+    check(`owner-decisions-alignment ${width}px: every person's row has one anatomy: ${width >= 1056 ? "name · dates and comment · answer, in three equal columns aligned down the list"
+      : "the name on the left, the answer on the right edge, the dates and the comment under them on the name's x"}`, ok, JSON.stringify(rows));
     await context.close();
   }
 
