@@ -200,14 +200,16 @@ main { padding-block: var(--space-6) var(--space-7); }
 .piece-heading { min-width: 0; max-width: 100%; font-size: var(--text-body); line-height: 1.3; }
 .piece-title { display: inline; font-size: var(--text-body); font-weight: 600; line-height: 1.3; }
 .piece-status { color: var(--muted); font-size: var(--text-small); }
-.piece-status:not([hidden]) { display: inline-block; margin-inline-start: var(--space-2); }
+/* A space in the DOM separates it from the title (pieceLayout): at a line break the space goes, so on its own line the
+   save line starts on the title's edge. */
+.piece-status:not([hidden]) { display: inline-block; }
 @media (min-width: 672px) {
   .piece-bar { row-gap: var(--space-1); padding-block: var(--space-1) var(--space-3); }
   .back-link-long { display: inline; }
   .back-link-short { display: none; }
   .piece-heading { display: grid; gap: var(--space-1); }
   .piece-title { display: block; }
-  .piece-status:not([hidden]) { display: block; margin-inline-start: 0; }
+  .piece-status:not([hidden]) { display: block; }
 }
 .piece-layout .notices { margin: 0 0 var(--space-3); }
 /* A closed piece (received, or a replaced version that was sent): its notices, the earlier change requests and the

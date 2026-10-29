@@ -1345,6 +1345,27 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     check(`${tag}: «← Volver» is one line and its name is «Volver a ${name.length > 30 ? name.slice(0, 30) + "…" : name}»`,
       at.back && at.back.lines === 1 && at.back.text.replace(/\s+/g, " ") === "← Volver" && at.back.label === `Volver a ${name}` && named === 1, JSON.stringify({ ...at.back, named }));
   };
+  // The first change makes the portal say «Guardado»: on the title's last line when it fits (inside that line, after its
+  // text), or right below it on the title's left edge (the brand's).
+  const savedLine = async (tag, page, frame) => {
+    if (frame) await frame.evaluate(() => responder("q-001", "si"));
+    const saved = await waitFor(() => page.evaluate(() => {
+      window.scrollTo(0, 0);
+      const s = document.querySelector(".piece-status"), t = document.querySelector("h1.piece-title");
+      if (!s || s.hidden || !s.textContent.includes("Guardado")) return null;
+      const range = document.createRange(); range.selectNodeContents(t);
+      const lines = [...range.getClientRects()].filter((r) => r.width > 0);
+      const last = lines[lines.length - 1], box = s.getBoundingClientRect();
+      return { status: { top: Math.round(box.top), bottom: Math.round(box.bottom), left: Math.round(box.left) }, titleLeft: Math.round(lines[0].left),
+        lastLine: { top: Math.round(last.top), bottom: Math.round(last.bottom), right: Math.round(last.right) } };
+    }), 5000);
+    const sameLine = saved && saved.status.top < saved.lastLine.bottom;
+    check(`${tag}: «Guardado» goes on the title's last line when it fits, or right below it on the title's edge`, saved && (sameLine
+      ? saved.status.top >= saved.lastLine.top - 2 && saved.status.bottom <= saved.lastLine.bottom + 2 && saved.status.left >= saved.lastLine.right
+      : Math.abs(saved.status.left - saved.titleLeft) <= 1 && saved.status.top >= saved.lastLine.bottom - 1 && saved.status.top <= saved.lastLine.bottom + 8),
+      JSON.stringify({ ...saved, sameLine }));
+    return saved;
+  };
   const fitCheck = async (tag, what, page, frame) => {
     const m = frame ? await settled(page, frame) : null;
     check(`${tag}: ${what}: the iframe is as tall as the piece and the piece does not scroll inside`, fits(m), JSON.stringify(m));
@@ -1362,21 +1383,8 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     const down = await stuckOf(page);
     check(`${tag}: one screen down nothing fixed or sticky is on screen, and the masthead went up`, down.scrollY > PHONE_FRAME_MAX &&
       down.stuck.length === 0 && down.masthead <= 0, JSON.stringify(down));
-    // The first change: «Guardado» on the title's last line, or right below it.
-    if (frame) await frame.evaluate(() => responder("q-001", "si"));
-    const saved = await waitFor(() => page.evaluate(() => {
-      window.scrollTo(0, 0);
-      const s = document.querySelector(".piece-status"), t = document.querySelector("h1.piece-title");
-      if (!s || s.hidden || !s.textContent.includes("Guardado")) return null;
-      const range = document.createRange(); range.selectNodeContents(t);
-      const lines = [...range.getClientRects()].filter((r) => r.width > 0);
-      const last = lines[lines.length - 1], box = s.getBoundingClientRect();
-      return { status: { top: Math.round(box.top), bottom: Math.round(box.bottom), left: Math.round(box.left) },
-        lastLine: { top: Math.round(last.top), bottom: Math.round(last.bottom), right: Math.round(last.right) } };
-    }), 5000);
-    check(`${tag}: «Guardado» goes on the title's last line when it fits, or right below it`, saved &&
-      ((saved.status.top < saved.lastLine.bottom && saved.status.left >= saved.lastLine.right) ||
-       (saved.status.top >= saved.lastLine.bottom - 1 && saved.status.top <= saved.lastLine.bottom + 8)), JSON.stringify(saved));
+    // The first change: «Guardado» right below the title (its one line is full).
+    await savedLine(tag, page, frame);
     // A step of the sheet, the page scrolled to its bottom: «Siguiente» shows the next step's title.
     const steps = frame && await frame.evaluate(() => (paged() ? steps().length : 0)).catch(() => 0);
     if (frame && steps > 1) {
@@ -1384,7 +1392,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       await settled(page, frame);
       const before = await frame.evaluate(() => document.getElementById("view-title")?.textContent);
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await frame.click("button[data-rol=accion-principal]");
+      await steadyClick(frame.locator("button[data-rol=accion-principal]"));
       await settled(page, frame);
       await sleep(200);
       const after = await frame.evaluate(() => document.getElementById("view-title")?.textContent);
@@ -1424,8 +1432,18 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
   // A title of TITLE_MAX characters still ends the title band at 160 px or less.
   {
     const tag = `phone ${engineName}: a title of ${TITLE_MAX} characters`;
-    const { context, page } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = TITLE_AT_MAX; });
+    const { context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = TITLE_AT_MAX; });
     await rest(tag, page, { title: TITLE_AT_MAX });
+    await savedLine(tag, page, frame);
+    await context.close();
+  }
+
+  // A short title: «Guardado» fits after it, on its line.
+  {
+    const tag = `phone ${engineName}: a short title`;
+    const { context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = "Preguntas del proyecto"; });
+    const saved = await savedLine(tag, page, frame);
+    check(`${tag}: «Guardado» fits on the title's line, and goes there`, saved && saved.status.top < saved.lastLine.bottom, JSON.stringify(saved));
     await context.close();
   }
 

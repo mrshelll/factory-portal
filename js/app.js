@@ -736,7 +736,8 @@ function pieceLayout(titleText, back = homeBack()) {
         masthead([], "div"),
         h("div", { class: "piece-bar" },
           backLink(back, { short: true }),
-          h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, status))),
+          // The space parts the title and the save line on one line, and goes at a line break (portal.css).
+          h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, " ", status))),
       pinned, notices),
     main));
   return { pinned, notices, title, status, main, live };
@@ -761,7 +762,7 @@ function followPiece(iframeOf) {
     const limit = height === null ? frameBox.height : height;
     pending = top > limit ? { request: { top, bottom, ifNeeded }, at: Date.now() } : null;
     const from = Math.min(Math.max(top, 0), limit);
-    const to = Math.min(Math.max(bottom, from), limit);
+    const to = Math.min(Math.max(bottom ?? from, from), limit);
     // The piece's top in the page, and the part of the page on screen (the visual viewport: a phone's keyboard hides
     // the rest).
     const start = frameBox.top + iframe.clientTop + window.scrollY;
