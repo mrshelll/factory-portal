@@ -77,21 +77,22 @@ function masthead(headerActions = [], tag = "header") {
   // The brand is a link home, on every screen after signing in (the logo is the way to «Tus proyectos»); on home itself it is
   // the current page. On the sign-in screens there is no home to go to, so it is the mark alone: tapping it would only wipe
   // the code being typed.
+  const mark = [logo(), h("span", {}, t("brand"))];
   const brand = state.view === "sign-in"
-    ? h("div", { class: "brand", "data-rol": "marca-producto" }, logo(), h("span", {}, t("brand")))
+    ? h("div", { class: "brand", "data-rol": "marca-producto" }, mark)
     : h("a", { class: "brand", "data-rol": "marca-producto", href: "#/", "aria-label": t("brandHome"),
-      "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, logo(), h("span", {}, t("brand")));
+      "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, mark);
   return h(tag, { class: "masthead" },
     brand,
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
 }
 
 // «← Tus proyectos», «← {project}»: where the screen goes back to. The arrow is not read; the link's name says where.
-// short: below 672 px the link reads «← Volver», one line whatever the destination's name (MAR-14), and its name still
-// says where («Volver a {project}»); from 672 it shows the destination (portal.css).
-function backLink({ href, text, label }, { short = false } = {}) {
+// Below 672 px the link reads «← Volver», one line whatever the destination's name (MAR-14), and its name still says
+// where («Volver a {project}»); from 672 it shows the destination (portal.css).
+function backLink({ href, text, label }) {
   return h("a", { class: "back-link", href, "aria-label": label }, h("span", { "aria-hidden": "true" }, "←"),
-    short ? [h("span", { class: "back-link-long" }, text), h("span", { class: "back-link-short" }, t("backShort"))] : text);
+    h("span", { class: "back-link-long" }, text), h("span", { class: "back-link-short" }, t("backShort")));
 }
 const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backToProjectsLabel") });
 
@@ -108,7 +109,7 @@ function frameLayout({ title, meta = [], headerActions = [], back = null }) {
     masthead(headerActions),
     h("main", { id: "main", class: back ? "context-wide" : null },
       h("div", { "data-rol": "marco" },
-        back ? h("p", { class: "page-context page-context--wide" }, backLink(back, { short: true })) : null,
+        back ? h("p", { class: "page-context page-context--wide" }, backLink(back)) : null,
         h("div", { class: "page-head", "data-rol": "cabecera" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
@@ -744,7 +745,7 @@ function pieceLayout(titleText, back = homeBack()) {
       h("header", {},
         masthead([], "div"),
         h("div", { class: "piece-bar" },
-          backLink(back, { short: true }),
+          backLink(back),
           // The space parts the title and the save line on one line, and goes at a line break (portal.css).
           h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, " ", status))),
       pinned, notices),

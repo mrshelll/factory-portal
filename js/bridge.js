@@ -462,12 +462,12 @@ function bridgeRuntime(cfg) {
   // nor changes its location.hash. Links to elsewhere, new tabs, downloads, modified clicks and links the piece
   // already handled (defaultPrevented) are left alone. Listening on the window, the piece's handlers run first.
   function anchorTarget(id) {
-    var el = null;
+    if (!id) return null;
     try {
-      el = id ? document.getElementById(id) : null;
-      if (!el && id && typeof document.getElementsByName === "function") el = document.getElementsByName(id)[0] || null;
-    } catch (e) { el = null; }
-    return el;
+      var el = document.getElementById(id);
+      if (!el && typeof document.getElementsByName === "function") el = document.getElementsByName(id)[0] || null;
+      return el;
+    } catch (e) { return null; }
   }
   window.addEventListener("click", function (event) {
     if (!event || event.defaultPrevented || event.button !== 0) return;
