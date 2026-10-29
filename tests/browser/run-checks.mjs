@@ -4654,7 +4654,9 @@ const GEOMETRY_EXCEPTIONS = {
 // row box (the link or the entry, without its padding), and the text of its three parts: the title (a person's name with
 // its «Ver lo que envió» in the owner's part), the meta line (people, dates) and the state or the aside. Text boxes are the
 // text's own rects, never a padded box.
-const LIST_SCREENS = ["home-projects", "project-page", "project-owner", "project-received"];
+// The «Decisiones» screens with rows of the list (the pieces' list, the owner's points): their other rows (a point to answer, a
+// proposal, a person's answers) are not row links nor entries, and listColumns leaves them out.
+const LIST_SCREENS = ["home-projects", "project-page", "project-owner", "project-received", "project-decisions", "project-owner-decisions"];
 const listColumns = (page) => page.evaluate(() => {
   const textBox = (el) => {
     if (!el) return null;
@@ -4669,7 +4671,7 @@ const listColumns = (page) => page.evaluate(() => {
       top: Math.round(Math.min(...rects.map((x) => x.top))), bottom: Math.round(Math.max(...rects.map((x) => x.bottom))) } : null;
   };
   const boxOf = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
-  return [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row")].map((li) => {
+  return [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row")].filter((li) => li.querySelector(":scope > .row-link, :scope > .row-item")).map((li) => {
     const row = li.querySelector(":scope > .row-link, :scope > .row-item");
     const main = row && row.querySelector(":scope > .row-main");
     const state = row && row.querySelector(":scope > .row-aside, :scope > .status");
@@ -4711,7 +4713,7 @@ function listColumnChecks(name, width, scheme, rows) {
   } else if (width >= 672) {
     check(`${tag}: as before the columns, the title on the row's left, the meta under it, the state on the row's right edge`, ok &&
       rows.every((r) => near(r.title.x, r.row.x) && near(r.state.der, r.row.der) && (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
-  } else if (name !== "project-owner") {
+  } else if (!["project-owner", "project-owner-decisions"].includes(name)) {
     check(`${tag}: as before the columns, the title, the meta and the state one under another on the title's edge`, ok &&
       rows.every((r) => near(r.title.x, r.row.x) && near(r.state.x, r.row.x) && r.state.top >= (r.meta || r.title).bottom - 1 &&
         (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
