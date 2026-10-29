@@ -285,8 +285,10 @@ check the email they were invited with, carrying its own action «Entrar con otr
 right after it in the same column at every width, «Actualizar», the view's `accion-principal`, as wide as the body up
 to the form measure like the sign-in buttons, as MAR-06 asks of an empty state. It does not reach FUN-43's 60 % from 1056 px and
 carries that rule's empty-view exception, with its reason, in the geometry check. From 1056 px the rows of every list
-(home's projects, a project's pieces, the owner's entries) are three equal columns: the title, the meta line and the
-state or aside, each on the same x down the list (FUN-43, «el grupo tabular como tabla»); from 672 to 1056 px the state
+(home's projects, a project's pieces, the owner's entries) are equal columns, decided by the list, not by the row: three
+(the title, the meta line and the state or aside) as soon as one row of the list has a meta line, a row without one
+leaving its middle cell empty; two (the title and the state or aside) when no row has one (every project is another
+person's). Each column falls on the same x down the list (FUN-43, «el grupo tabular como tabla»); from 672 to 1056 px the state
 stays on the row's right, and below 672 px the rows keep their phone layout.
 
 ## The sign-in code email
