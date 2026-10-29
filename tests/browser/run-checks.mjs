@@ -3689,6 +3689,9 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
 // 2026-10-25 página del proyecto §4.1–4.3).
 const DECISIONS = {
   title: "Decisiones",
+  signOutUnsent: "Escribiste en Decisiones algo que todavía no enviaste. Si sales, se perderá.",
+  signOutLose: "Salir y perder lo escrito",
+  stay: "Quedarme",
   lead: "Esto ya se decidió. Dinos si va, si lo cambiarías o si no va. Si no respondes, la decisión sigue como está.",
   choices: ["Va", "Lo cambiaría", "No va", "No sé"],
   marks: { new: "Nuevo", changed: "Cambió desde tu respuesta", confirmed: "Ya lo confirmaste" },
@@ -3849,6 +3852,44 @@ async function decisionsChecks(browser, base, html) {
     const [yes, change, no] = [await look("yes"), await look("change"), await look("no")];
     check("decisions-forced-colors: under forced colours the chosen answer's mark is painted unlike the others', which look alike", chosen && yes && change && no &&
       yes !== change && change === no, JSON.stringify({ chosen, yes, change, no }));
+    await context.close();
+  }
+
+  // decisions-sign-out-unsent: signing out with a comment or a proposal typed and not sent asks first, as with an unsent change
+  // request (same notice, «Quedarme» keeps what was typed); a comment that is the one already sent is not unsent.
+  {
+    const backend = decisionsBackend(html);
+    backend.decisions[IDS.project].answers.find((a) => a.key === DKEY.c).comment = "Bien así.";
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    await sectionShown(page);
+    const signOut = () => page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
+    const askedNow = () => waitFor(async () => page.evaluate((text) => {
+      const n = document.querySelector("[data-rol=avisos] .notice");
+      return n && n.textContent.includes(text) ? { buttons: [...n.querySelectorAll("button")].map((b) => b.textContent) } : null;
+    }, DECISIONS.signOutUnsent), 5000);
+    const signedIn = async () => (await page.evaluate((k) => Boolean(localStorage.getItem(k)), STORAGE_KEY)) && !(await page.$("#email"));
+    const commentOf = (key) => page.locator(`.decision[data-key="${key}"] textarea`);
+    // The comment opens with an answer that asks for it («Lo cambiaría»).
+    await page.locator(`.decision[data-key="${DKEY.a}"] label.choice:has(input[value="change"])`).click({ timeout: 3000 }).catch(() => {});
+    for (const [what, field, text] of [["a comment", () => commentOf(DKEY.a), "Que lo confirme quien conduce."], ["a proposal", () => page.locator("#decisions-propose-text"), "Falta el horario."]]) {
+      await field().fill(text, { timeout: 3000 }).catch(() => {});
+      await signOut();
+      const asked = await askedNow();
+      check(`decisions-sign-out-unsent: with ${what} typed and not sent, «Salir» asks «${DECISIONS.signOutUnsent}» and signs nothing out yet`,
+        asked && asked.buttons.includes(DECISIONS.signOutLose) && asked.buttons.includes(DECISIONS.stay) && await signedIn(), JSON.stringify(asked));
+      await page.click(`text=${DECISIONS.stay}`, { timeout: 3000 }).catch(() => {});
+      const kept = await field().inputValue().catch(() => null);
+      const gone = await page.evaluate(() => !document.querySelector("[data-rol=avisos] .notice"));
+      check(`decisions-sign-out-unsent: «${DECISIONS.stay}» keeps ${what} and closes the notice`, kept === text && gone, JSON.stringify({ kept, gone }));
+      await field().fill("", { timeout: 3000 }).catch(() => {});
+    }
+    // Nothing typed but the comment already sent with «Va» (point c): «Salir» signs out at once.
+    const prefilled = await commentOf(DKEY.c).inputValue().catch(() => null);
+    await signOut();
+    const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k) } : null), STORAGE_KEY), 10000);
+    check("decisions-sign-out-unsent: with only the comment already sent, «Salir» signs out without asking", prefilled === "Bien así." && out && !out.session,
+      JSON.stringify({ prefilled, out }));
+    check("decisions-sign-out-unsent: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
 

@@ -43,6 +43,7 @@ const state = {
   statusListeners: new Map(), // pieceId -> save status callback of the open piece screen
   lateSend: null,             // { userId, pieceId, requestId }: a send that arrived after the close, said once on reopening
   requestTexts: new Map(),    // `${userId}|${pieceId}` -> a change request being written (kept if the session ends)
+  decisionsUnsent: null,      // () => true while the «Decisiones» section on screen holds a comment or a proposal not sent
 };
 
 const t = (key, params) => translate(state.lang, key, params);
@@ -423,12 +424,16 @@ async function signOut(notices) {
   const saved = await trySaveAll(state.savers.values(), SIGN_OUT_SAVE_MS);
   state.signingOut = false;
   const unsent = hasUnsentRequest();
-  if (!saved || unsent) {
-    const text = !saved && unsent ? t("unsavedAndRequestSignOut") : saved ? t("unsentRequestSignOut") : t("unsavedSignOut");
+  // A comment or a proposal typed in «Decisiones» and not sent is lost on signing out, as an unsent change request.
+  const written = typeof state.decisionsUnsent === "function" && state.decisionsUnsent();
+  if (!saved || unsent || written) {
+    const text = !saved
+      ? (written ? t("unsavedAndWrittenSignOut") : unsent ? t("unsavedAndRequestSignOut") : t("unsavedSignOut"))
+      : written ? (unsent ? t("unsentWrittenSignOut") : t("unsentDecisionsSignOut")) : t("unsentRequestSignOut");
     showNotice(notices, {
       tone: "warning", text, dismissible: false,
       actions: [
-        { label: saved ? t("signOutLoseRequest") : t("signOutAnyway"), onClick: finishSignOut },
+        { label: !saved ? t("signOutAnyway") : written ? t("signOutLoseWritten") : t("signOutLoseRequest"), onClick: finishSignOut },
         { label: t("stay"), onClick: () => clearNotice(notices) },
       ],
     });
@@ -449,6 +454,7 @@ async function finishSignOut() {
   disposeSavers();
   state.draftOwner = null;
   state.requestTexts.clear(); // a change request being written is the account's, not the next person's on this device
+  state.decisionsUnsent = null;
   state.lateSend = null;
   clearPendingSignIn();
   history.replaceState(null, "", `${location.pathname}${location.search}`);
@@ -894,6 +900,10 @@ function decisionsSection({ projectId, viewId, points, live }) {
   const sending = new Set(); // point keys whose answer is on its way
   const shown = new Map();  // point key -> the point as shown now ({ point, item, setSending, confirm, showFailure })
   const list = h("ol", { class: "rows decisions-points" });
+  let proposeInput = null;
+  // Something typed here and not sent (a comment that is not the one already sent, a proposal): signing out asks first.
+  state.decisionsUnsent = () => viewId === state.viewId &&
+    ([...shown.values()].some((entry) => entry.unsent()) || Boolean(proposeInput && /\S/.test(proposeInput.value)));
 
   // The section again as the server has it. false when it could not be read (the caller says so in the point); a person no
   // longer in the list, or a section left without points, gets the page as it is now.
@@ -1066,7 +1076,9 @@ function decisionsSection({ projectId, viewId, points, live }) {
                 h("span", {}, t(ANSWER_KEYS[radio.value]))))),
             commentField, failure, button))));
     reveal();
-    shown.set(key, { point, item, setSending, confirm, showFailure });
+    const sentComment = current && typeof current.comment === "string" ? current.comment.trim() : "";
+    const unsent = () => /\S/.test(comment.value) && comment.value.trim() !== sentComment;
+    shown.set(key, { point, item, setSending, confirm, showFailure, unsent });
     return item;
   }
 
@@ -1075,6 +1087,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
   function proposeForm() {
     const input = h("textarea", { id: "decisions-propose-text", name: "proposal", rows: "4", maxlength: String(DECISION_TEXT_MAX),
       "aria-describedby": "decisions-propose-error" });
+    proposeInput = input;
     const error = fieldError("decisions-propose-error");
     const failure = h("div", { class: "decision-notice" });
     const button = h("button", { type: "submit", class: "button button--secondary" }, t("proposeSend"));
