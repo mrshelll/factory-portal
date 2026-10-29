@@ -221,10 +221,12 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 /* The owner's view of the section (app.js ownerDecisionsPart, showOwnerDecision: the manual's «lista»). On the project's
    page, after the pieces' part, its title and lead, then one row per point as the pieces' rows read: the point's title,
    its counts in muted text, and «Ver respuestas» on the row's right (the owner's link, a 44 px target); then what people
-   proposed, each by name and date over its text. A point's screen lists each person: the name in the text colour and the
-   answer that counts on its right in the same weight, the dates and «Ya no está en la lista» under them in muted text, the
-   comment under them in the text colour, on the row's own start line (MAR-10: no indent of its own), and the earlier answers folded as
-   «En qué se apoya» is. Texts keep the reading measure and break anywhere (a long word or address never widens the page). */
+   proposed, each by name and date over its text. A point's screen lists each person: the name in the text colour and regular
+   weight, and the answer that counts on its right, small and in bold (the row's one emphasis); the dates, «Ya no se le
+   pregunta» and «Respondió a la versión anterior del punto» under them in muted text; the comment under them in the text
+   colour, on the row's own start line (MAR-10: no indent of its own); and the earlier answers folded as «En qué se apoya» is
+   (from 1056 px the row's three columns, below). Texts keep the reading measure and break anywhere (a long word or address
+   never widens the page). */
 .owner-decisions .owner-lead { margin-bottom: var(--space-3); }
 .owner-proposals { margin-top: var(--space-5); }
 .owner-proposals h3 { margin: 0 0 var(--space-3); font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
