@@ -40,10 +40,16 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    answer; a project the person owns says so (with its people and the last response).
    The lists never fetch `pieces.html`; it is fetched only when a piece is opened.
 3. **A project's page** (`#/project/<id>`): first, under the title band, the line «El responsable del
-   proyecto ve cuándo abres lo que te compartimos y lo que envías.» (`projectOwnerSees`; an owner with
-   nothing asked of them does not get it); then the person's own items under «Lo que se te pidió», grouped
-   as before, with status (not started, in progress, sent, received) and date. Every item opens
-   at `#/piece/<id>`. The owner's part comes last. See **The owner's part** below.
+   proyecto ve cuándo abres lo que te compartimos o esta sección, y lo que envías.» (`projectOwnerSees`; an
+   owner with nothing asked of them does not get it); then the person's own items under «Lo que se te pidió»,
+   grouped as before, with status (not started, in progress, sent, received) and date. Every item opens
+   at `#/piece/<id>`. Then, for a person in the project's list, the **«Decisiones»** section: each point the
+   factory published (what was decided, and «En qué se apoya» folded), answered with «Va», «Lo cambiaría»,
+   «No va» or «No sé» and a comment (optional with «Va», required with the others), and «¿Falta algo?» to
+   propose what is missing. A point already answered on the version shown is folded to its answer line and
+   «Cambiar respuesta». A project with only the section (no pieces for the person) is listed at home too.
+   The owner's part comes last, with the section's counts and what people proposed; each point opens at
+   `#/project/<id>/decisions/<key>`, how each person answered it (read only). See **The owner's part** below.
 4. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
@@ -91,8 +97,9 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
 
 ### The owner's part
 
-Routes: `#/` (home), `#/project/<id>`, `#/piece/<id>` and `#/project/<p>/piece/<x>/person/<m>` (the owner
-reading one person's send). The routes are pure functions in `js/project.js`.
+Routes: `#/` (home), `#/project/<id>`, `#/piece/<id>`, `#/project/<p>/piece/<x>/person/<m>` (the owner
+reading one person's send) and `#/project/<p>/decisions/<key>` (the owner reading how each person answered one
+point of «Decisiones»). The routes are pure functions in `js/project.js`.
 
 The owner of a project (the member with `role = 'owner'`, which the factory sets after a publish through `factory_set_owner`) sees,
 besides their own items, the section «Avance de lo que compartiste»: per piece, one entry per person
@@ -356,10 +363,36 @@ Steps in the Supabase panel (the owner does them; the app password is typed in t
   person still reads only their own rows. Applied to `factory` on 2026-10-28, by hand from the SQL
   editor; its history row was inserted by hand with the file's version (`20261025120000`), so the name
   stays. It is idempotent.
+- `20261028120000_decisions.sql` is the «Decisiones» section: five tables (`decision_points`, `decision_audience`,
+  `decision_answers`, `decision_proposals`, `decision_opens`) with row level security on, no policy and no table
+  privilege for `anon` or `authenticated`, so the browser reaches them only through functions; answers are a history
+  (every answer is a new row; nothing updates or deletes one). Functions for people (execute for `authenticated`):
+  `decision_projects`, `my_decisions`, `answer_decision`, `propose_decision`, `mark_decisions_opened` and the
+  owner's read-only `owner_decisions` (it checks first that the caller is the project's `owner`). Factory-only
+  (execute for `service_role`): `factory_publish_decisions`, `factory_fetch_decisions`,
+  `factory_mark_decisions_fetched`. `factory_publish`, `owner_project` and `save_draft` are not touched. It is
+  idempotent (safe to run twice). **Not applied yet.**
+  - Dry run first, as one request against `factory` (Supabase SQL editor, MCP `execute_sql`, or psql as `postgres`):
+    `begin;`, then the whole migration, then the whole `tests/sql/decisions-checks.sql`. The checks file ends with
+    `rollback;`, which undoes the migration too (its own `begin;` only warns that a transaction is open). It must
+    print the NOTICE and return one row `decisions: ok 15 checks`; any failure raises an exception and nothing stays.
+  - Apply: one transaction with the migration and its history row, so the file's version stays the registered one:
+
+    ```sql
+    begin;
+    -- the whole of supabase/migrations/20261028120000_decisions.sql
+    insert into supabase_migrations.schema_migrations (version, name)
+      values ('20261028120000', 'decisions') on conflict (version) do nothing;
+    commit;
+    ```
+
+    Then run `tests/sql/decisions-checks.sql` alone against `factory` (it rolls back its own data): `decisions: ok 15
+    checks`.
 
 `tests/sql/factory-connection-checks.sql` checks the factory connection migration,
-`tests/sql/piece-closure-checks.sql` checks the piece closure and `tests/sql/project-page-checks.sql`
-checks the project page, all against the database (see their headers).
+`tests/sql/piece-closure-checks.sql` checks the piece closure, `tests/sql/project-page-checks.sql`
+checks the project page and `tests/sql/decisions-checks.sql` checks «Decisiones» (15 checks), all against the
+database (see their headers).
 
 ## Keeping Supabase awake
 
@@ -505,12 +538,13 @@ portal at the width a person sees them.
 | `index.html`, `css/portal.css` | Page shell and the portal's own styles (on top of the brand and its components) |
 | `brand/` | Generated copy of the ninben brand (`ninben.css`, `ninben-components.css`, `logo.svg`, `fonts/`) |
 | `scripts/sync-brand.mjs` | Copies the brand from the software factory repo, or checks the copy |
-| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection, the piece closure and the project page |
+| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection, the piece closure, the project page and «Decisiones» (`20261028120000_decisions.sql`) |
 | `supabase/templates/` | The sign-in code email: `otp-code.html` and `otp-code.subject.txt` (pasted in the Supabase panel) |
 | `.github/workflows/keep-alive.yml` | Calls `keep_alive()` every 3 days so Supabase does not pause |
 | `config.js` | Public Supabase configuration |
 | `js/app.js` | Router and screens: sign in, home, a project's page (and the owner's part), piece |
 | `js/project.js` | Routes and the states the owner reads, as pure functions |
+| `js/decisions.js` | «Decisiones» rules as pure functions: the answers, when a comment is required, the marks, the owner's counts line, the projects with only the section |
 | `js/api.js` | Supabase queries and RPCs |
 | `js/bridge.js` | Script injected into each piece (storage shim, `factorySubmit`, `factoryHost`, height and scroll messages) |
 | `js/piece-frame.js` | Mounts a piece in the sandboxed iframe and speaks the bridge protocol |
