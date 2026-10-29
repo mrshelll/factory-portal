@@ -4336,7 +4336,7 @@ async function decisionsScreens(browser, base, html) {
 // The owner of a project sees, on its page after the pieces' part, every point of the section with how many people
 // answered each way, silence said as «Sin respuesta» and never counted as «Va», and what the people proposed; «Ver
 // respuestas» opens one point: its text, then each person with their latest answer and comment, «Sin respuesta» for
-// silence, «Respondió antes de que cambiara» for an answer on an older version, «Ya no está en la lista» for a person
+// silence, «Respondió a la versión anterior del punto» for an answer on an older version, «Ya no se le pregunta» for a person
 // removed from the list, their earlier answers, and when they last opened the section. Read only: nothing answers, sends
 // or records (spec 2026-10-25 página del proyecto §4.3, §4.5).
 const OWNER_DECISIONS = {
@@ -4346,8 +4346,8 @@ const OWNER_DECISIONS = {
   seeLabel: (title) => `Ver respuestas sobre ${title}`,
   peopleTitle: "Cómo respondió cada persona",
   noAnswer: "Sin respuesta",
-  older: "Respondió antes de que cambiara",
-  left: "Ya no está en la lista",
+  older: "Respondió a la versión anterior del punto",
+  left: "Ya no se le pregunta",
   answeredOn: (date) => `Respondió el ${date}`,
   openedOn: (date) => `Abrió la sección el ${date}`,
   history: "Respuestas anteriores",

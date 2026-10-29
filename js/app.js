@@ -722,7 +722,7 @@ function ownerDecisionsPart(projectId, view) {
         h("p", { class: "owner-proposal-text" }, x.text))))) : null);
 }
 
-// One answer as the owner reads it: the answer's word and its date, with «Respondió antes de que cambiara» when it was
+// One answer as the owner reads it: the answer's word and its date, with «Respondió a la versión anterior del punto» when it was
 // given on an older version of the point.
 function historyEntry(entry, version) {
   const parts = [t(ANSWER_KEYS[entry.value] || "ownerNoAnswer")];
