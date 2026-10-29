@@ -183,7 +183,8 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
    weight (they are answers, not field labels). The fold is the pieces' «more» fold: a signal chevron that turns, only the
    words underlined, a 44 px summary; a quote inside it is set off by a rule on its start edge. */
 .decisions-lead { margin-bottom: var(--space-4); }
-.decision { display: grid; gap: var(--space-2); padding-block: var(--space-4); }
+.decision { padding-block: var(--space-4); }
+.decision-row, .decision-head, .decision-body { display: grid; gap: var(--space-2); }
 .decision-title { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
 .decision-title:focus { outline: none; } /* it takes the focus after a reload of the section; it is not a control */
 .decision-mark { font-size: var(--text-small); font-weight: 600; }
@@ -208,7 +209,8 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .decision-basis[open] summary svg { transform: rotate(90deg); }
 .decision-basis-body { display: grid; gap: var(--space-2); padding-bottom: var(--space-2); }
 .decision-basis blockquote { max-width: var(--measure-text); margin: 0; padding-inline-start: var(--space-4); border-inline-start: var(--mark) solid var(--line); }
-.decisions-propose { display: grid; gap: var(--space-3); margin-top: var(--space-5); }
+.decisions-propose, .decisions-propose-main { display: grid; gap: var(--space-3); }
+.decisions-propose { margin-top: var(--space-5); }
 .decisions-propose h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
 
 /* The owner's view of the section (app.js ownerDecisionsPart, showOwnerDecision: the manual's «lista»). On the project's
@@ -267,6 +269,14 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
   .owner-answers .owner-answer-value { grid-area: 1 / 3; }
   .owner-answers .owner-answer .row-meta { grid-area: 1 / 2; }
   .owner-answers .owner-answer :is(.owner-answer-comment, .owner-history) { grid-column: 2; }
+  /* The «Decisiones» section takes the page's column as the pieces' list does: each point's three parts side by side in the
+     same three equal columns, its title (and its mark under it) · what was decided, with the fold «En qué se apoya» and when
+     she answered under it · the answer, which starts where the pieces' states do: the part spans its column (MAR-12) and
+     its form keeps the form measure at the part's edge (MAR-09); «¿Falta algo?» likewise, its title · its form. The texts
+     keep the reading measure inside their column. */
+  .decision-row, .decisions-propose { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--space-4); align-items: start; }
+  .decision-answer > .decision-form { margin-top: 0; }
+  .decisions-propose > .decisions-propose-main { grid-column: 3; }
 }
 
 /* ---- piece ------------------------------------------------------------------------------ */

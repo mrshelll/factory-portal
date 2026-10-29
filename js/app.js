@@ -1046,18 +1046,25 @@ function decisionsSection({ projectId, viewId, points, live }) {
       sayFailure(t(result.error === "invalid" ? "unknownError" : "networkError"));
     }
 
+    // Three parts, one under another and from 1056 px side by side as the list's columns (portal.css): the title and its
+    // mark; what was decided, what it rests on and when she answered; the answer, whose form keeps the form measure at the
+    // start of its part.
     const item = h("li", { class: "row decision", "data-key": key },
-      h("h3", { id: `${id}-title`, class: "decision-title", tabindex: "-1" }, title),
-      mark,
-      h("p", { class: "decision-decided" }, typeof point.decided === "string" ? point.decided : ""),
-      basisFold(point.basis),
-      answered,
-      h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
-        h("fieldset", { class: "choices" },
-          h("legend", { class: "visually-hidden" }, title),
-          radios.map((radio) => h("label", { class: "choice", for: radio.id }, radio, h("span", { class: "choice-mark", "aria-hidden": "true" }),
-            h("span", {}, t(ANSWER_KEYS[radio.value]))))),
-        commentField, failure, button));
+      h("div", { class: "decision-row" },
+        h("div", { class: "decision-head" },
+          h("h3", { id: `${id}-title`, class: "decision-title", tabindex: "-1" }, title),
+          mark),
+        h("div", { class: "decision-body" },
+          h("p", { class: "decision-decided" }, typeof point.decided === "string" ? point.decided : ""),
+          basisFold(point.basis),
+          answered),
+        h("section", { class: "decision-answer" },
+          h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+            h("fieldset", { class: "choices" },
+              h("legend", { class: "visually-hidden" }, title),
+              radios.map((radio) => h("label", { class: "choice", for: radio.id }, radio, h("span", { class: "choice-mark", "aria-hidden": "true" }),
+                h("span", {}, t(ANSWER_KEYS[radio.value]))))),
+            commentField, failure, button))));
     reveal();
     shown.set(key, { point, item, setSending, confirm, showFailure });
     return item;
@@ -1104,11 +1111,12 @@ function decisionsSection({ projectId, viewId, points, live }) {
     }
 
     return h("div", { class: "decisions-propose" },
-      h("h3", { id: "decisions-propose-title" }, t("proposeTitle")),
-      h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit, "aria-labelledby": "decisions-propose-title" },
-        h("div", { class: "field" }, h("label", { for: input.id }, t("proposeLead")), input, error),
-        failure, button),
-      sent);
+      h("div", { class: "decisions-propose-head" }, h("h3", { id: "decisions-propose-title" }, t("proposeTitle"))),
+      h("section", { class: "decisions-propose-main" },
+        h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit, "aria-labelledby": "decisions-propose-title" },
+          h("div", { class: "field" }, h("label", { for: input.id }, t("proposeLead")), input, error),
+          failure, button),
+        sent));
   }
 
   render(points);

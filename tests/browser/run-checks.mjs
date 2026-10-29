@@ -3796,6 +3796,40 @@ const liveText = (page) => page.evaluate(() => document.querySelector("[data-rol
 async function decisionsChecks(browser, base, html) {
   const sectionShown = (page) => waitFor(async () => { const s = await decisionsSection(page); return s && s.points.length ? s : null; }, 10000);
 
+  // decisions-columns: from 1056 px the section takes the page's column as the pieces' list does: each point is a row of the
+  // list's three equal columns, its title (and mark) · what was decided (the fold and when she answered under it) · its form,
+  // and «¿Falta algo?» the same, its title · its form; the forms start where the pieces' states do. Below 1056, one column.
+  for (const width of [768, 1056, 1440]) {
+    const backend = decisionsBackend(html);
+    const { context, page } = await openMocked(browser, base, backend, `#/project/${IDS.project}`, width);
+    await sectionShown(page);
+    const cols = await page.evaluate(() => {
+      const x = (el) => (el ? Math.round(el.getBoundingClientRect().left) : null);
+      const top = (el) => (el ? Math.round(el.getBoundingClientRect().top) : null);
+      const pieces = [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row .row-link")].map((row) => x(row.querySelector(".status, .row-aside")));
+      const points = [...document.querySelectorAll(".decision")].map((li) => ({ row: x(li), der: Math.round(li.getBoundingClientRect().right),
+        title: x(li.querySelector(".decision-title")), titleTop: top(li.querySelector(".decision-title")), decided: x(li.querySelector(".decision-decided")),
+        form: x(li.querySelector(".decision-form")), formTop: top(li.querySelector(".decision-form")) }));
+      const propose = document.querySelector(".decisions-propose");
+      return { pieces, points, propose: propose && { row: x(propose), title: x(propose.querySelector("h3")), titleTop: top(propose.querySelector("h3")),
+        form: x(propose.querySelector("form")), formTop: top(propose.querySelector("form")) } };
+    });
+    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 2;
+    let ok = cols.points.length === 4 && Boolean(cols.propose);
+    if (width >= 1056) {
+      const p0 = cols.points[0];
+      const step = p0 ? (p0.der - p0.row + 16) / 3 : 0;
+      ok = ok && cols.points.every((p) => near(p.title, p.row) && near(p.decided, p.row + step) && near(p.form, p.row + 2 * step) && near(p.formTop, p.titleTop)) &&
+        cols.pieces.length > 0 && cols.pieces.every((s) => near(s, p0.row + 2 * step)) &&
+        near(cols.propose.title, p0.row) && near(cols.propose.form, p0.row + 2 * step) && near(cols.propose.formTop, cols.propose.titleTop);
+    } else {
+      ok = ok && cols.points.every((p) => near(p.title, p.row) && near(p.decided, p.row) && near(p.form, p.row) && p.formTop > p.titleTop) &&
+        near(cols.propose.form, cols.propose.title);
+    }
+    check(`decisions-columns ${width}px: ${width >= 1056 ? "each point and «¿Falta algo?» are rows of the list's three columns, the forms where the pieces' states are"
+      : "each point is one column: its title, what was decided and its form one under another"}`, ok, JSON.stringify(cols));
+    await context.close();
+  }
 
   // section-after-pieces, owner-sees-line, the marks, the choices, comment-required-for-change, answer-sent-confirmed-in-page,
   // propose-always-available and opened-once-per-visit, on one visit.
