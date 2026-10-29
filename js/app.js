@@ -1578,7 +1578,7 @@ async function showOwnerDecision({ projectId, key }, viewId) {
   const project = loaded.project;
   setLanguage((project && project.language) || browserLanguage);
   const projectName = project && (project.name || project.slug);
-  const back = view && projectName ? { href: projectHref(projectId), text: projectName, label: t("backToProjectLabel", { name: projectName }) } : homeBack();
+  const back = view && projectName ? { href: projectHref(projectId), text: projectName, label: t("backTo", { name: projectName }) } : homeBack();
   const point = view ? publishedPoints(view).find((p) => p.key === key) || null : null;
   if (!point) {
     setTitle(t("pieceNotFoundTitle"));
