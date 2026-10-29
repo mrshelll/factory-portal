@@ -3725,7 +3725,7 @@ function decisionsFixture(memberId = IDS.member) {
         decided: "El viaje se registra solo cuando quien conduce y quien viaja dicen que ocurrió.",
         basis: [{ text: "Así quedó escrito al definir el proyecto.", quote: { file: "01-discovery/vision-brief.md", text: QUOTE } }],
         firstPublishedAt: DAT.newPublish },
-      { key: DKEY.b, version: "b00000000002", position: 2, title: "En la prueba piloto no hay plata de por medio",
+      { key: DKEY.b, version: "b00000000002", position: 2, title: "En la prueba piloto no se paga ni se cobra",
         decided: "Nadie paga ni cobra durante la prueba.", basis: [], firstPublishedAt: DAT.oldPublish },
       { key: DKEY.c, version: "c00000000001", position: 3, title: "La empresa ve números, nunca nombres",
         decided: "La empresa recibe totales por semana, sin datos de cada persona.", basis: [{ text: "Lo pidió el área de personas." }],
@@ -4272,7 +4272,7 @@ const OAT = { member: "2026-10-01T12:00:00.000Z", before: "2026-10-10T12:00:00.0
   third: "2026-10-16T12:00:00.000Z", luisOpened: "2026-10-21T12:00:00.000Z", martaOpened: "2026-10-22T12:00:00.000Z", proposed: "2026-10-23T12:00:00.000Z" };
 const HTML_COMMENT = '<img src=x onerror="window.__x=1">';
 const HTML_PROPOSAL = "<script>window.__y=1</script>Falta decir quién responde si algo sale mal.";
-const OTITLE = { trips: "Un viaje cuenta cuando las dos personas lo confirman", pilot: "En la prueba piloto no hay plata de por medio",
+const OTITLE = { trips: "Un viaje cuenta cuando las dos personas lo confirman", pilot: "En la prueba piloto no se paga ni se cobra",
   removed: "Un punto que ya no se publica", phones: "La app funciona primero en teléfonos" };
 // Ana owns «Biblioteca del barrio». Its section went to Luis, Marta and Pedro; Sofía answered and was then removed from the
 // list. «trips»: Luis «Va», Marta «No va» with a comment that is markup, Pedro silent, Sofía «Lo cambiaría». «pilot»
