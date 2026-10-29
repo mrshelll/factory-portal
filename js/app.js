@@ -683,6 +683,12 @@ const textOr = (value, fallbackKey) => (typeof value === "string" && value.trim(
 const personName = (value) => (typeof value === "string" && value.trim() ? value.trim() : t("ownerUnnamed"));
 // «Va: 2 · No va: 1 · Sin respuesta: 3»: a count of 0 is not said.
 const countsText = (counts) => countsLine(counts).map(({ key, n }) => `${t(key)}: ${n}`).join(" · ");
+// The same line as nodes, each «label: n» kept on one line (a narrow row wraps between them, never inside one); null when
+// nothing is counted. Its text is countsText's.
+const countsParts = (counts) => {
+  const parts = countsLine(counts).map(({ key, n }) => h("span", { class: "count" }, `${t(key)}: ${n}`));
+  return parts.length ? parts.flatMap((part, i) => (i ? [" · ", part] : [part])) : null;
+};
 
 // The owner's part of the section on the project's page: each published point with its counts and «Ver respuestas»,
 // then what people proposed adding, oldest first. null before the factory published any point (an empty section is of
@@ -1594,7 +1600,7 @@ async function showOwnerDecision({ projectId, key }, viewId) {
 
   const title = textOr(point.title, "untitled");
   setTitle(title);
-  layout = frameLayout({ title, meta: [countsText(point.counts)], headerActions: [signOutButton()], back });
+  layout = frameLayout({ title, meta: [countsParts(point.counts)], headerActions: [signOutButton()], back });
   const openedAt = new Map(view.people.map((p) => [p.member_id, p.last_opened_at]));
   const people = (Array.isArray(point.people) ? point.people : []).filter((p) => p && typeof p === "object");
   layout.body.append(

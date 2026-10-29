@@ -1804,6 +1804,26 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       });
       check(`${tag}: the counts go in the row of «← Volver», on its right, above the title`, row.back && row.meta && row.h1 && row.meta.left > row.back.right &&
         row.meta.top >= row.back.top && row.meta.bottom <= row.h1.top && row.text === "Va: 1 · No va: 1 · Sin respuesta: 1", JSON.stringify(row));
+      // Where the row wraps, it wraps between two counts, never inside one («Sin respuesta:» on a line and its number on the next).
+      const split = await screen.page.evaluate(() => {
+        const meta = document.querySelector(".page-meta");
+        if (!meta) return null;
+        const nodes = [];
+        const walker = document.createTreeWalker(meta, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(), at = 0; n; at += n.textContent.length, n = walker.nextNode()) nodes.push({ n, at });
+        const point = (offset) => { const x = nodes.findLast((e) => e.at <= offset); return [x.n, offset - x.at]; };
+        const text = meta.textContent, out = [];
+        let from = 0;
+        for (const part of text.split(" · ")) {
+          const range = document.createRange();
+          range.setStart(...point(from)); range.setEnd(...point(from + part.length));
+          const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+          if (tops.size > 1) out.push(part);
+          from += part.length + 3;
+        }
+        return out;
+      });
+      check(`${tag}: no count is split across two lines`, Array.isArray(split) && split.length === 0, JSON.stringify(split));
       if (title.length === DECISION_TITLE_MAX) check(`${tag}: it wraps to ${screen.at.h1Lines} lines (two at most)`, screen.at.h1Lines <= 2, JSON.stringify(screen.at));
       await screen.context.close();
     }
