@@ -235,8 +235,12 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 /* The name on the row's left and the answer on its right edge, across the whole row (not the reading measure of a section's
    text): every answer ends on the same x. */
 .owner-answers .owner-answer-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: var(--space-3); max-width: none; }
-.owner-answer .row-title { color: var(--ink); }
-.owner-answer-value { font-weight: 600; }
+/* Squinting, the point's title is the screen's one heading of its size and weight (on a phone it is 16 px): the list's heading
+   is a small label, as a point's mark (.decision-mark); each name is in the text's regular weight, as a person in the
+   owner's part, and the answer, small and in bold, is the row's one emphasis. */
+.owner-answers h2 { font-size: var(--text-small); }
+.owner-answer .row-title { color: var(--ink); font-weight: 400; }
+.owner-answer-value { font-size: var(--text-small); font-weight: 600; }
 .owner-proposal-text, .owner-answer-comment, .owner-decision-decided, .owner-answer-head { overflow-wrap: anywhere; }
 .owner-proposal-text, .owner-answer-comment { max-width: var(--measure-text); white-space: pre-line; }
 .owner-answer-comment { margin: var(--space-1) 0 0; }

@@ -4550,7 +4550,8 @@ async function ownerDecisionsChecks(browser, base, html) {
         if (!node) return null;
         const range = document.createRange(); range.selectNodeContents(node);
         const rects = [...range.getClientRects()].filter((r) => r.width > 0);
-        return rects.length ? { x: Math.round(Math.min(...rects.map((r) => r.left))), der: Math.round(Math.max(...rects.map((r) => r.right))), top: Math.round(Math.min(...rects.map((r) => r.top))) } : null;
+        return rects.length ? { x: Math.round(Math.min(...rects.map((r) => r.left))), der: Math.round(Math.max(...rects.map((r) => r.right))),
+          top: Math.round(Math.min(...rects.map((r) => r.top))), bottom: Math.round(Math.max(...rects.map((r) => r.bottom))) } : null;
       };
       const box = el.getBoundingClientRect();
       return { row: { x: Math.round(box.left), der: Math.round(box.right) }, name: text(".row-title"), answer: text(".owner-answer-value"),
@@ -4565,13 +4566,33 @@ async function ownerDecisionsChecks(browser, base, html) {
     if (width >= 1056) {
       const step = (rows[0].row.der - rows[0].row.x + 16) / 3;
       ok = ok && same(rows.map((r) => r.answer.x)) && rows.every((r) => near(r.name.x, r.row.x) && Math.abs(r.answer.x - r.row.x - 2 * step) <= 2 &&
-        [r.meta, r.comment, r.history].filter(Boolean).every((x) => Math.abs(x.x - r.row.x - step) <= 2) && near(r.answer.top, r.name.top));
+        [r.meta, r.comment, r.history].filter(Boolean).every((x) => Math.abs(x.x - r.row.x - step) <= 2) && r.answer.top >= r.name.top - 1 && r.answer.bottom <= r.name.bottom + 1);
     } else {
-      ok = ok && same(rows.map((r) => r.answer.der)) && rows.every((r) => near(r.name.x, r.row.x) && near(r.answer.der, r.row.der) && near(r.answer.top, r.name.top) &&
+      ok = ok && same(rows.map((r) => r.answer.der)) && rows.every((r) => near(r.name.x, r.row.x) && near(r.answer.der, r.row.der) && r.answer.top >= r.name.top - 1 && r.answer.bottom <= r.name.bottom + 1 &&
         under.every((x) => near(x.x, r.row.x)));
     }
     check(`owner-decisions-alignment ${width}px: every person's row has one anatomy: ${width >= 1056 ? "name · dates and comment · answer, in three equal columns aligned down the list"
       : "the name on the left, the answer on the right edge, the dates and the comment under them on the name's x"}`, ok, JSON.stringify(rows));
+    await context.close();
+  }
+
+  // owner-decisions-hierarchy: squinting, the point's title stands out: no other text of the screen (the section's heading,
+  // a name, an answer) has the h1's size and weight, at a phone's width (where the h1 is 16 px) and at a wide one. Links are
+  // apart: «← Volver» keeps the frame's link type on every screen, set off by the link colour.
+  for (const width of [320, 1440]) {
+    const backend = ownerDecisionsBackend(html);
+    const { context, page } = await openMocked(browser, base, backend, detailHref(OKEY.trips), width);
+    await detailShown(page, OTITLE.trips);
+    const type = await page.evaluate(() => {
+      const of = (el) => { const cs = getComputedStyle(el); return `${cs.fontSize} ${cs.fontWeight}`; };
+      const h1 = document.querySelector("main h1");
+      const same = [...document.querySelectorAll("main *")].filter((el) => el !== h1 && !h1.contains(el) && !el.closest("a") && el.getBoundingClientRect().height > 0 &&
+        [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim()) && of(el) === of(h1)).map((el) => el.textContent.trim().slice(0, 40));
+      return { h1: of(h1), same, heading: of(document.querySelector(".owner-answers h2")), name: of(document.querySelector(".owner-answer .row-title")),
+        answer: of(document.querySelector(".owner-answer-value")) };
+    });
+    check(`owner-decisions-hierarchy ${width}px: the h1 (${type.h1}) is the only text of its size and weight; heading ${type.heading}, name ${type.name}, answer ${type.answer}`,
+      type.same.length === 0, JSON.stringify(type));
     await context.close();
   }
 
