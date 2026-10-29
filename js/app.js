@@ -960,7 +960,8 @@ function decisionsSection({ projectId, viewId, points, live }) {
       "aria-describedby": `${id}-comment-error` });
     comment.value = draft ? draft.comment : current && typeof current.comment === "string" ? current.comment : "";
     const commentError = fieldError(`${id}-comment-error`);
-    const commentField = h("div", { class: "field" }, h("label", { for: comment.id }, t("commentLabel")), comment, commentError);
+    const commentLabel = h("label", { for: comment.id }, t("commentLabel"));
+    const commentField = h("div", { class: "field" }, commentLabel, comment, commentError);
     const failure = h("div", { class: "decision-notice" });
     const button = h("button", { type: "submit", class: "button button--secondary" });
     // Off and saying so while its answer is on its way, also when a reload of the section drew it again meanwhile.
@@ -1003,9 +1004,11 @@ function decisionsSection({ projectId, viewId, points, live }) {
       if (lost) changeButton.focus();
     }
 
-    // The comment only once the choice needs it, and the send only once there is a choice (FOR-05).
+    // The comment and the send once there is a choice (FOR-05): with «Va» the comment is optional and says so (FOR-04), with
+    // the others it is required (spec §4.2).
     function reveal() {
-      commentField.hidden = !chosen || !needsComment(chosen);
+      commentField.hidden = !chosen;
+      commentLabel.textContent = t(chosen && !needsComment(chosen) ? "commentLabelOptional" : "commentLabel");
       button.hidden = !chosen;
     }
     const remember = () => drafts.set(key, { value: chosen, comment: comment.value });
@@ -1026,8 +1029,8 @@ function decisionsSection({ projectId, viewId, points, live }) {
       event.preventDefault();
       if (sending.has(key) || !chosen) return;
       const value = chosen;
-      // A hidden comment (she chose «Va» after typing one) is not sent: only what she sees goes.
-      const text = needsComment(value) ? comment.value : null;
+      // The comment she sees goes with any answer; an empty one with «Va» goes as none.
+      const text = /\S/.test(comment.value) ? comment.value : null;
       const problem = validateAnswer(value, text);
       if (problem === "comment-required") return setFieldError(comment, commentError, t(COMMENT_PROMPT_KEYS[value]));
       if (problem) return showFailure(t("unknownError"));
@@ -1101,8 +1104,8 @@ function decisionsSection({ projectId, viewId, points, live }) {
             commentField, failure, button))));
     reveal();
     showOpen();
-    // Only a comment she sees counts (its form open, its field shown): one hidden by choosing «Va» would not be sent with the
-    // answer either, and a folded form holds what was sent.
+    // Only a comment she sees counts (its form open, its field shown; with «Va» too, where it is optional): a folded form
+    // holds what was sent.
     const unsent = () => open && !commentField.hidden && /\S/.test(comment.value) && comment.value.trim() !== sentComment;
     shown.set(key, { point, item, setSending, confirm, showFailure, unsent });
     return item;

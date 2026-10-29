@@ -3697,6 +3697,7 @@ const DECISIONS = {
   marks: { new: "Nuevo", changed: "Cambió desde tu respuesta", confirmed: "Ya lo confirmaste" },
   basis: "En qué se apoya",
   commentLabel: "Comentario",
+  commentLabelOptional: "Comentario (opcional)",
   commentRequired: "Cuéntanos qué cambiarías y por qué.",
   commentRequiredNo: "Cuéntanos por qué no va.",
   commentRequiredUnsure: "Cuéntanos qué te falta para decidir.",
@@ -3839,7 +3840,7 @@ async function decisionsChecks(browser, base, html) {
   }
 
   // decisions-progressive: on a phone a point she has not answered shows only its options; choosing one that asks for a comment
-  // shows the comment and the send, the focus staying on her choice; «Va» shows the send only. A point answered on this version
+  // shows the comment and the send, the focus staying on her choice; «Va» shows the comment as optional and the send. A point answered on this version
   // is folded to its answer line and «Cambiar respuesta», a 44 px target or more.
   {
     const backend = decisionsBackend(html);
@@ -3858,7 +3859,8 @@ async function decisionsChecks(browser, base, html) {
       JSON.stringify(before));
     check("decisions-progressive: «Lo cambiaría» shows the comment and the send, the focus staying on the choice", change && change.comment && change.button && focusChange,
       JSON.stringify({ change, focusChange }));
-    check("decisions-progressive: «Va» shows the send only", yes && !yes.comment && yes.button, JSON.stringify(yes));
+    check("decisions-progressive: «Va» shows the comment, labelled optional, and the send", yes && yes.comment && yes.comment.label === DECISIONS.commentLabelOptional &&
+      change.comment.label === DECISIONS.commentLabel && yes.button, JSON.stringify({ yes, change }));
     check("decisions-progressive: a point answered on this version is folded to its answer line and «Cambiar respuesta», at least 44 × 44", folded && !folded.form &&
       folded.change && folded.answered && target && target[0] >= 44 && target[1] >= 44, JSON.stringify({ folded, target }));
     await context.close();
@@ -3922,20 +3924,14 @@ async function decisionsChecks(browser, base, html) {
     check("decisions-sign-out-unsent: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
-  // decisions-sign-out-unsent: a comment sent during the visit (still in its field) and a comment hidden by choosing «Va»
-  // (it is not sent) are not unsent: «Salir» signs out without asking.
+  // decisions-sign-out-unsent: a comment sent during the visit (still in its field, the form folded) is not unsent: «Salir»
+  // signs out without asking.
   for (const [what, act] of [
     ["a comment sent during the visit", async (page, point) => {
       await point.locator('label.choice:has(input[value="change"])').click({ timeout: 3000 }).catch(() => {});
       await point.locator("textarea").fill("Que lo confirme quien conduce.", { timeout: 3000 }).catch(() => {});
       await point.locator('button[type="submit"]').click({ timeout: 3000 }).catch(() => {});
       return waitFor(() => point.locator(".decision-answered").evaluate((el) => !el.hidden && /\S/.test(el.textContent)).catch(() => false), 8000);
-    }],
-    ["a comment typed and then hidden by choosing «Va»", async (page, point) => {
-      await point.locator('label.choice:has(input[value="change"])').click({ timeout: 3000 }).catch(() => {});
-      await point.locator("textarea").fill("Mejor no.", { timeout: 3000 }).catch(() => {});
-      await point.locator('label.choice:has(input[value="yes"])').click({ timeout: 3000 }).catch(() => {});
-      return point.locator("textarea").evaluate((el) => el.value === "Mejor no." && el.closest(".field").hidden).catch(() => false);
     }]]) {
     const backend = decisionsBackend(html);
     const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
@@ -3945,6 +3941,34 @@ async function decisionsChecks(browser, base, html) {
     const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k) } : null), STORAGE_KEY), 10000);
     check(`decisions-sign-out-unsent: with ${what}, «Salir» signs out without asking`, Boolean(ready) && out && !out.session, JSON.stringify({ ready, out }));
     check(`decisions-sign-out-unsent: with ${what}: no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // decisions-va-optional-comment and decisions-sign-out-unsent: with «Va» the comment is optional (spec §4.2): written and not
+  // sent, «Salir» asks; sent, it goes with the answer (and «Va» with none sends none).
+  {
+    const backend = decisionsBackend(html);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    await sectionShown(page);
+    const asked = () => waitFor(async () => page.evaluate((text) => {
+      const n = document.querySelector("[data-rol=avisos] .notice");
+      return n && n.textContent.includes(text) ? true : null;
+    }, DECISIONS.signOutUnsent), 5000);
+    const stay = async () => { await page.click(`text=${DECISIONS.stay}`, { timeout: 3000 }).catch(() => {}); };
+    const signOut = () => page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
+    // «Va» on d, with a comment written: asks; then sent with the answer.
+    const d = page.locator(`.decision[data-key="${DKEY.d}"]`);
+    await d.locator('label.choice:has(input[value="yes"])').click({ timeout: 3000 }).catch(() => {});
+    await d.locator("textarea").fill("Bien, siempre que haya web después.", { timeout: 3000 }).catch(() => {});
+    await signOut();
+    check("decisions-sign-out-unsent: a «Va» comment written and not sent makes «Salir» ask", Boolean(await asked()));
+    await stay();
+    await d.locator('button[type="submit"]').click({ timeout: 3000 }).catch(() => {});
+    await waitFor(() => d.locator(".decision-change").isVisible().catch(() => false), 8000);
+    const sent = decisionCalls(backend, "answer_decision").at(-1);
+    check("decisions-va-optional-comment: «Va» with a comment written sends it with the answer", sent && sent.p_key === DKEY.d && sent.p_value === "yes" &&
+      sent.p_comment === "Bien, siempre que haya web después.", JSON.stringify(sent));
+    check("decisions-va-optional-comment: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
 
@@ -4021,7 +4045,8 @@ async function decisionsChecks(browser, base, html) {
     }
     await page.check(radioSel(DKEY.a, "yes")).catch(() => {});
     p = pointOf(await decisionsSection(page), DKEY.a);
-    check("decisions: comment-required-for-change: «Va» needs no comment and hides it", p && !p.comment && p.button && !p.error, JSON.stringify(p));
+    check("decisions: comment-required-for-change: «Va» keeps the comment, optional («Comentario (opcional)»), with no error", p && p.comment &&
+      p.comment.label === DECISIONS.commentLabelOptional && !p.comment.invalid && p.button && !p.error, JSON.stringify(p));
 
     // answer-sent-confirmed-in-page: «No va» with its comment; the button is off while sending, then the point says when she answered.
     const typed = "Basta con que <b>una</b> persona lo confirme.";
