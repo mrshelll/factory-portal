@@ -186,6 +186,9 @@ main.context-wide { padding-top: var(--space-4); }
   .rows:not(.empty) .row-main > :first-child { grid-area: title; }
   .rows:not(.empty) .row-meta { grid-area: meta; }
   .rows:not(.empty) :is(.row-aside, .status) { grid-area: state; }
+  /* A row with no meta line (another person's project: a name and what is left to answer) has two parts: the state takes the
+     second and third columns, so the middle one is not left empty, and starts where the meta column starts in the other rows. */
+  .rows:not(.empty) :is(.row-link, .row-item):not(:has(.row-meta)) { grid-template-areas: "title state state"; }
 }
 
 /* ---- piece ------------------------------------------------------------------------------ */

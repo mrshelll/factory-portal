@@ -74,10 +74,15 @@ function visuallyHiddenStatus() {
 // The masthead with the ninben brand, the same on every screen (the piece screen included, where it is a
 // <div> inside the screen's single <header>).
 function masthead(headerActions = [], tag = "header") {
+  // The brand is a link home, on every screen after signing in (the logo is the way to «Tus proyectos»); on home itself it is
+  // the current page. On the sign-in screens there is no home to go to, so it is the mark alone: tapping it would only wipe
+  // the code being typed.
+  const brand = state.view === "sign-in"
+    ? h("div", { class: "brand", "data-rol": "marca-producto" }, logo(), h("span", {}, t("brand")))
+    : h("a", { class: "brand", "data-rol": "marca-producto", href: "#/", "aria-label": t("brandHome"),
+      "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, logo(), h("span", {}, t("brand")));
   return h(tag, { class: "masthead" },
-    // The brand is a link home, on every screen (the logo is the way to «Tus proyectos»); on home itself it is the current page.
-    h("a", { class: "brand", "data-rol": "marca-producto", href: "#/", "aria-label": t("brandHome"),
-      "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, logo(), h("span", {}, t("brand"))),
+    brand,
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
 }
 
@@ -896,7 +901,7 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
     ? t("receivedNotice", { date: formatDate(state.lang, context.assignment.updated_at || (context.lastResponse && context.lastResponse.submitted_at)) })
     : t("closedReplacedNotice");
   const links = context.closed === "replaced"
-    ? [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: "#/" }]
+    ? [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: projectHref(context.piece.project_id) }]
     : [];
   const notice = noticeElement({ tone: "info", text: why, dismissible: false, actions: [...links, { label: t("requestChange"), onClick: openForm }] });
   actionButton = notice.querySelector(".notice-actions button");
@@ -988,7 +993,7 @@ async function showPiece(pieceId, viewId) {
   if (replaced) {
     showNotice(pinned, {
       tone: "warning", text: t("replacedNotice"), dismissible: false,
-      actions: [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: "#/" }],
+      actions: [context.newerPieceId ? { label: t("openNewer"), href: `#/piece/${context.newerPieceId}` } : { label: t("openList"), href: projectHref(context.piece.project_id) }],
     });
   }
 

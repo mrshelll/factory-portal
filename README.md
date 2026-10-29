@@ -278,6 +278,31 @@ carries that rule's empty-view exception, with its reason, in the geometry check
 state or aside, each on the same x down the list (FUN-43, «el grupo tabular como tabla»); from 672 to 1056 px the state
 stays on the row's right, and below 672 px the rows keep their phone layout.
 
+## The sign-in code email
+
+The email with the one-time code is `supabase/templates/otp-code.html` (HTML only: Supabase Auth's mailer sends no plain-text
+part) and its subject is `supabase/templates/otp-code.subject.txt`. The rules are COR-10 to COR-13 of the factory's visual
+manual (`patrones/correo-aviso.md`): the code first, large and as real text; how long it lasts; what to do if it was not asked
+for; no links, no images. `tests/unit/otp-template.test.mjs` checks what is mechanical.
+
+Steps in the Supabase panel (the owner does them; the app password is typed in the panel, never in this repository):
+
+1. **Check first.** Authentication > SMTP Settings: see whether a custom SMTP is already set. Without one, Supabase's default
+   sender only delivers to addresses in the project's team: make sure the owner's second address is in the team (Organization
+   settings > Team) or set the SMTP below before testing with it.
+2. **Authentication > SMTP Settings** > enable custom SMTP: host `smtp.gmail.com`, port `465`, username the Gmail address that
+   already sends the notices, password an app password of that Gmail (Google account > Security > App passwords), sender
+   address that same Gmail, sender name `ninben`.
+3. **Authentication > Rate Limits:** set "emails per hour" below Gmail's limit of 500 a day (for example 20 an hour).
+4. **Read "Email OTP expiration"** (Authentication > Sign In / Providers > Auth Providers > Email). The template says
+   «Vale 1 hora.» (Supabase's default, 3600 seconds). If the panel shows another value, change that line in
+   `otp-code.html` before pasting it.
+5. **Authentication > Email Templates:** the portal asks for the code with `signInWithOtp` and creates users on the fly, so
+   Supabase sends it with the "Magic link" template to an existing address and with "Confirm sign up" to a new one: paste the
+   subject from `otp-code.subject.txt` and the body from `otp-code.html` into both.
+6. Test: ask for a code from the portal with an address that is not Gmail's own and check the email arrives (and not in Junk),
+   with the code first.
+
 ## Database migrations
 
 `supabase/migrations/` holds the schema, without data:
@@ -456,6 +481,7 @@ portal at the width a person sees them.
 | `brand/` | Generated copy of the ninben brand (`ninben.css`, `ninben-components.css`, `logo.svg`, `fonts/`) |
 | `scripts/sync-brand.mjs` | Copies the brand from the software factory repo, or checks the copy |
 | `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection, the piece closure and the project page |
+| `supabase/templates/` | The sign-in code email: `otp-code.html` and `otp-code.subject.txt` (pasted in the Supabase panel) |
 | `.github/workflows/keep-alive.yml` | Calls `keep_alive()` every 3 days so Supabase does not pause |
 | `config.js` | Public Supabase configuration |
 | `js/app.js` | Router and screens: sign in, home, a project's page (and the owner's part), piece |

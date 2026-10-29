@@ -131,6 +131,15 @@ async function portalChecks(browser, base) {
       check("brand: the masthead shows the ninben logo and name", brand.logo && brand.name === "ninben", JSON.stringify(brand));
       check("brand: the logo stroke is the signal colour", brand.stroke === "rgb(65, 55, 255)" && brand.signal === "#4137FF", `${brand.stroke} · ${brand.signal}`);
       check("brand: Inter loads from brand/fonts and is the body font", brand.inter && brand.body === "Inter");
+      // Signed out the brand has nowhere to go: it is the mark without a link (nothing to tap, nothing lost on the code step).
+      const bare = await page.evaluate(() => {
+        const mark = document.querySelector("[data-rol=marca-producto]"), frame = document.querySelector(".frame");
+        return { tag: mark.tagName.toLowerCase(), href: mark.hasAttribute("href"), current: mark.hasAttribute("aria-current"), label: mark.hasAttribute("aria-label"),
+          words: mark.textContent, left: Math.round(mark.getBoundingClientRect().left - frame.getBoundingClientRect().left), height: Math.round(mark.getBoundingClientRect().height),
+          weight: getComputedStyle(mark.querySelector("span")).fontWeight };
+      });
+      check("brand: on the sign-in screen the brand is not a link (no href, no aria-current), with the brand's look", bare.tag !== "a" && !bare.href && !bare.current &&
+        !bare.label && bare.words === "ninben" && bare.height >= 44 && bare.weight === "600", JSON.stringify(bare));
       await snapshot(page, "sign-in-email", "formulario");
       const violations = await axeViolations(page);
       if (violations) check("login: axe has no violations", violations.length === 0, violations.join(", "));
@@ -164,6 +173,14 @@ async function portalChecks(browser, base) {
   const code = await codePage.waitForSelector("#code", { timeout: 10000 }).catch(() => null);
   check("login: a pending sign-in opens on the code step", code);
   if (code) await snapshot(codePage, "sign-in-code", "formulario");
+  if (code) {
+    // Tapping the brand on the code step used to wipe the code being typed: now it is no link, and nothing is lost.
+    await codePage.fill("#code", "123");
+    const mark = await codePage.evaluate(() => { const m = document.querySelector("[data-rol=marca-producto]"); return { tag: m.tagName.toLowerCase(), href: m.hasAttribute("href"), current: m.hasAttribute("aria-current") }; });
+    await codePage.click("[data-rol=marca-producto]", { force: true });
+    const kept = await codePage.inputValue("#code").catch(() => null);
+    check("login: on the code step the brand is no link and tapping it keeps the code being typed", mark.tag !== "a" && !mark.href && !mark.current && kept === "123", JSON.stringify({ mark, kept }));
+  }
   const codeAxe = await axeViolations(codePage);
   if (codeAxe) check("login: axe on the code step has no violations", codeAxe.length === 0, codeAxe.join(", "));
   await codeContext.close();
@@ -1833,7 +1850,7 @@ async function replacedAppChecks(browser, base, html, flowHtml, demoHtml) {
     check(`${tag}: a fixed notice says there is a newer version and that sending this one still reaches`, notice && notice.visible && !notice.dismiss &&
       notice.text.includes("Hay una versión más nueva") && notice.text.includes("le llega a quien te la compartió"), JSON.stringify(notice));
     check(`${tag}: the notice links to ${withNewer ? "the newer version" : "the list"}`, notice &&
-      notice.href === (withNewer ? `#/piece/${IDS.demo}` : "#/") && notice.label === (withNewer ? "Abrir la versión nueva" : "Ver lo que te compartimos"), JSON.stringify(notice));
+      notice.href === (withNewer ? `#/piece/${IDS.demo}` : `#/project/${IDS.project}`) && notice.label === (withNewer ? "Abrir la versión nueva" : "Ver lo que te compartimos"), JSON.stringify(notice));
     if (!withNewer || !frame) { await context.close(); continue; }
     await page.screenshot({ path: join(outDir, "piece-replaced-360.png") });
     const axe = await axeViolations(page);
@@ -2223,6 +2240,18 @@ async function closureChecks(browser, base, html) {
       const done = await waitFor(async () => ((await pinnedText(page)).includes(CLOSURE.sentPrefix) ? true : null), 5000);
       check(`${tag}: replaced: a change request reaches request_change`, done && backend.requestCalls.length === 1 && backend.requestCalls[0].p_piece_id === IDS.questions, JSON.stringify(backend.requestCalls));
       check(`${tag}: replaced: no page errors`, errors.length === 0, errors.join(" | "));
+      await context.close();
+    }
+
+    // closed-replaced, no newer version found: the link goes to the project (the list of what was shared), not to home.
+    {
+      const backend = closedBackend(html, storage, "replaced");
+      const { context, page, errors } = await open(backend, width, scheme, `#/piece/${IDS.questions}`);
+      await appPiece(page);
+      const notices = await waitFor(async () => { const n = await pinnedNotices(page); return n.length ? n : null; }, 5000) || [];
+      check(`${tag}: replaced, no newer one: the link goes to the project`, notices.length === 1 && notices[0].links.length === 1 &&
+        notices[0].links[0].href === `#/project/${IDS.project}` && notices[0].links[0].label === "Ver lo que te compartimos", JSON.stringify(notices));
+      check(`${tag}: replaced, no newer one: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
     }
 
@@ -3398,18 +3427,21 @@ function listColumnChecks(name, width, scheme, rows) {
   const detail = JSON.stringify(rows.map((r) => [r.text, r.row && [r.row.x, r.row.der], r.title && [r.title.x, r.title.der, r.title.top],
     r.meta && [r.meta.x, r.meta.der, r.meta.top], r.state && [r.state.x, r.state.der, r.state.top]]));
   if (width >= 1056) {
-    const metas = rows.filter((r) => r.meta);
+    const metas = rows.filter((r) => r.meta), bare = rows.filter((r) => !r.meta);
+    // A row without a meta line (another person's project: only a title and what is left to answer) does not leave the middle
+    // column empty: its state starts where the meta column starts, on the same x down every such row.
     check(`${tag}: the rows are columns, title · meta · state, each column aligned down the list`, ok && same(rows.map((r) => r.title.x)) &&
-      same(metas.map((r) => r.meta.x)) && same(rows.map((r) => r.state.x)) &&
+      same(metas.map((r) => r.meta.x)) && (!metas.length || same(metas.map((r) => r.state.x))) && (!bare.length || same(bare.map((r) => r.state.x))) &&
       rows.every((r) => near(r.title.x, r.row.x) && (!r.meta || r.meta.x > r.title.der) && r.state.x > (r.meta ? r.meta.der : r.title.der) &&
         r.state.top < r.title.bottom && (!r.meta || r.meta.top < r.title.bottom)), detail);
     // Three equal columns: from the title to the meta, from the meta to the state and from the state to the row's end (plus
-    // the gap between columns) is the same step: a third of the row and one gap.
-    const metaX = metas.length ? metas[0].meta.x : null;
-    check(`${tag}: the row's width is shared in three equal columns, the state two thirds into the row, not on its far edge`, ok && metaX !== null &&
+    // the gap between columns) is the same step: a third of the row and one gap. A row without meta has two parts: the state
+    // takes the second and third columns, from one step in.
+    check(`${tag}: the row's width is shared in three equal columns, the state two thirds into the row, not on its far edge`, ok &&
       rows.every((r) => { const step = (r.row.der - r.row.x + r.gap) / 3;
-        return Math.abs(metaX - r.title.x - step) <= 2 && Math.abs(r.state.x - metaX - step) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2; }),
-      JSON.stringify({ metaX, gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
+        return r.meta ? Math.abs(r.meta.x - r.title.x - step) <= 2 && Math.abs(r.state.x - r.meta.x - step) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2
+          : Math.abs(r.state.x - r.title.x - step) <= 2; }),
+      JSON.stringify({ gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
   } else if (width >= 672) {
     check(`${tag}: as before the columns, the title on the row's left, the meta under it, the state on the row's right edge`, ok &&
       rows.every((r) => near(r.title.x, r.row.x) && near(r.state.der, r.row.der) && (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
