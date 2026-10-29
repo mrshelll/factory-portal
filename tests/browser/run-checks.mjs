@@ -1439,9 +1439,10 @@ const TITLE_MAX = 60;
 const PROJECT_TWO_LINES = "Tienda virtual de artesanías";
 const TITLE_AT_MAX = "Demo de la tienda virtual de artesanías: catálogo y compras.";
 if (TITLE_AT_MAX.length !== TITLE_MAX) throw new Error(`TITLE_AT_MAX is ${TITLE_AT_MAX.length} characters, not ${TITLE_MAX}`);
-// The longest title of a «Decisiones» point the factory publishes (its decisions.py pins the same number), at exactly that.
-const DECISION_TITLE_MAX = 120;
-const DECISION_TITLE_AT_MAX = "Un viaje cuenta en la plataforma solo cuando quien conduce y quien viaja confirman, cada uno desde su teléfono, que pasó";
+// The longest title of a «Decisiones» point the factory publishes (its decisions.py pins the same number): the pieces' TITLE_MAX,
+// because on a phone the owner's point takes the piece screen's title band (16 px, the same 288 px at 320), at exactly that.
+const DECISION_TITLE_MAX = TITLE_MAX;
+const DECISION_TITLE_AT_MAX = "Un viaje cuenta cuando quien conduce y quien viaja confirman";
 if (DECISION_TITLE_AT_MAX.length !== DECISION_TITLE_MAX) throw new Error(`DECISION_TITLE_AT_MAX is ${DECISION_TITLE_AT_MAX.length} characters, not ${DECISION_TITLE_MAX}`);
 // A piece of 1000 px that grows 200 px from inside the resize event of its iframe reaching 1000 px: its growth comes in
 // the same rendering frame as the portal's resize, in the same direction. It records the order of the frame's resize
@@ -1784,14 +1785,26 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       }
     } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
     // One point of «Decisiones» as the owner reads it keeps «← Volver» too: it goes back to the project, not home (the
-    // brand's destination). Its h1 is the point's title: the fixture's, and the longest the factory publishes.
-    for (const [what, title] of [["the screens' title", OTITLE.trips], [`a title of ${DECISION_TITLE_MAX} characters`, DECISION_TITLE_AT_MAX]]) {
+    // brand's destination). Its h1 is the point's title, in the piece screen's title type on a phone: the fixture's, the
+    // longest the factory publishes, and the pieces' earliest-breaking title of that length (two lines, never three).
+    for (const [what, title] of [["the screens' title", OTITLE.trips], [`a title of ${DECISION_TITLE_MAX} characters`, DECISION_TITLE_AT_MAX],
+      [`the earliest-breaking title of ${DECISION_TITLE_MAX} characters`, TITLE_AT_MAX]]) {
       const b = ownerDecisionsBackend(html);
       b.decisions[IDS.ownedProject].points[0].title = title;
       const tag = `phone ${engineName}: owner's point of «Decisiones» with ${what}`;
-      const screen = await phoneScreen(tag, b, `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".page-head", `Volver a ${PROJECT.owned}`,
+      const screen = await phoneScreen(tag, b, `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".page-head h1, .page-meta", `Volver a ${PROJECT.owned}`,
         () => document.querySelector(".page-head h1")?.textContent.length > 0 && document.querySelectorAll(".owner-answer").length > 0);
       check(`${tag}: the title is whole (${title.length} characters, never cut)`, screen.at.h1Text === title, JSON.stringify(screen.at));
+      const type = await screen.page.evaluate(() => { const cs = getComputedStyle(document.querySelector(".page-head h1")); return `${cs.fontSize} ${cs.fontWeight}`; });
+      check(`${tag}: the title takes the piece screen's title type (16px 600)`, type === "16px 600", type);
+      // The counts go in the row of «← Volver», on its right, as the piece screen's line (never a row of their own).
+      const row = await screen.page.evaluate(() => {
+        const box = (s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) }; };
+        return { back: box("[data-rol=marco] .back-link"), meta: box(".page-meta"), h1: box(".page-head h1"), text: document.querySelector(".page-meta")?.textContent };
+      });
+      check(`${tag}: the counts go in the row of «← Volver», on its right, above the title`, row.back && row.meta && row.h1 && row.meta.left > row.back.right &&
+        row.meta.top >= row.back.top && row.meta.bottom <= row.h1.top && row.text === "Va: 1 · No va: 1 · Sin respuesta: 1", JSON.stringify(row));
+      if (title.length === DECISION_TITLE_MAX) check(`${tag}: it wraps to ${screen.at.h1Lines} lines (two at most)`, screen.at.h1Lines <= 2, JSON.stringify(screen.at));
       await screen.context.close();
     }
   }
