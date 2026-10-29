@@ -943,12 +943,14 @@ function decisionsSection({ projectId, viewId, points, live }) {
 
     const mark = h("p", { class: "decision-mark" });
     const answered = h("p", { class: "decision-answered" });
+    // When she answered; what she answered too when it is on the version shown (her form is then folded: the line says it).
     function showStatus(markValue, answer) {
       const markText = markKey(markValue) ? t(markKey(markValue)) : "";
       mark.textContent = markText;
       mark.hidden = !markText;
       const date = answer ? formatDate(state.lang, answer.created_at) : "";
-      answered.textContent = date ? t("answerSent", { date }) : "";
+      const said = answer && answer.version === point.version && ANSWER_KEYS[answer.value] ? t(ANSWER_KEYS[answer.value]) : "";
+      answered.textContent = !date ? "" : said ? t("answerSentAs", { answer: said, date }) : t("answerSent", { date });
       answered.hidden = !date;
     }
     showStatus(stale.has(key) ? "changed" : point.mark, point.answer);
@@ -969,6 +971,20 @@ function decisionsSection({ projectId, viewId, points, live }) {
     setSending(sending.has(key));
     if (stale.has(key)) showNotice(failure, { tone: "warning", text: t("answerStale"), dismissible: false });
     const showFailure = (text) => showNotice(failure, { tone: "error", text, dismissible: false });
+    // A point she answered on this version shows its answer line and «Cambiar respuesta», which opens the form again; the form
+    // is open with no answer yet, with a draft of this visit, after a refusal because the point changed, and while sending.
+    let open = !current || Boolean(draft) || stale.has(key) || sending.has(key);
+    const changeButton = h("button", { type: "button", class: "button button--secondary decision-change", "aria-describedby": `${id}-title` }, t("changeAnswer"));
+    let form = null;
+    function showOpen() {
+      if (form) form.hidden = !open;
+      changeButton.hidden = open;
+    }
+    changeButton.addEventListener("click", () => {
+      open = true;
+      showOpen();
+      (radios.find((radio) => radio.checked) || radios[0]).focus();
+    });
     // The comment of the answer that counts, as sent: what is in the field is unsent only when it differs.
     let sentComment = current && typeof current.comment === "string" ? current.comment.trim() : "";
     // Her answer went: the point says so in place, announced, without moving the focus (COM-16).
@@ -979,8 +995,12 @@ function decisionsSection({ projectId, viewId, points, live }) {
       clearNotice(failure);
       showStatus(point.mark, point.answer);
       live.textContent = answered.textContent;
-      // The button was off while sending, which drops the focus: give it back where it was.
-      if (!document.activeElement || document.activeElement === document.body) button.focus();
+      // Sent, the form folds again to the answer line and «Cambiar respuesta». The send button was off while sending, which
+      // dropped the focus: it goes to «Cambiar respuesta», in the place of the form.
+      const lost = !document.activeElement || document.activeElement === document.body || (form && form.contains(document.activeElement));
+      open = false;
+      showOpen();
+      if (lost) changeButton.focus();
     }
 
     // The comment only once the choice needs it, and the send only once there is a choice (FOR-05).
@@ -1072,15 +1092,18 @@ function decisionsSection({ projectId, viewId, points, live }) {
           basisFold(point.basis),
           answered),
         h("section", { class: "decision-answer" },
-          h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+          changeButton,
+          form = h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
             h("fieldset", { class: "choices" },
               h("legend", { class: "visually-hidden" }, title),
               radios.map((radio) => h("label", { class: "choice", for: radio.id }, radio, h("span", { class: "choice-mark", "aria-hidden": "true" }),
                 h("span", {}, t(ANSWER_KEYS[radio.value]))))),
             commentField, failure, button))));
     reveal();
-    // Only a comment she sees counts: one hidden by choosing «Va» would not be sent with the answer either.
-    const unsent = () => !commentField.hidden && /\S/.test(comment.value) && comment.value.trim() !== sentComment;
+    showOpen();
+    // Only a comment she sees counts (its form open, its field shown): one hidden by choosing «Va» would not be sent with the
+    // answer either, and a folded form holds what was sent.
+    const unsent = () => open && !commentField.hidden && /\S/.test(comment.value) && comment.value.trim() !== sentComment;
     shown.set(key, { point, item, setSending, confirm, showFailure, unsent });
     return item;
   }

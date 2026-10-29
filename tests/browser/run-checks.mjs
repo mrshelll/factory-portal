@@ -3703,6 +3703,8 @@ const DECISIONS = {
   send: "Enviar respuesta",
   sending: "Enviando…",
   answered: (date) => `Respondiste el ${date}`,
+  answeredAs: (answer, date) => `Respondiste «${answer}» el ${date}`,
+  change: "Cambiar respuesta",
   stale: "Este punto cambió mientras lo leías. Míralo de nuevo.",
   network: "No hay conexión. Revisa tu internet y vuelve a intentarlo.",
   proposeTitle: "¿Falta algo?",
@@ -3781,6 +3783,8 @@ const decisionsSection = (page) => page.evaluate((title) => {
         checked: el.querySelector("input[type=radio]:checked")?.value || null,
         comment: field(el.querySelector("textarea")), error: text(el.querySelector(".field-error")), notice: text(el.querySelector(".notice p")),
         button: button(el.querySelector("button[type=submit]")),
+        // The form shown, or folded behind «Cambiar respuesta» (a point answered on this version).
+        form: shown(el.querySelector(".decision-form")), change: button(el.querySelector(".decision-change")),
         basis: basis ? { summary: basis.querySelector("summary")?.textContent || null, open: basis.open, text: basis.textContent } : null,
       };
     }),
@@ -3812,7 +3816,7 @@ async function decisionsChecks(browser, base, html) {
       const pieces = [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row .row-link")].map((row) => x(row.querySelector(".status, .row-aside")));
       const points = [...document.querySelectorAll(".decision")].map((li) => ({ row: x(li), der: Math.round(li.getBoundingClientRect().right),
         title: x(li.querySelector(".decision-title")), titleTop: top(li.querySelector(".decision-title")), decided: x(li.querySelector(".decision-decided")),
-        form: x(li.querySelector(".decision-form")), formTop: top(li.querySelector(".decision-form")) }));
+        form: x(li.querySelector(".decision-answer")), formTop: top(li.querySelector(".decision-answer")) }));
       const propose = document.querySelector(".decisions-propose");
       return { pieces, points, propose: propose && { row: x(propose), title: x(propose.querySelector("h3")), titleTop: top(propose.querySelector("h3")),
         form: x(propose.querySelector("form")), formTop: top(propose.querySelector("form")) } };
@@ -3831,6 +3835,32 @@ async function decisionsChecks(browser, base, html) {
     }
     check(`decisions-columns ${width}px: ${width >= 1056 ? "each point and «¿Falta algo?» are rows of the list's three columns, the forms where the pieces' states are"
       : "each point is one column: its title, what was decided and its form one under another"}`, ok, JSON.stringify(cols));
+    await context.close();
+  }
+
+  // decisions-progressive: on a phone a point she has not answered shows only its options; choosing one that asks for a comment
+  // shows the comment and the send, the focus staying on her choice; «Va» shows the send only. A point answered on this version
+  // is folded to its answer line and «Cambiar respuesta», a 44 px target or more.
+  {
+    const backend = decisionsBackend(html);
+    const { context, page } = await openMocked(browser, base, backend, `#/project/${IDS.project}`, 320);
+    await sectionShown(page);
+    const at = async () => pointOf(await decisionsSection(page), DKEY.d);
+    const before = await at();
+    await page.locator(`.decision[data-key="${DKEY.d}"] label.choice:has(input[value="change"])`).click({ timeout: 3000 }).catch(() => {});
+    const change = await at();
+    const focusChange = await page.evaluate((k) => document.activeElement === document.querySelector(`.decision[data-key="${k}"] input[value="change"]`), DKEY.d);
+    await page.locator(`.decision[data-key="${DKEY.d}"] label.choice:has(input[value="yes"])`).click({ timeout: 3000 }).catch(() => {});
+    const yes = await at();
+    const folded = pointOf(await decisionsSection(page), DKEY.c);
+    const target = await page.locator(`.decision[data-key="${DKEY.c}"] .decision-change`).evaluate((el) => { const r = el.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }).catch(() => null);
+    check("decisions-progressive: before a choice the point shows its options only, no comment and no send", before && before.form && !before.comment && !before.button && !before.change,
+      JSON.stringify(before));
+    check("decisions-progressive: «Lo cambiaría» shows the comment and the send, the focus staying on the choice", change && change.comment && change.button && focusChange,
+      JSON.stringify({ change, focusChange }));
+    check("decisions-progressive: «Va» shows the send only", yes && !yes.comment && yes.button, JSON.stringify(yes));
+    check("decisions-progressive: a point answered on this version is folded to its answer line and «Cambiar respuesta», at least 44 × 44", folded && !folded.form &&
+      folded.change && folded.answered && target && target[0] >= 44 && target[1] >= 44, JSON.stringify({ folded, target }));
     await context.close();
   }
 
@@ -3938,9 +3968,11 @@ async function decisionsChecks(browser, base, html) {
       JSON.stringify(marks));
     const answeredOn = DECISIONS.answered(await formatIn(page, DAT.answered));
     const [a, b, c, d] = section ? section.points : [];
-    check("decisions: marks-new-changed-confirmed-none: a point she answered says when; the confirmed one comes back with «Va» chosen and the changed one with nothing chosen (FOR-12)",
-      a && !a.answered && !a.checked && b.answered === answeredOn && !b.checked && c.answered === answeredOn && c.checked === "yes" && c.button && !d.answered && !d.checked,
-      JSON.stringify(section && section.points.map(({ key, answered, checked }) => ({ key, answered, checked }))));
+    const answeredYes = DECISIONS.answeredAs("Va", await formatIn(page, DAT.answered));
+    check("decisions: marks-new-changed-confirmed-none: a point she answered says when (and what, on the version shown); the confirmed one comes back with «Va» chosen and folded behind «Cambiar respuesta», the changed one open with nothing chosen (FOR-12)",
+      a && !a.answered && !a.checked && a.form && !a.change && b.answered === answeredOn && !b.checked && b.form && !b.change &&
+      c.answered === answeredYes && c.checked === "yes" && !c.form && c.change && c.change.text === DECISIONS.change && !d.answered && !d.checked && d.form,
+      JSON.stringify(section && section.points.map(({ key, answered, checked, form, change }) => ({ key, answered, checked, form, change }))));
     check("decisions: each point is one radio group named by its title, of four choices with «No sé» among them (FOR-11)", section &&
       section.points.every((p) => JSON.stringify(p.choices) === JSON.stringify(DECISIONS.choices) && p.group && p.group.radios === 4 && p.group.names === 1 &&
         p.group.name === p.title), JSON.stringify(section && section.points.map((p) => ({ choices: p.choices, group: p.group, title: p.title }))));
@@ -3999,18 +4031,27 @@ async function decisionsChecks(browser, base, html) {
     const busy = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.a); return q && q.button && q.button.disabled && q.button.text === DECISIONS.sending ? q : null; }, 2000);
     check("decisions: answer-sent-confirmed-in-page: while it is sent the button is off and says so", busy, JSON.stringify(busy));
     const done = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.a); return q && q.answered ? q : null; }, 5000);
-    const today = DECISIONS.answered(await formatIn(page, new Date().toISOString()));
+    const todayDate = await formatIn(page, new Date().toISOString());
+    const today = DECISIONS.answeredAs("Va", todayDate), saidNo = DECISIONS.answeredAs("No va", todayDate);
     const call = decisionCalls(backend, "answer_decision")[0];
-    check("decisions: answer-sent-confirmed-in-page: the point says «Respondiste el …» in place, announced, keeps her answer, and no dialog opened (COM-16, COM-18)",
-      done && done.answered === today && (await liveText(page)) === today && done.checked === "no" && done.comment && done.comment.value === typed &&
-      done.button && !done.button.disabled && done.mark === null && dialogs.length === 0, JSON.stringify({ done, live: await liveText(page), dialogs }));
+    const focusedChange = await page.evaluate((k) => document.activeElement === document.querySelector(`.decision[data-key="${k}"] .decision-change`), DKEY.a);
+    check("decisions: answer-sent-confirmed-in-page: the point says «Respondiste «No va» el …» in place, announced, folds its form behind «Cambiar respuesta» (which takes the focus), and no dialog opened (COM-16, COM-18)",
+      done && done.answered === saidNo && (await liveText(page)) === saidNo && done.checked === "no" && !done.form && done.change && !done.change.disabled &&
+      focusedChange && done.mark === null && dialogs.length === 0, JSON.stringify({ done, focusedChange, live: await liveText(page), dialogs }));
+    // «Cambiar respuesta» opens the form again with what she sent, the focus on her answer.
+    await page.click(`.decision[data-key="${DKEY.a}"] .decision-change`).catch(() => {});
+    const reopened = pointOf(await decisionsSection(page), DKEY.a);
+    const focusedNo = await page.evaluate((k) => document.activeElement === document.querySelector(`.decision[data-key="${k}"] input[value="no"]`), DKEY.a);
+    check("decisions: answer-sent-confirmed-in-page: «Cambiar respuesta» opens the form again with her answer and comment, the focus on her answer",
+      reopened && reopened.form && !reopened.change && reopened.checked === "no" && reopened.comment && reopened.comment.value === typed && reopened.button &&
+      !reopened.button.disabled && focusedNo, JSON.stringify({ reopened, focusedNo }));
     check("decisions: answer-sent-confirmed-in-page: it went once, with the point's key, the version the page showed, the value and the comment",
       decisionCalls(backend, "answer_decision").length === 1 && call && call.p_project_id === IDS.project && call.p_key === DKEY.a &&
       call.p_version === "a00000000001" && call.p_value === "no" && call.p_comment === typed, JSON.stringify(decisionCalls(backend, "answer_decision")));
     await page.check(radioSel(DKEY.d, "yes")).catch(() => {});
     await page.click(sendSel(DKEY.d)).catch(() => {});
     p = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.mark === DECISIONS.marks.confirmed ? q : null; }, 5000);
-    check("decisions: answer-sent-confirmed-in-page: «Va» marks the point «Ya lo confirmaste» in place", p && p.answered === today &&
+    check("decisions: answer-sent-confirmed-in-page: «Va» marks the point «Ya lo confirmaste» in place", p && p.answered === today && !p.form && p.change &&
       decisionCalls(backend, "answer_decision").at(-1).p_comment === null, JSON.stringify(p));
 
     // propose-always-available: last in the section; empty, it says why; sent, it says so and stays for another.
@@ -4192,7 +4233,7 @@ async function decisionsChecks(browser, base, html) {
     const landed = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.answered ? q : null; }, 6000);
     await sleep(500);
     const sends = decisionCalls(backend, "answer_decision").filter((c) => c.p_key === DKEY.d);
-    const today = DECISIONS.answered(await formatIn(page, new Date().toISOString()));
+    const today = DECISIONS.answeredAs("Va", await formatIn(page, new Date().toISOString()));
     check("decisions: in-flight-send-survives-reload: d's answer went exactly once; the section read again after it, and d says it was answered, announced",
       landed && sends.length === 1 && backend.decisions[IDS.project].answers.filter((x) => x.key === DKEY.d).length === 1 &&
       landed.mark === DECISIONS.marks.confirmed && landed.answered === today && (await liveText(page)) === today &&
@@ -4210,13 +4251,13 @@ async function decisionsChecks(browser, base, html) {
     await sleep(200);
     const during = pointOf(await decisionsSection(page), DKEY.d);
     await page.$eval(`.decision[data-key="${DKEY.d}"] form`, (form) => form.requestSubmit()).catch(() => {});
-    const landed = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.answered && q.button && !q.button.disabled ? q : null; }, 6000);
+    const landed = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.answered && q.change && !q.change.disabled ? q : null; }, 6000);
     await sleep(500);
     const sends = decisionCalls(backend, "answer_decision").filter((c) => c.p_key === DKEY.d);
     check("decisions: no-second-send-while-reading-again: while the section is read again after d's answer landed, d's send stays off and says so",
       reading && during && during.button && during.button.disabled && during.button.text === DECISIONS.sending, JSON.stringify({ reading, during }));
     check("decisions: no-second-send-while-reading-again: a second send of d's form in that window does not go; d is confirmed once the read is done",
-      landed && landed.mark === DECISIONS.marks.confirmed && landed.button.text === DECISIONS.send && sends.length === 1 &&
+      landed && landed.mark === DECISIONS.marks.confirmed && !landed.form && landed.change && sends.length === 1 &&
       backend.decisions[IDS.project].answers.filter((x) => x.key === DKEY.d).length === 1, JSON.stringify({ landed, sends }));
     check("decisions: no-second-send-while-reading-again: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
@@ -4224,12 +4265,12 @@ async function decisionsChecks(browser, base, html) {
   {
     const { context, page, errors, backend } = await sendingWhileReloaded();
     backend.myDecisionsFails = true;
-    const today = DECISIONS.answered(await formatIn(page, new Date().toISOString()));
+    const today = DECISIONS.answeredAs("Va", await formatIn(page, new Date().toISOString()));
     const landed = await waitFor(async () => { const q = pointOf(await decisionsSection(page), DKEY.d); return q && q.answered ? q : null; }, 6000);
     await sleep(300);
     check("decisions: confirm-when-reload-fails: the reload after d's send could not read the section, and d says in place that it was answered, announced",
       landed && landed.answered === today && landed.mark === DECISIONS.marks.confirmed && (await liveText(page)) === today &&
-      landed.button && !landed.button.disabled && landed.button.text === DECISIONS.send && !landed.notice &&
+      !landed.form && landed.change && !landed.change.disabled && !landed.notice &&
       decisionCalls(backend, "my_decisions").length === 3 && decisionCalls(backend, "answer_decision").filter((c) => c.p_key === DKEY.d).length === 1,
       JSON.stringify({ landed, live: await liveText(page), loads: decisionCalls(backend, "my_decisions").length }));
     check("decisions: confirm-when-reload-fails: no page errors", errors.length === 0, errors.join(" | "));

@@ -190,6 +190,9 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .decision-mark { font-size: var(--text-small); font-weight: 600; }
 .decision-answered { color: var(--muted); font-size: var(--text-small); }
 .decision-form { margin-top: var(--space-2); }
+/* A point already answered on this version folds its form: the answer line says what she said, and «Cambiar respuesta» (the
+   base's secondary button, a 48 px target) opens the form again in its place. */
+.decision-change { margin-top: var(--space-2); }
 .choices { display: flex; flex-wrap: wrap; column-gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
 /* Each choice is a row, as the pieces' options (preguntas.template.html): the whole 44 px row is what you touch and what
    shows the focus (FUN-18, FUN-16); the real radio lies over it, invisible, so a click anywhere chooses and the keyboard
@@ -289,7 +292,7 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
      its form keeps the form measure at the part's edge (MAR-09); «¿Falta algo?» likewise, its title · its form. The texts
      keep the reading measure inside their column. */
   .decision-row, .decisions-propose { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--space-4); align-items: start; }
-  .decision-answer > .decision-form { margin-top: 0; }
+  .decision-answer > :is(.decision-form, .decision-change) { margin-top: 0; }
   .decisions-propose > .decisions-propose-main { grid-column: 3; }
 }
 
