@@ -80,8 +80,11 @@ function masthead(headerActions = [], tag = "header") {
 }
 
 // «← Tus proyectos», «← {project}»: where the screen goes back to. The arrow is not read; the link's name says where.
-function backLink({ href, text, label }) {
-  return h("a", { class: "back-link", href, "aria-label": label }, h("span", { "aria-hidden": "true" }, "←"), text);
+// short: below 672 px the link reads «← Volver», one line whatever the destination's name (MAR-14), and its name still
+// says where («Volver a {project}»); from 672 it shows the destination (portal.css).
+function backLink({ href, text, label }, { short = false } = {}) {
+  return h("a", { class: "back-link", href, "aria-label": label }, h("span", { "aria-hidden": "true" }, "←"),
+    short ? [h("span", { class: "back-link-long" }, text), h("span", { class: "back-link-short" }, t("backShort"))] : text);
 }
 const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backToProjectsLabel") });
 
@@ -732,11 +735,61 @@ function pieceLayout(titleText, back = homeBack()) {
       h("header", {},
         masthead([], "div"),
         h("div", { class: "piece-bar" },
-          backLink(back),
+          backLink(back, { short: true }),
           h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, status))),
       pinned, notices),
     main));
   return { pinned, notices, title, status, main, live };
+}
+
+// The piece is as tall as its content and the portal's page scrolls, never the piece (MAR-14): the iframe takes exactly
+// the last height the bridge posted (factory:height; until the first one, what is left of the screen under the frame,
+// portal.css), and the piece's scroll requests (factory:scroll, px from the piece's top) move the page. The bridge's loop
+// guard counts on the iframe's height being that height and nothing else (no min-height of the screen's). A request is
+// kept inside the piece's last height; one past it (the piece grew and its new height has not arrived yet) is done again
+// when that height arrives, within a second. The page scrolls at once (it has no smooth scrolling), so a request right
+// after another (a step's scrollTo(0, 0) and then its title's focus) is judged where the first one left the page: no
+// second jump. iframeOf: the mounted iframe, or null once the piece is gone.
+const PENDING_SCROLL_MS = 1000;
+function followPiece(iframeOf) {
+  let height = null;
+  let pending = null;
+  function show({ top, bottom, ifNeeded }) {
+    const iframe = iframeOf();
+    if (!iframe || !iframe.isConnected) return;
+    const frameBox = iframe.getBoundingClientRect();
+    const limit = height === null ? frameBox.height : height;
+    pending = top > limit ? { request: { top, bottom, ifNeeded }, at: Date.now() } : null;
+    const from = Math.min(Math.max(top, 0), limit);
+    const to = Math.min(Math.max(bottom, from), limit);
+    // The piece's top in the page, and the part of the page on screen (the visual viewport: a phone's keyboard hides
+    // the rest).
+    const start = frameBox.top + iframe.clientTop + window.scrollY;
+    const view = window.visualViewport;
+    const offset = view ? view.offsetTop : 0;
+    const viewTop = window.scrollY + offset;
+    const viewHeight = view ? view.height : window.innerHeight;
+    let y = start + from;
+    if (ifNeeded) {
+      if (start + from >= viewTop && start + to <= viewTop + viewHeight) return; // already in view
+      // Below the window and not taller than it: its bottom at the window's bottom; otherwise its top at the top.
+      if (start + from > viewTop && to - from <= viewHeight) y = start + to - viewHeight;
+    }
+    window.scrollTo(window.scrollX, Math.max(0, Math.round(y - offset)));
+  }
+  return {
+    onHeight(next) {
+      const iframe = iframeOf();
+      if (!iframe) return;
+      height = next;
+      iframe.style.height = `${next}px`;
+      iframe.dataset.sized = "true";
+      const waiting = pending;
+      pending = null;
+      if (waiting && Date.now() - waiting.at <= PENDING_SCROLL_MS && waiting.request.top <= next) show(waiting.request);
+    },
+    onScroll: show,
+  };
 }
 
 // A closed piece (received, or a replaced version the person had sent) shows what was sent, read only. In its pinned
@@ -889,7 +942,7 @@ async function showPiece(pieceId, viewId) {
   // Back to the piece's project, by its name; home when the project cannot be read.
   const projectName = project && (project.name || project.slug);
   layout = pieceLayout(pieceTitle, projectName
-    ? { href: projectHref(piece.project_id), text: projectName, label: t("backToProjectLabel", { name: projectName }) }
+    ? { href: projectHref(piece.project_id), text: projectName, label: t("backTo", { name: projectName }) }
     : homeBack());
   // «La abrió»: an open piece records that the person opened it here (the server keeps the first time). Not awaited,
   // and it never throws: the piece opens whatever happens to that call.
@@ -1001,8 +1054,10 @@ async function showPiece(pieceId, viewId) {
     if (reopen && viewId === state.viewId) route();
   }
 
+  const follow = followPiece(() => (frame ? frame.iframe : null));
   frame = mountPiece({
     container: main, html: piece.html, kind: piece.kind, storage: seed, title: pieceTitle,
+    onHeight: follow.onHeight, onScroll: follow.onScroll,
     host: { reviewerName: context.memberDisplayName, closed, sentAt: closed && context.lastResponse ? context.lastResponse.submitted_at : null },
     onReady: (ready) => { if (!ready.persistence) showNotice(notices, { tone: "warning", text: t("noPersistence") }); },
     onDirty: () => saver.markPending(),
@@ -1060,12 +1115,14 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
   setTitle(pieceTitle);
   const projectName = project && (project.name || project.slug);
   layout = pieceLayout(pieceTitle, projectName
-    ? { href: projectHref(projectId), text: projectName, label: t("backToProjectLabel", { name: projectName }) }
+    ? { href: projectHref(projectId), text: projectName, label: t("backTo", { name: projectName }) }
     : homeBack());
   const date = formatDate(state.lang, response.submitted_at);
   layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
+  const follow = followPiece(() => (frame ? frame.iframe : null));
   frame = mountPiece({
     container: layout.main, html: piece.html, kind: piece.kind, storage: response.storage, title: pieceTitle,
+    onHeight: follow.onHeight, onScroll: follow.onScroll,
     // reviewerName exactly as loadPiece gives it to the person: a piece keys what it stores by it.
     host: { reviewerName: member.display_name, closed: "received", sentAt: response.submitted_at, observer: true },
     onSubmit: ({ requestId }) => { if (frame) frame.respond(requestId, { ok: false, error: "rejected" }); },

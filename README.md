@@ -49,7 +49,18 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
    normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
    screen, then the way back to the piece's project («← <project name>»; «← Tus proyectos» when its name cannot be
-   read) and the piece's title with its save line («Guardando…», «Guardado»), all on the brand's left edge. The
+   read) and the piece's title with its save line («Guardando…», «Guardado»), all on the brand's left edge. On a
+   phone (below 672 px) the frame takes the least it can, with nothing cut (the manual's MAR-14): the way back reads
+   «← Volver», one line, and its accessible name says where («Volver a <project>»); the title is never cut (a title
+   of two lines ends the band at 160 px or less of a 640 px screen; the factory's publisher keeps titles to that); and
+   the save line goes on the title's last line when it fits, or right below it, in small text. The iframe is as
+   tall as the piece (the height the bridge posts; until the first one, what is left of the screen under the frame)
+   and the portal's page scrolls, never the piece: nothing of the frame is fixed or sticky, so on a phone it goes up
+   with the page. The piece's scroll requests move the portal's page (`followPiece` in `js/app.js`): a position is
+   kept inside the piece's last height, a request with `ifNeeded` scrolls only if its stretch is out of the window
+   (the visual viewport, which a phone's keyboard shortens), and the page scrolls at once, so a step's
+   `scrollTo(0, 0)` and its title's focus right after it move the page once. A failed save is said where it was:
+   the save line and the notices, announced to screen readers; nothing floats or stays fixed for it. The
    iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it), and the factory's pieces, inside the portal, start their content at the frame's
    margin (16 px, 24 px from 672 px), on the brand's edge, keeping their reading measure. The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
@@ -163,7 +174,12 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   have no size yet when the piece opens, and the first real height then comes with its first layout,
   a moment after `factory:ready`. A change in the same direction as a change of the iframe's height
   alone, in the same rendering frame, is not posted: it follows the frame (a piece sized with `vh`
-  would grow forever otherwise). The piece's scrolling becomes
+  would grow forever otherwise). A change of the piece's own can come in that same frame too (it
+  grew again while the portal gave the iframe its last height): when the guard held a measure back
+  and the piece's DOM changed since the last height posted (a `MutationObserver` on `<html>`), the
+  bridge measures once more when that frame is over, once, so a piece that touches its DOM and
+  grows with its frame on every resize grows one step at most. The portal gives the iframe exactly
+  that height and nothing else (no minimum of the screen's): the guard counts on it. The piece's scrolling becomes
   `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, in px from the piece's top:
   `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call
   `scrollTo(0, 0)` on every step change), `scrollIntoView` (the element's top; with
@@ -197,8 +213,9 @@ cambio»: a form with a required text of up to 4000 characters that calls `reque
 which closes it keeping the text. When the server draft is newer by more than 5 s than both that response
 and the newest change request (a late send already carried the draft), the form says the unsent changes
 go with the request and sends that draft as `p_storage`, once. If `request_change` answers 55000 (the
-factory reopened the piece meanwhile), the piece opens again as it is now. The piece keeps at least 60 %
-of the screen's height under the frame; on a short phone with the form open the page scrolls. Every send passes the piece's storage to `submit_response`; when the id it returns is
+factory reopened the piece meanwhile), the piece opens again as it is now. The notices and the form are content
+of that moment: they scroll with the page, and on a phone with the form open both the form and the piece are reached
+by scrolling. Every send passes the piece's storage to `submit_response`; when the id it returns is
 a change request (the piece closed meanwhile), the piece hears ok and opens again, closed, saying once
 that the send arrived as a change request. The rules are in `js/closure.js`.
 
@@ -334,9 +351,9 @@ and a change request (`list-received-<width>-<scheme>.png`); a received piece re
 (`closed-received-…`); the request form sent empty (`request-empty-error-…`), failing (network, and a
 rejection) and arriving (`request-sent-…`), closed with «Cancelar»; a replaced version that was sent (`closed-replaced-…`); a
 draft with unsent changes going with the request (`request-with-unsent-…`); and a send from a tab left
-open after the close (`late-send-…`). At 320 × 640: the piece stays at least 60 % high with the form open
-(`request-short-phone-320-light.png`), and scrolled into view the piece shows painted, its «Lo que enviaste» inside the
-screen (`…-scrolled.png`); and a piece reopened while the person writes
+open after the close (`late-send-…`). At 320 × 640: with the form open the page scrolls, the iframe as tall as the
+piece and the form in the window (`request-short-phone-320-light.png`), and scrolled to the piece's start the piece
+shows painted, its «Lo que enviaste» inside the screen (`…-scrolled.png`); and a piece reopened while the person writes
 opens again on 55000; a send whose late check cannot be read still answers ok and opens the piece again as the
 server has it (closed after a late send, open after a normal one); and signing out with a change request written and
 not sent asks first («Quedarme» keeps the text). The piece screen is checked at 320, 768 and
@@ -346,7 +363,16 @@ the checks walk (start, review, inside a flow, a note being written, the flows' 
 and «Ver todos los flujos» in a flow, on that same edge, with the reading measure kept; no second
 banner inside the piece; a piece opened and left alone says nothing about saving and saves nothing;
 and «Enviada el …» only for a send the saved draft cannot show. Each piece opened on its own still
-shows its bar. Screenshots in `<out>`: `piece-view-<width>-<scheme>.png` (questions),
+shows its bar. Below 672 px the review captures are 320 × 640 (`host-<piece>-w320-light.png` included). The
+piece screen on a phone (MAR-14, `phoneFrameChecks`), at 320 × 640 with a project of a long name, in Chromium and
+also in WebKit when playwright-core has its build installed (otherwise a `NOTE` line says it did not run): at rest
+the title band ends at 160 px or less, with a title of `TITLE_MAX` characters too; «← Volver» is one line named
+«Volver a <project>»; the iframe is as tall as the piece, which does not scroll inside, and the page is taller than
+the screen; one screen down nothing fixed or sticky is on screen; «Guardado» on the title's last line or right below
+it; at the bottom of a step «Siguiente» shows the new step's title, and a link of the flows' index its group; the
+step's last field, focused, is in the window; an opened `<details>` grows the iframe; and a piece that grows again
+in the same rendering frame as the portal's resize of its iframe ends as tall as the iframe, with the resize event
+before the ResizeObserver there. Screenshots in `<out>`: `piece-view-<width>-<scheme>.png` (questions),
 `piece-view-flow-320.png`, `piece-view-flow-1440-<scheme>.png`, `piece-view-flow-note-1440.png`,
 `piece-view-flow-start-<768|1440>.png`, `piece-view-flow-final-<768|1440>.png` and
 `piece-view-demo-1440-<scheme>.png`.

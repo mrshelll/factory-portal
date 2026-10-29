@@ -24,6 +24,9 @@
 // With --factory, the portal's own frame is also measured with the factory's geometria.mjs (see
 // portalGeometryChecks): every screen at 320, 672, 1056 and 1440, light and dark, and the piece screen's
 // iframe against the factory's piece-host.mjs.
+//
+// With --questions, the piece screen on a phone too (phoneFrameChecks, MAR-14), at 320 x 640: in Chromium, and in
+// WebKit when playwright-core has its build installed (otherwise a NOTE line says it did not run).
 
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -186,7 +189,16 @@ const frameText = (frame) => frame.evaluate(() => document.body.innerText);
 // The questions piece: go to "Revisa y envía" and tap its send button (the piece's own).
 async function sendQuestions(frame) {
   await frame.evaluate(() => { if (view !== "review") showReview(); });
-  await frame.click("button[data-rol=accion-principal]");
+  await steadyClick(frame.locator("button[data-rol=accion-principal]"));
+}
+// The portal's page scrolls with the piece (MAR-14), and the piece's iframe runs in its own process: Chrome sends a pointer
+// event to the frame that was under it on the last frame it drew. So a control is first brought into view, then the page
+// and the piece draw (piecePainted), and only then it is clicked; a click in the same frame as the scroll can land in the
+// piece where it was a frame ago. A person never clicks that fast.
+async function steadyClick(locator) {
+  await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+  await piecePainted(locator.page());
+  await locator.click();
 }
 
 async function questionsChecks(browser, base, html) {
@@ -501,8 +513,8 @@ function tokenSubject(request) {
   try { return match ? JSON.parse(Buffer.from(match[2], "base64url").toString("utf8")).sub || null : null; } catch { return null; }
 }
 
-async function mockedContext(browser, { width = 360, locale = "en-US", backend }) {
-  const context = await browser.newContext({ viewport: { width, height: 780 }, locale });
+async function mockedContext(browser, { width = 360, height = 780, locale = "en-US", backend }) {
+  const context = await browser.newContext({ viewport: { width, height }, locale });
   await context.addInitScript(([key, value]) => {
     if (window.top !== window) return; // never touch the sandboxed piece
     try { if (!localStorage.getItem(key)) localStorage.setItem(key, value); } catch { /* ignore */ }
@@ -823,7 +835,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: the portal shows its in-page sign-in-again notice", ask && ask.pos === "static" && ask.text.includes("Entrar de nuevo"), ask ? ask.text : "none");
   const kept = backend.draft && JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas["q-002"]?.quien === "Luis";
   check("app: the draft is still in piece_drafts", kept);
-  await page.click("text=Entrar de nuevo");
+  await steadyClick(page.locator("text=Entrar de nuevo"));
   await page.waitForSelector("#email", { timeout: 10000 });
   backend.authExpired = false;
   await page.fill("#email", USER.email);
@@ -1077,7 +1089,8 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   };
   async function openInApp(width, scheme, pieceId, ready) {
     const backend = newBackend(html, flowHtml, demoHtml);
-    const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+    // A phone is 640 px high (MAR-14), so the judge's captures at 320 are 320 x 640.
+    const context = await mockedContext(browser, { backend, width, height: width < 672 ? PHONE.height : 780, locale: "es-CO" });
     const page = await context.newPage();
     await page.emulateMedia({ colorScheme: scheme });
     const errors = [];
@@ -1226,6 +1239,249 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       check("flow on its own: inside a flow the bar keeps the brand and «Ver todos los flujos»", inFlow.bar && inFlow.brand && inFlow.homeButton, JSON.stringify(inFlow));
       check("flow on its own: its bar is still the page's banner", (await page.getByRole("banner").count()) === 1);
     }
+    await context.close();
+  }
+}
+
+// ---- the piece screen on a phone (MAR-14) ------------------------------------------------------
+//
+// Below 672 px the piece's content scrolls with the page: the portal sizes the iframe to the piece's height (the bridge's
+// factory:height) and scrolls its own page when the piece asks (factory:scroll). At 320 x 640, with a project of a long
+// name: at rest the title band ends at 160 px or less (with a title of TITLE_MAX characters too), «← Volver» is one line
+// named «Volver a <project>»; the iframe is as tall as the piece (no scrolling of its own) and the page is taller than the
+// screen; one screen down nothing fixed or sticky is on top; «Siguiente» at the bottom of the sheet shows the new step's
+// title, a link of the flows' index its group, a focused field is inside the window, and an opened <details> grows the
+// iframe. A piece that grows again in the same rendering frame as its iframe's resize still ends with the right height,
+// and there the resize event comes before the ResizeObserver (the bridge's loop guard counts on it). Run in every engine
+// given (Chromium; WebKit when playwright-core has it installed).
+const PHONE = { width: 320, height: 640 };
+const PHONE_FRAME_MAX = 160; // a quarter of a 640 px screen (MAR-14)
+const LONG_PROJECT = "Biblioteca del barrio San Martín de Porres: préstamos, socios y avisos para los vecinos";
+// The longest piece title the factory's publisher lets through (its portal_publish.py pins the same number): what fits
+// in two lines of the piece's title at 320 px. Measured on this screen at 320 x 640 (Inter 600 16/20.8 px, 288 px wide):
+// normal Spanish running-text titles take a third line from 66 to 74 characters on, title-case ones from 65; 60 keeps
+// a margin for an unlucky break. The check's title is the earliest-breaking of those, at exactly TITLE_MAX characters.
+const TITLE_MAX = 60;
+const TITLE_AT_MAX = "Demo de la tienda virtual de artesanías: catálogo y compras.";
+if (TITLE_AT_MAX.length !== TITLE_MAX) throw new Error(`TITLE_AT_MAX is ${TITLE_AT_MAX.length} characters, not ${TITLE_MAX}`);
+// A piece of 1000 px that grows 200 px from inside the resize event of its iframe reaching 1000 px: its growth comes in
+// the same rendering frame as the portal's resize, in the same direction. It records the order of the frame's resize
+// events and of its ResizeObserver.
+const GROWS_ON_RESIZE = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Crece al cambiar de alto</title>
+<style>body { margin: 0; } .block { height: 1000px; }</style></head><body><main><div class="block"></div></main><script>
+window.order = [];
+let grown = false;
+new ResizeObserver(() => order.push("ro:" + Math.round(document.documentElement.getBoundingClientRect().height))).observe(document.documentElement);
+addEventListener("resize", () => {
+  order.push("resize:" + innerHeight);
+  if (!grown && innerHeight >= 1000) { grown = true; const more = document.createElement("div"); more.style.height = "200px"; document.body.append(more); }
+});
+</script></body></html>`;
+
+async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
+  const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+  async function openPhone(pieceId, ready, setup = () => {}) {
+    const backend = newBackend(html, flowHtml);
+    backend.projects[0].name = LONG_PROJECT;
+    setup(backend);
+    const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO" });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto(`${base}/#/piece/${pieceId}`, { waitUntil: "networkidle" });
+    const frame = await waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(ready).catch(() => false)) ? f : null; }, 10000);
+    if (frame) await settled(page, frame);
+    return { backend, context, page, frame, errors };
+  }
+  // The iframe against the piece's content: its height, the piece's (its <html> box) and whether the piece scrolls inside.
+  const fitOf = async (page, frame) => {
+    const outer = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f ? f.getBoundingClientRect().height : null; });
+    const inner = frame && await frame.evaluate(() => ({ content: document.documentElement.getBoundingClientRect().height,
+      scroll: document.documentElement.scrollHeight, view: window.innerHeight })).catch(() => null);
+    return { outer, ...(inner || {}) };
+  };
+  const fits = (m) => Boolean(m) && near(m.outer, m.content) && m.scroll <= m.view + 1;
+  async function settled(page, frame) {
+    return (await waitFor(async () => { const m = await fitOf(page, frame); return fits(m) ? m : null; }, 3000)) || fitOf(page, frame);
+  }
+  // Where an element of the piece is in the portal's window (px from its top), and whether all of it is inside.
+  const inWindow = async (page, frame, selector) => {
+    const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f ? f.getBoundingClientRect().top : null; });
+    const box = frame && await frame.evaluate((s) => { const el = document.querySelector(s); if (!el) return null; const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; }, selector).catch(() => null);
+    const vh = await page.evaluate(() => window.innerHeight);
+    if (offset === null || !box) return { selector, found: false };
+    const top = Math.round(box.top + offset), bottom = Math.round(box.bottom + offset);
+    return { selector, top, bottom, vh, inside: top >= 0 && bottom <= vh };
+  };
+  // The frame at rest: the title band's bottom, the title's, and «Volver» (its lines, its text and its name).
+  const restOf = (page) => page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const bottom = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().bottom) : null; };
+    const back = document.querySelector(".back-link");
+    const range = document.createRange();
+    if (back) range.selectNodeContents(back);
+    const rects = back ? [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0) : [];
+    return { heading: bottom(".piece-heading"), title: bottom("h1.piece-title"), titleText: document.querySelector("h1.piece-title")?.textContent,
+      back: back && { lines: rects.length && rects.every((r) => Math.abs(r.top - rects[0].top) < r.height / 2) ? 1 : rects.length,
+        text: back.innerText.trim(), label: back.getAttribute("aria-label") } };
+  });
+  // One screen down: what is fixed or sticky on screen, and where the masthead went.
+  const stuckOf = (page) => page.evaluate(() => {
+    window.scrollTo(0, window.innerHeight);
+    const stuck = [...document.querySelectorAll("body *")].filter((el) => {
+      const p = getComputedStyle(el).position;
+      if (p !== "fixed" && p !== "sticky") return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight;
+    }).map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}`);
+    return { scrollY: Math.round(window.scrollY), stuck, masthead: Math.round(document.querySelector(".masthead").getBoundingClientRect().bottom) };
+  });
+  const pageHeight = (page) => page.evaluate(() => ({ scroll: document.documentElement.scrollHeight, vh: window.innerHeight }));
+  const rest = async (tag, page, { name = LONG_PROJECT, title } = {}) => {
+    const at = await restOf(page);
+    check(`${tag}: at rest the title band ends at ${PHONE_FRAME_MAX} px or less`, at.heading !== null && at.heading <= PHONE_FRAME_MAX &&
+      (!title || at.titleText === title), JSON.stringify(at));
+    const named = await page.getByRole("link", { name: `Volver a ${name}`, exact: true }).count();
+    check(`${tag}: «← Volver» is one line and its name is «Volver a ${name.length > 30 ? name.slice(0, 30) + "…" : name}»`,
+      at.back && at.back.lines === 1 && at.back.text.replace(/\s+/g, " ") === "← Volver" && at.back.label === `Volver a ${name}` && named === 1, JSON.stringify({ ...at.back, named }));
+  };
+  const fitCheck = async (tag, what, page, frame) => {
+    const m = frame ? await settled(page, frame) : null;
+    check(`${tag}: ${what}: the iframe is as tall as the piece and the piece does not scroll inside`, fits(m), JSON.stringify(m));
+    return m;
+  };
+
+  // The questions sheet.
+  {
+    const tag = `phone ${engineName}: questions`;
+    const { context, page, frame, errors } = await openPhone(IDS.questions, () => typeof respondidas === "function");
+    await rest(tag, page);
+    await fitCheck(tag, "open", page, frame);
+    const tall = await pageHeight(page);
+    check(`${tag}: the portal's page is taller than the screen`, tall.scroll > tall.vh, JSON.stringify(tall));
+    const down = await stuckOf(page);
+    check(`${tag}: one screen down nothing fixed or sticky is on screen, and the masthead went up`, down.scrollY > PHONE_FRAME_MAX &&
+      down.stuck.length === 0 && down.masthead <= 0, JSON.stringify(down));
+    // The first change: «Guardado» on the title's last line, or right below it.
+    if (frame) await frame.evaluate(() => responder("q-001", "si"));
+    const saved = await waitFor(() => page.evaluate(() => {
+      window.scrollTo(0, 0);
+      const s = document.querySelector(".piece-status"), t = document.querySelector("h1.piece-title");
+      if (!s || s.hidden || !s.textContent.includes("Guardado")) return null;
+      const range = document.createRange(); range.selectNodeContents(t);
+      const lines = [...range.getClientRects()].filter((r) => r.width > 0);
+      const last = lines[lines.length - 1], box = s.getBoundingClientRect();
+      return { status: { top: Math.round(box.top), bottom: Math.round(box.bottom), left: Math.round(box.left) },
+        lastLine: { top: Math.round(last.top), bottom: Math.round(last.bottom), right: Math.round(last.right) } };
+    }), 5000);
+    check(`${tag}: «Guardado» goes on the title's last line when it fits, or right below it`, saved &&
+      ((saved.status.top < saved.lastLine.bottom && saved.status.left >= saved.lastLine.right) ||
+       (saved.status.top >= saved.lastLine.bottom - 1 && saved.status.top <= saved.lastLine.bottom + 8)), JSON.stringify(saved));
+    // A step of the sheet, the page scrolled to its bottom: «Siguiente» shows the next step's title.
+    const steps = frame && await frame.evaluate(() => (paged() ? steps().length : 0)).catch(() => 0);
+    if (frame && steps > 1) {
+      await frame.evaluate(() => goToStep(0));
+      await settled(page, frame);
+      const before = await frame.evaluate(() => document.getElementById("view-title")?.textContent);
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await frame.click("button[data-rol=accion-principal]");
+      await settled(page, frame);
+      await sleep(200);
+      const after = await frame.evaluate(() => document.getElementById("view-title")?.textContent);
+      const title = await inWindow(page, frame, "#view-title");
+      check(`${tag}: at the bottom of a step, «Siguiente» shows the new step's title in the window`, before !== after && title.inside,
+        JSON.stringify({ before, after, title }));
+      // The last field of the step, focused with the page at its top: it is inside the window.
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const last = await frame.evaluate(() => {
+        const fields = [...document.querySelectorAll("main input, main textarea, main select")].filter((el) => {
+          const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
+        });
+        const el = fields[fields.length - 1];
+        if (!el) return null;
+        el.setAttribute("data-check", "last-field");
+        el.focus();
+        return el.id || el.name;
+      });
+      await sleep(300);
+      const field = await inWindow(page, frame, "[data-check=last-field]");
+      check(`${tag}: the step's last field, focused, is inside the window`, last && field.inside, JSON.stringify({ last, field }));
+    } else check(`${tag}: the sheet has steps to walk through`, false, `${steps} step(s)`);
+    // «Cambiaría algo» on the step's first question: its text field appears, and the iframe grows with it, nothing cut.
+    const grows = frame && await frame.evaluate(() => {
+      const id = steps()[currentStep()].questionIds[0];
+      return id ? { id, before: document.documentElement.getBoundingClientRect().height } : null;
+    }).catch(() => null);
+    const beforeFit = frame && await settled(page, frame);
+    if (grows) await frame.evaluate((id) => responder(id, "cambio"), grows.id);
+    const afterFit = frame && await settled(page, frame);
+    check(`${tag}: the field «Cambiaría algo» opens grows the iframe, and nothing is cut`, grows && fits(afterFit) && afterFit.outer > beforeFit.outer,
+      JSON.stringify({ grows, before: beforeFit, after: afterFit }));
+    check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // A title of TITLE_MAX characters still ends the title band at 160 px or less.
+  {
+    const tag = `phone ${engineName}: a title of ${TITLE_MAX} characters`;
+    const { context, page } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = TITLE_AT_MAX; });
+    await rest(tag, page, { title: TITLE_AT_MAX });
+    await context.close();
+  }
+
+  // The flows' review: its index takes the page to the group.
+  if (flowHtml) {
+    const tag = `phone ${engineName}: flows`;
+    const { context, page, frame, errors } = await openPhone(IDS.flow, () => typeof openFlow === "function");
+    await rest(tag, page);
+    await fitCheck(tag, "open", page, frame);
+    // The index shows when the list is longer than three screens (DET-04): the portal's screens, not the iframe's.
+    const index = frame && await frame.evaluate(() => {
+      const fold = document.getElementById("indexFold");
+      const links = fold ? [...fold.querySelectorAll("a[href^='#act-']")] : [];
+      return { shown: Boolean(fold) && fold.getBoundingClientRect().height > 0, link: links.length ? links[links.length - 1].getAttribute("href") : null,
+        page: document.documentElement.scrollHeight, frame: window.innerHeight };
+    }).catch(() => null);
+    check(`${tag}: the list of flows shows its index (it is longer than three screens)`, index && index.shown, JSON.stringify(index));
+    // Its last link takes the page to that group (the index made visible if it is not: this is the portal's part).
+    if (index && index.link) {
+      // (it would hide it again at the next resize of its iframe)
+      if (!index.shown) await frame.evaluate(() => { ajustarIndice = () => {}; document.getElementById("indice").hidden = false; });
+      await settled(page, frame);
+      await frame.click("#indexFold > summary", { timeout: 3000 }).catch(() => {});
+      await frame.click(`#indexFold a[href="${index.link}"]`, { timeout: 3000 }).catch(() => {});
+      await settled(page, frame);
+      await sleep(200);
+      const group = await inWindow(page, frame, `${index.link} > h2`);
+      check(`${tag}: a link of the index shows its group's title in the window`, group.inside, JSON.stringify(group));
+    } else check(`${tag}: a link of the index shows its group's title in the window`, false, "no index in the list of flows");
+    // Inside a flow, a fold opened (the first flow that has one, «¿Qué pasa si no?»): the iframe grows and nothing is cut.
+    const fold = frame && await frame.evaluate(() => {
+      const find = () => [...document.querySelectorAll("main details:not([open])")].find((el) => el.getBoundingClientRect().height > 0);
+      for (const id of IDS) { openFlow(id); if (find()) break; }
+      const d = find();
+      if (d) d.setAttribute("data-check", "fold");
+      return Boolean(d);
+    }).catch(() => false);
+    const closedFit = frame && await settled(page, frame);
+    if (fold) await frame.click("[data-check=fold] > summary");
+    const openFit = frame && await settled(page, frame);
+    check(`${tag}: inside a flow, an opened <details> grows the iframe, and nothing is cut`, fold && fits(openFit) && openFit.outer > closedFit.outer,
+      JSON.stringify({ fold, before: closedFit, after: openFit }));
+    check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
+  // A piece that grows in the same rendering frame as the portal's resize of its iframe.
+  {
+    const tag = `phone ${engineName}: a piece that grows again while its iframe is resized`;
+    const { context, page, frame } = await openPhone(IDS.questions, () => Array.isArray(window.order), (b) => { b.html[IDS.questions] = GROWS_ON_RESIZE; });
+    const grown = frame && await waitFor(() => frame.evaluate(() => (window.order.some((e) => e.startsWith("ro:12")) ? true : null)).catch(() => null), 3000);
+    const m = frame ? await settled(page, frame) : null;
+    check(`${tag}: it ends with the iframe as tall as the piece`, grown && fits(m) && near(m.content, 1200), JSON.stringify(m));
+    const order = frame ? await frame.evaluate(() => window.order).catch(() => []) : [];
+    const resizeAt = order.indexOf("resize:1000"), roAt = order.findIndex((e) => e.startsWith("ro:12"));
+    check(`${tag}: the iframe's resize event comes before the ResizeObserver of the same frame`, resizeAt >= 0 && roAt > resizeAt, JSON.stringify(order));
     await context.close();
   }
 }
@@ -1586,12 +1842,13 @@ const pieceHost = (frame) => frame.evaluate(() => ({ closed: factoryHost.closed,
   sendButton: [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Enviar respuestas") }));
 const requestButton = (page) => page.getByRole("button", { name: CLOSURE.action, exact: true });
 const sendRequestButton = (page) => page.locator("#change-request-text").locator("xpath=ancestor::form").locator("button[type=submit]");
-// A control that is not there fails its check, it does not stop the run. Before the click, two of the page's animation
-// frames: the piece's iframe runs in its own process, and Chrome sends a pointer event to the frame that was under it on
+// A control that is not there fails its check, it does not stop the run. Before the click, brought into view (the page
+// scrolls, not the piece) and two of the page's animation frames: the piece's iframe runs in its own process, and Chrome sends a pointer event to the frame that was under it on
 // the last frame it drew. A click right after the layout moved (the request form just opened above the piece) can land in
 // the piece where it was a frame ago, though the page's DOM already has the button there (Playwright's own target check
 // passes), and the form is never sent.
 const tap = async (locator) => {
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
   await locator.page().evaluate(nextFrames).catch(() => {});
   await locator.click({ timeout: 3000 }).catch(() => {});
 };
@@ -1934,25 +2191,28 @@ async function closureChecks(browser, base, html) {
       await context.close();
     }
 
-    // A short phone (320 x 640) with the late notice, the received notice and the form open: the piece keeps at least
-    // 60 % of the screen and the page scrolls instead. Then the piece is reopened by the factory while the person writes:
-    // request_change answers 55000 and the portal opens the piece again (open), never the network error.
+    // A phone (320 x 640) with the late notice, the received notice and the form open: the page scrolls as one (MAR-14),
+    // the iframe as tall as the piece, and both the form and the piece's start can be reached. Then the piece is reopened
+    // by the factory while the person writes: request_change answers 55000 and the portal opens the piece again (open),
+    // never the network error.
     if (first) {
       const backend = closedBackend(html, storage);
       backend.changeRequests.push(earlierRequest(IDS.questions));
-      const context = await mockedContext(browser, { backend, width: 320, locale: "es-CO" });
+      const context = await mockedContext(browser, { backend, width: 320, height: 640, locale: "es-CO" });
       const page = await context.newPage();
-      await page.setViewportSize({ width: 320, height: 640 });
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await page.goto(`${base}/#/piece/${IDS.questions}`, { waitUntil: "networkidle" });
-      await appPiece(page);
+      const closedFrame = await appPiece(page);
       await tap(requestButton(page));
       await waitFor(() => requestForm(page), 3000);
-      const sizes = await page.evaluate(() => ({ iframe: document.querySelector("iframe.piece-frame").getBoundingClientRect().height,
-        vh: window.innerHeight, scroll: document.documentElement.scrollHeight }));
-      check(`${tag}: short phone: with the form open the piece stays at least 60 % of the screen high, and the page scrolls`,
-        sizes.iframe >= Math.floor(0.6 * sizes.vh) - 1 && sizes.scroll > sizes.vh, JSON.stringify(sizes));
+      const sizeOf = async () => ({ ...(await page.evaluate(() => ({ iframe: document.querySelector("iframe.piece-frame").getBoundingClientRect().height,
+        vh: window.innerHeight, scroll: document.documentElement.scrollHeight }))),
+        piece: closedFrame && await closedFrame.evaluate(() => document.documentElement.getBoundingClientRect().height).catch(() => null) });
+      const sizes = (await waitFor(async () => { const s = await sizeOf(); return Math.abs(s.iframe - s.piece) <= 1 ? s : null; }, 3000)) || await sizeOf();
+      const field = await page.evaluate(() => { const r = document.getElementById("change-request-text").getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+      check(`${tag}: short phone: with the form open the page scrolls, the iframe as tall as the piece, and the form is in the window`,
+        sizes.scroll > sizes.vh && Math.abs(sizes.iframe - sizes.piece) <= 1 && field.top >= 0 && field.bottom <= sizes.vh, JSON.stringify({ sizes, field }));
       await shot(page, "request-short-phone", 320, "light");
       // The piece, scrolled into view once it has painted (a full-page capture leaves an iframe below the fold blank):
       // its heading inside the screen and painted in that capture.
@@ -1963,7 +2223,7 @@ async function closureChecks(browser, base, html) {
       const headingBox = heading && await heading.boundingBox().catch(() => null);
       const inView = Boolean(headingBox) && headingBox.height > 0 && headingBox.y >= 0 && headingBox.y + headingBox.height <= sizes.vh;
       const headingColours = inView ? await coloursIn(page, scrolledShot, headingBox) : 0;
-      check(`${tag}: short phone: scrolled into view, the piece's «Lo que enviaste» is inside the screen and painted in the capture`,
+      check(`${tag}: short phone: scrolled to the piece's start, its «Lo que enviaste» is inside the screen and painted in the capture`,
         inView && headingColours > 1, JSON.stringify({ headingBox, vh: sizes.vh, headingColours }));
       await typeRequest(page, "Quiero cambiar algo");
       backend.patch[IDS.questions] = { status: "submitted", updated_at: new Date().toISOString() };
@@ -3136,7 +3396,7 @@ async function portalGeometryChecks(browser, base, html, factory) {
   }
 }
 
-const { chromium } = loadPlaywright();
+const { chromium, webkit: webkitType } = loadPlaywright();
 const { server, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
 const read = (path) => (path ? readFileSync(path, "utf8") : null);
@@ -3152,6 +3412,15 @@ try {
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
   if (args.questions) await sessionReturnsChecks(browser, base, read(args.questions));
   if (args.questions) await pieceViewChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
+  if (args.questions) await phoneFrameChecks(browser, "chromium", base, read(args.questions), read(args.flow));
+  if (args.questions) {
+    // WebKit only when playwright-core has its build installed (npx playwright install webkit); without it, a note.
+    let webkit = null;
+    try { webkit = await webkitType.launch({ headless: true }); } catch (error) {
+      console.log(`NOTE  phone checks: WebKit is not installed for playwright-core, they ran in Chromium only (${String(error).split("\n")[0]})`);
+    }
+    if (webkit) { try { await phoneFrameChecks(webkit, "webkit", base, read(args.questions), read(args.flow)); } finally { await webkit.close(); } }
+  }
   if (args.questions) await sentLineChecks(browser, base, read(args.questions));
   if (args.questions && args.demo) await demoAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));

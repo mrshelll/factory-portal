@@ -177,23 +177,38 @@ main { padding-block: var(--space-6) var(--space-7); }
 
 /* ---- piece ------------------------------------------------------------------------------ */
 
-/* The piece fills the screen under the frame; when the frame is tall (a closed piece with the request form open on a
-   short phone) the piece keeps at least 60 % of the screen and the page scrolls instead. */
+/* The piece is as tall as its content and the page scrolls, never the piece (MAR-14): the iframe takes the height the
+   piece posts (app.js followPiece), and its box (.piece-main) fills the screen under the frame, so a short piece still
+   has the screen. Nothing of the frame is fixed or sticky: on a phone it goes up as the page scrolls. */
 .piece-layout { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 .piece-layout > .frame { flex: none; }
 /* Under the masthead, at every width: «Volver», then the title band (the piece's title and its save
-   line). Both start on the brand's left edge, the frame's. */
+   line). Both start on the brand's left edge, the frame's. On a phone the frame takes the least it can, with nothing cut
+   (MAR-14, FUN-14): at rest the title band ends at 160 px or less of a 640 px screen with a title of two lines (the
+   factory's publisher keeps titles to what fits there): «← Volver» right under the masthead, one line (its name still
+   says where); the title right under it; the save line on the title's last line when it fits, or right below it, in
+   small text. From 672 px «Volver» shows where it goes and the save line goes under the title. */
 .piece-bar {
   display: grid;
   justify-items: start;
-  row-gap: var(--space-1);
-  padding-block: var(--space-1) var(--space-3);
+  padding-block: 0 var(--space-3);
 }
 .back-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--signal); font-weight: 600; text-decoration: none; }
 @media (hover: hover) { .back-link:hover { text-decoration: underline; text-underline-offset: 3px; } }
-.piece-heading { display: grid; gap: var(--space-1); min-width: 0; max-width: 100%; }
-.piece-title { font-size: var(--text-body); font-weight: 600; line-height: 1.3; }
+.back-link-long { display: none; }
+.back-link-short { white-space: nowrap; }
+.piece-heading { min-width: 0; max-width: 100%; font-size: var(--text-body); line-height: 1.3; }
+.piece-title { display: inline; font-size: var(--text-body); font-weight: 600; line-height: 1.3; }
 .piece-status { color: var(--muted); font-size: var(--text-small); }
+.piece-status:not([hidden]) { display: inline-block; margin-inline-start: var(--space-2); }
+@media (min-width: 672px) {
+  .piece-bar { row-gap: var(--space-1); padding-block: var(--space-1) var(--space-3); }
+  .back-link-long { display: inline; }
+  .back-link-short { display: none; }
+  .piece-heading { display: grid; gap: var(--space-1); }
+  .piece-title { display: block; }
+  .piece-status:not([hidden]) { display: block; margin-inline-start: 0; }
+}
 .piece-layout .notices { margin: 0 0 var(--space-3); }
 /* A closed piece (received, or a replaced version that was sent): its notices, the earlier change requests and the
    request form, one under the other in the pinned zone; their texts keep the reading measure. */
@@ -221,4 +236,6 @@ main { padding-block: var(--space-6) var(--space-7); }
   padding: 0;
 }
 .piece-main::before { content: ""; flex: none; margin-inline: var(--margin-page); border-top: 1px solid var(--line); }
+/* Until the piece posts its height, the iframe takes what is left of the screen; then exactly that height. */
 .piece-frame { display: block; flex: 1; min-height: 0; width: 100%; border: 0; }
+.piece-frame[data-sized] { flex: none; }

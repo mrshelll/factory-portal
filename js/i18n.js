@@ -105,7 +105,8 @@ export const dictionaries = {
 
     backToProjects: "Tus proyectos",
     backToProjectsLabel: "Volver a tus proyectos",
-    backToProjectLabel: "Volver a {name}",
+    backTo: "Volver a {name}",
+    backShort: "Volver",
     opening: "Abriendo…",
     pieceLoadErrorTitle: "No se pudo abrir",
     pieceNotFoundTitle: "No está disponible",
@@ -240,7 +241,8 @@ export const dictionaries = {
 
     backToProjects: "Your projects",
     backToProjectsLabel: "Back to your projects",
-    backToProjectLabel: "Back to {name}",
+    backTo: "Back to {name}",
+    backShort: "Back",
     opening: "Opening…",
     pieceLoadErrorTitle: "Couldn't open",
     pieceNotFoundTitle: "Not available",
