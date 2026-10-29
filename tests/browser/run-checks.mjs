@@ -4128,8 +4128,8 @@ async function decisionsChecks(browser, base, html) {
     await page.click(sendSel(DKEY.a)).catch(() => {});
     const after = await waitFor(async () => { const s = await decisionsSection(page); const q = pointOf(s, DKEY.a); return q && q.notice === DECISIONS.stale ? s : null; }, 5000);
     const a = pointOf(after, DKEY.a), d = pointOf(after, DKEY.d);
-    check("decisions: decisions-stale-version: refused (PT409), the section reloads and the point shows it changed, with its new text",
-      a && a.mark === DECISIONS.marks.changed && a.decided === point.decided && decisionCalls(backend, "my_decisions").length === loadsBefore + 1 &&
+    check("decisions: decisions-stale-version: refused (PT409), the section reloads and the point says it changed while she read it, with its new text; never answered, it does not say «Cambió desde tu respuesta»",
+      a && a.notice === DECISIONS.stale && a.mark === null && a.decided === point.decided && decisionCalls(backend, "my_decisions").length === loadsBefore + 1 &&
       backend.decisions[IDS.project].answers.every((x) => x.key !== DKEY.a), JSON.stringify({ a, loads: decisionCalls(backend, "my_decisions").length - loadsBefore }));
     check("decisions: decisions-stale-version: the typed comment and the choice are kept, on that point and on the others",
       a && a.checked === "no" && a.comment && a.comment.value === typed && d && d.checked === "unsure" && d.comment && d.comment.value === "No conozco ese caso.",

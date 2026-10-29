@@ -953,7 +953,9 @@ function decisionsSection({ projectId, viewId, points, live }) {
       answered.textContent = !date ? "" : said ? t("answerSentAs", { answer: said, date }) : t("answerSent", { date });
       answered.hidden = !date;
     }
-    showStatus(stale.has(key) ? "changed" : point.mark, point.answer);
+    // Refused because it changed while she read it: «Cambió desde tu respuesta» only when she had answered it before; the
+    // notice (answerStale) says the rest.
+    showStatus(stale.has(key) ? (point.answer ? "changed" : null) : point.mark, point.answer);
 
     const radios = ANSWER_VALUES.map((value) => h("input", { type: "radio", id: `${id}-${value}`, name: `${id}-answer`, value, checked: chosen === value }));
     const comment = h("textarea", { id: `${id}-comment`, name: `${id}-comment`, rows: "3", maxlength: String(DECISION_TEXT_MAX),
