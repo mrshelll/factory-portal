@@ -53,7 +53,10 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    phone (below 672 px) the frame takes the least it can, with nothing cut (the manual's MAR-14): the way back reads
    «← Volver», one line, and its accessible name says where («Volver a <project>»); the title is never cut (a title
    of two lines ends the band at 160 px or less of a 640 px screen; the factory's publisher keeps titles to that); and
-   the save line goes on the title's last line when it fits, or right below it, in small text. The iframe is as
+   the save line goes on the title's last line when it fits, or right below it, in small text. On the owner's screen
+   the line «Lo que envió … el …» goes in the row of «← Volver», on its right, so a title of 60 characters still ends
+   the band at 150 px. The project's page does the same below 672 px: «← Volver» (named «Volver a tus proyectos») right
+   under the masthead, and the title ends at 151 px. The iframe is as
    tall as the piece (the height the bridge posts; until the first one, what is left of the screen under the frame)
    and the portal's page scrolls, never the piece: nothing of the frame is fixed or sticky, so on a phone it goes up
    with the page. The piece's scroll requests move the portal's page (`followPiece` in `js/app.js`): a position is
@@ -368,7 +371,9 @@ piece screen on a phone (MAR-14, `phoneFrameChecks`), at 320 × 640 with a proje
 also in WebKit when playwright-core has its build installed (otherwise a `NOTE` line says it did not run): at rest
 the title band ends at 160 px or less, with a title of `TITLE_MAX` characters too; «← Volver» is one line named
 «Volver a <project>»; the iframe is as tall as the piece, which does not scroll inside, and the page is taller than
-the screen; one screen down nothing fixed or sticky is on screen; «Guardado» on the title's last line or right below
+the screen; one screen down nothing fixed or sticky is on screen; the project's page, the owner's project page and the
+owner's piece screen (with a title of `TITLE_MAX` characters too) end their band at 160 px or less, with «← Volver»
+in one line named after where it goes; «Guardado» on the title's last line or right below
 it; at the bottom of a step «Siguiente» shows the new step's title, and a link of the flows' index its group; the
 step's last field, focused, is in the window; an opened `<details>` grows the iframe; and a piece that grows again
 in the same rendering frame as the portal's resize of its iframe ends as tall as the iframe, with the resize event

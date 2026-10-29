@@ -1447,6 +1447,56 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     await context.close();
   }
 
+  // The project's page and the owner's screens (MAR-14 too): «← Volver» in one line named after where it goes, and the
+  // title band short at rest, with nothing cut. The owner's piece screen has the longest title and its permanent line
+  // «Lo que envió … el …» under it.
+  {
+    const bandOf = (page, headSelector) => page.evaluate((sel) => {
+      window.scrollTo(0, 0);
+      const bottom = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().bottom) : null; };
+      const back = document.querySelector(".back-link");
+      const range = document.createRange();
+      if (back) range.selectNodeContents(back);
+      const rects = back ? [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0) : [];
+      const h1 = document.querySelector("h1");
+      const style = h1 && getComputedStyle(h1);
+      // The band: what its elements reach (the owner's heading gives its box up to the grid, so the title and the line count).
+      const band = Math.max(...sel.split(",").map((one) => bottom(one.trim()) ?? 0));
+      return { h1: bottom("h1"), band, h1Text: h1 && h1.textContent, h1Lines: h1 && Math.round(h1.getBoundingClientRect().height / parseFloat(style.lineHeight)),
+        back: back && { lines: rects.length && rects.every((r) => Math.abs(r.top - rects[0].top) < r.height / 2) ? 1 : rects.length,
+          text: back.innerText.trim().replace(/\s+/g, " "), label: back.getAttribute("aria-label"), height: Math.round(back.getBoundingClientRect().height) } };
+    }, headSelector);
+    const phoneScreen = async (tag, backend, hash, headSelector, label, ready) => {
+      const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO" });
+      const page = await context.newPage();
+      await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+      await waitFor(() => page.evaluate(ready).catch(() => false), 10000);
+      await sleep(200);
+      const at = await bandOf(page, headSelector);
+      check(`${tag}: at rest the h1 and the title band end at ${PHONE_FRAME_MAX} px or less`, at.h1 !== null && at.h1 <= PHONE_FRAME_MAX && at.band > 0 && at.band <= PHONE_FRAME_MAX, JSON.stringify(at));
+      check(`${tag}: «← Volver» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
+        at.back.text === "← Volver" && at.back.label === label, JSON.stringify(at.back));
+      const fixed = await stuckOf(page);
+      check(`${tag}: nothing fixed or sticky is on screen one screen down`, fixed.stuck.length === 0, JSON.stringify(fixed));
+      return { context, page, at };
+    };
+    let screen = await phoneScreen(`phone ${engineName}: project page`, ownerBackend(html), `#/project/${IDS.project}`, ".page-head", "Volver a tus proyectos", () => document.querySelector(".page-head h1")?.textContent === "Portal de prueba");
+    await screen.context.close();
+    screen = await phoneScreen(`phone ${engineName}: owner's project page`, ownerBackend(html), `#/project/${IDS.ownedProject}`, ".page-head", "Volver a tus proyectos", () => document.querySelector(".page-head h1")?.textContent === PROJECT.owned);
+    await screen.context.close();
+    for (const [what, title] of [["a short title", OWNED_TITLES[OWNED.questions]], [`a title of ${TITLE_MAX} characters`, TITLE_AT_MAX]]) {
+      // The owner's backend takes the title from OWNED_TITLES when it is built.
+      OWNED_TITLES[OWNED.questions] = title;
+      const b = ownerViewBackend(html, null, null, {});
+      const tag = `phone ${engineName}: owner's piece with ${what}`;
+      screen = await phoneScreen(tag, b, ownerHref(IDS.ownedProject, OWNED.questions, PEOPLE.luis), "h1.piece-title, .piece-status", `Volver a ${PROJECT.owned}`,
+        () => document.querySelector("h1.piece-title") && document.querySelector(".piece-status")?.textContent.startsWith("Lo que envió"));
+      check(`${tag}: the title is whole (${title.length} characters, never cut) and the line says whose send it is`, screen.at.h1Text === title, JSON.stringify(screen.at));
+      await screen.context.close();
+      OWNED_TITLES[OWNED.questions] = "Preguntas para el equipo";
+    }
+  }
+
   // The flows' review: its index takes the page to the group.
   if (flowHtml) {
     const tag = `phone ${engineName}: flows`;

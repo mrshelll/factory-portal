@@ -98,9 +98,9 @@ function frameLayout({ title, meta = [], headerActions = [], back = null }) {
   const live = visuallyHiddenStatus();
   replaceChildren(root, h("div", { class: "frame" },
     masthead(headerActions),
-    h("main", { id: "main" },
+    h("main", { id: "main", class: back ? "has-context" : null },
       h("div", { "data-rol": "marco" },
-        back ? h("p", { class: "page-context" }, backLink(back)) : null,
+        back ? h("p", { class: "page-context" }, backLink(back, { short: true })) : null,
         h("div", { class: "page-head", "data-rol": "cabecera" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
@@ -720,8 +720,9 @@ function saverFor(pieceId) {
 
 // The frame of the piece screen: the same masthead as every screen, then the way back (to the piece's project, or home
 // until it is known) and the title band on the same left edge, the notices, and the piece below (it drops its own brand
-// bar in the portal).
-function pieceLayout(titleText, back = homeBack()) {
+// bar in the portal). sentLine: the owner's screen, whose permanent line «Lo que envió … el …» goes beside «Volver» on a
+// phone (portal.css), so the title band stays short with a title of two lines.
+function pieceLayout(titleText, back = homeBack(), { sentLine = false } = {}) {
   // A notice that stays for the whole visit (a replaced version); the zone below takes the passing ones.
   const pinned = h("div", { class: "notices", "data-rol": "aviso-fijo" });
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
@@ -730,7 +731,7 @@ function pieceLayout(titleText, back = homeBack()) {
   const main = h("main", { id: "main", class: "piece-main", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
   main.append(live);
-  replaceChildren(root, h("div", { class: "piece-layout" },
+  replaceChildren(root, h("div", { class: sentLine ? "piece-layout piece-layout--sent" : "piece-layout" },
     h("div", { class: "frame", "data-rol": "marco" },
       h("header", {},
         masthead([], "div"),
@@ -1117,7 +1118,7 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
   const projectName = project && (project.name || project.slug);
   layout = pieceLayout(pieceTitle, projectName
     ? { href: projectHref(projectId), text: projectName, label: t("backTo", { name: projectName }) }
-    : homeBack());
+    : homeBack(), { sentLine: true });
   const date = formatDate(state.lang, response.submitted_at);
   layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
   const follow = followPiece(() => (frame ? frame.iframe : null));
