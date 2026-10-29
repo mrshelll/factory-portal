@@ -3892,6 +3892,31 @@ async function decisionsChecks(browser, base, html) {
     check("decisions-sign-out-unsent: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
+  // decisions-sign-out-unsent: a comment sent during the visit (still in its field) and a comment hidden by choosing «Va»
+  // (it is not sent) are not unsent: «Salir» signs out without asking.
+  for (const [what, act] of [
+    ["a comment sent during the visit", async (page, point) => {
+      await point.locator('label.choice:has(input[value="change"])').click({ timeout: 3000 }).catch(() => {});
+      await point.locator("textarea").fill("Que lo confirme quien conduce.", { timeout: 3000 }).catch(() => {});
+      await point.locator('button[type="submit"]').click({ timeout: 3000 }).catch(() => {});
+      return waitFor(() => point.locator(".decision-answered").evaluate((el) => !el.hidden && /\S/.test(el.textContent)).catch(() => false), 8000);
+    }],
+    ["a comment typed and then hidden by choosing «Va»", async (page, point) => {
+      await point.locator('label.choice:has(input[value="change"])').click({ timeout: 3000 }).catch(() => {});
+      await point.locator("textarea").fill("Mejor no.", { timeout: 3000 }).catch(() => {});
+      await point.locator('label.choice:has(input[value="yes"])').click({ timeout: 3000 }).catch(() => {});
+      return point.locator("textarea").evaluate((el) => el.value === "Mejor no." && el.closest(".field").hidden).catch(() => false);
+    }]]) {
+    const backend = decisionsBackend(html);
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    await sectionShown(page);
+    const ready = await act(page, page.locator(`.decision[data-key="${DKEY.a}"]`));
+    await page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
+    const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k) } : null), STORAGE_KEY), 10000);
+    check(`decisions-sign-out-unsent: with ${what}, «Salir» signs out without asking`, Boolean(ready) && out && !out.session, JSON.stringify({ ready, out }));
+    check(`decisions-sign-out-unsent: with ${what}: no page errors`, errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
 
   // section-after-pieces, owner-sees-line, the marks, the choices, comment-required-for-change, answer-sent-confirmed-in-page,
   // propose-always-available and opened-once-per-visit, on one visit.

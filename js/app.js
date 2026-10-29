@@ -969,9 +969,12 @@ function decisionsSection({ projectId, viewId, points, live }) {
     setSending(sending.has(key));
     if (stale.has(key)) showNotice(failure, { tone: "warning", text: t("answerStale"), dismissible: false });
     const showFailure = (text) => showNotice(failure, { tone: "error", text, dismissible: false });
+    // The comment of the answer that counts, as sent: what is in the field is unsent only when it differs.
+    let sentComment = current && typeof current.comment === "string" ? current.comment.trim() : "";
     // Her answer went: the point says so in place, announced, without moving the focus (COM-16).
     function confirm(answer) {
       point.answer = answer;
+      sentComment = typeof answer.comment === "string" ? answer.comment.trim() : "";
       point.mark = answer.value === "yes" ? "confirmed" : "none";
       clearNotice(failure);
       showStatus(point.mark, point.answer);
@@ -1076,8 +1079,8 @@ function decisionsSection({ projectId, viewId, points, live }) {
                 h("span", {}, t(ANSWER_KEYS[radio.value]))))),
             commentField, failure, button))));
     reveal();
-    const sentComment = current && typeof current.comment === "string" ? current.comment.trim() : "";
-    const unsent = () => /\S/.test(comment.value) && comment.value.trim() !== sentComment;
+    // Only a comment she sees counts: one hidden by choosing «Va» would not be sent with the answer either.
+    const unsent = () => !commentField.hidden && /\S/.test(comment.value) && comment.value.trim() !== sentComment;
     shown.set(key, { point, item, setSending, confirm, showFailure, unsent });
     return item;
   }
