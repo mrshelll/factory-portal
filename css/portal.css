@@ -87,8 +87,11 @@ main { padding-block: var(--space-6) var(--space-7); }
    title takes its place, so a name of two lines (24 px each) still ends the band at 160 px or less (MAR-14). */
 main.context-wide { padding-top: var(--space-4); }
 .page-context--wide { display: none; }
+/* A way back elsewhere (the owner's point of «Decisiones», back to its project) stays on a phone, as the piece screen's: «← Volver»
+   right under the masthead, its 44 px target the only gap. */
+main.context-back { padding-top: 0; }
 @media (min-width: 672px) {
-  main.context-wide { padding-top: var(--space-6); }
+  main:is(.context-wide, .context-back) { padding-top: var(--space-6); }
   .page-context--wide { display: block; }
 }
 .page-note { max-width: var(--measure-text); color: var(--muted); }

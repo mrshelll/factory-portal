@@ -101,17 +101,19 @@ const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backT
 // One frame for every screen: masthead, then inside <main> the title band, the notice zone and
 // the body. The frame's box is the .frame (the masthead's too); inside <main>, its data-rol="marco" holds
 // the title band, the notices and the body, as the visual manual's anatomy puts them (marco.md). `back`
-// ({ href, text, label }) puts the way back first, as the manual's optional «contexto» zone, without a data-rol; only from
-// 672 px: the screens that have it (a project's page) go back home, which the brand links to on a phone (portal.css).
+// ({ href, text, label }) puts the way back first, as the manual's optional «contexto» zone, without a data-rol. A way back
+// home shows only from 672 px: on a phone the brand links there (portal.css). A way back elsewhere (the owner's point of
+// «Decisiones» goes back to its project) shows at every width, «← Volver» on a phone, right under the masthead.
 function frameLayout({ title, meta = [], headerActions = [], back = null }) {
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const body = h("div", { class: "body", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
+  const home = Boolean(back) && back.href === "#/";
   replaceChildren(root, h("div", { class: "frame" },
     masthead(headerActions),
-    h("main", { id: "main", class: back ? "context-wide" : null },
+    h("main", { id: "main", class: back ? (home ? "context-wide" : "context-back") : null },
       h("div", { "data-rol": "marco" },
-        back ? h("p", { class: "page-context page-context--wide" }, backLink(back)) : null,
+        back ? h("p", { class: home ? "page-context page-context--wide" : "page-context" }, backLink(back)) : null,
         h("div", { class: "page-head", "data-rol": "cabecera" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),

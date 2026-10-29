@@ -1439,6 +1439,10 @@ const TITLE_MAX = 60;
 const PROJECT_TWO_LINES = "Tienda virtual de artesanías";
 const TITLE_AT_MAX = "Demo de la tienda virtual de artesanías: catálogo y compras.";
 if (TITLE_AT_MAX.length !== TITLE_MAX) throw new Error(`TITLE_AT_MAX is ${TITLE_AT_MAX.length} characters, not ${TITLE_MAX}`);
+// The longest title of a «Decisiones» point the factory publishes (its decisions.py pins the same number), at exactly that.
+const DECISION_TITLE_MAX = 120;
+const DECISION_TITLE_AT_MAX = "Un viaje cuenta en la plataforma solo cuando quien conduce y quien viaja confirman, cada uno desde su teléfono, que pasó";
+if (DECISION_TITLE_AT_MAX.length !== DECISION_TITLE_MAX) throw new Error(`DECISION_TITLE_AT_MAX is ${DECISION_TITLE_AT_MAX.length} characters, not ${DECISION_TITLE_MAX}`);
 // A piece of 1000 px that grows 200 px from inside the resize event of its iframe reaching 1000 px: its growth comes in
 // the same rendering frame as the portal's resize, in the same direction. It records the order of the frame's resize
 // events and of its ResizeObserver.
@@ -1779,6 +1783,17 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         await screen.context.close();
       }
     } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
+    // One point of «Decisiones» as the owner reads it keeps «← Volver» too: it goes back to the project, not home (the
+    // brand's destination). Its h1 is the point's title: the fixture's, and the longest the factory publishes.
+    for (const [what, title] of [["the screens' title", OTITLE.trips], [`a title of ${DECISION_TITLE_MAX} characters`, DECISION_TITLE_AT_MAX]]) {
+      const b = ownerDecisionsBackend(html);
+      b.decisions[IDS.ownedProject].points[0].title = title;
+      const tag = `phone ${engineName}: owner's point of «Decisiones» with ${what}`;
+      const screen = await phoneScreen(tag, b, `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".page-head", `Volver a ${PROJECT.owned}`,
+        () => document.querySelector(".page-head h1")?.textContent.length > 0 && document.querySelectorAll(".owner-answer").length > 0);
+      check(`${tag}: the title is whole (${title.length} characters, never cut)`, screen.at.h1Text === title, JSON.stringify(screen.at));
+      await screen.context.close();
+    }
   }
 
   // The flows' review: its index takes the page to the group.
@@ -4222,8 +4237,8 @@ const ownerDecisionView = (page) => page.evaluate(() => {
   return {
     h1: text(document.querySelector("h1")),
     meta: [...document.querySelectorAll(".page-meta")].map((el) => el.textContent),
-    // The link's words, without its arrow (not read).
-    back: back ? { href: back.getAttribute("href"), text: [...back.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("") } : null,
+    // The link's words from 672 px (where it goes), without its arrow (not read), and its name.
+    back: back ? { href: back.getAttribute("href"), text: back.querySelector(".back-link-long")?.textContent ?? null, label: back.getAttribute("aria-label") } : null,
     decided: text(document.querySelector(".owner-decision-decided")),
     peopleTitle: text(document.querySelector("[data-rol=cuerpo] section h2")),
     people: [...document.querySelectorAll(".owner-answer")].map((el) => {
@@ -4284,7 +4299,7 @@ async function ownerDecisionsChecks(browser, base, html) {
     point = await ownerDecisionView(page);
     check("owner-decisions: a point opens with its title, its counts, the way back to the project and what was decided", point.h1 === OTITLE.trips &&
       JSON.stringify(point.meta) === JSON.stringify(["Va: 1 · No va: 1 · Sin respuesta: 1"]) && point.back && point.back.href === `#/project/${IDS.ownedProject}` &&
-      point.back.text === PROJECT.owned && point.decided === backend.decisions[IDS.ownedProject].points[0].decided && point.peopleTitle === OWNER_DECISIONS.peopleTitle,
+      point.back.text === PROJECT.owned && point.back.label === `Volver a ${PROJECT.owned}` && point.decided === backend.decisions[IDS.ownedProject].points[0].decided && point.peopleTitle === OWNER_DECISIONS.peopleTitle,
       JSON.stringify(point));
     const byName = (v, name) => v.people.find((x) => x.name === name) || null;
     check("owner-decisions-disagreement: two people, «Va» and «No va», both shown with their own answer", byName(point, luis.name)?.answer === "Va" &&
