@@ -186,9 +186,10 @@ main.context-wide { padding-top: var(--space-4); }
   .rows:not(.empty) .row-main > :first-child { grid-area: title; }
   .rows:not(.empty) .row-meta { grid-area: meta; }
   .rows:not(.empty) :is(.row-aside, .status) { grid-area: state; }
-  /* A row with no meta line (another person's project: a name and what is left to answer) has two parts: the state takes the
-     second and third columns, so the middle one is not left empty, and starts where the meta column starts in the other rows. */
-  .rows:not(.empty) :is(.row-link, .row-item):not(:has(.row-meta)) { grid-template-areas: "title state state"; }
+  /* Decided by the list, not by the row: a list in which no row has a meta line (every project is another person's: a name and
+     what is left to answer) has two equal columns, title · state, so no column stands empty; as soon as one row has a meta line
+     the list keeps its three columns and a row without one leaves that cell empty, so every state still falls on the same x. */
+  .rows:not(.empty):not(:has(.row-meta)) :is(.row-link, .row-item) { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "title state"; }
 }
 
 /* ---- piece ------------------------------------------------------------------------------ */

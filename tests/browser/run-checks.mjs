@@ -135,11 +135,11 @@ async function portalChecks(browser, base) {
       const bare = await page.evaluate(() => {
         const mark = document.querySelector("[data-rol=marca-producto]"), frame = document.querySelector(".frame");
         return { tag: mark.tagName.toLowerCase(), href: mark.hasAttribute("href"), current: mark.hasAttribute("aria-current"), label: mark.hasAttribute("aria-label"),
-          words: mark.textContent, left: Math.round(mark.getBoundingClientRect().left - frame.getBoundingClientRect().left), height: Math.round(mark.getBoundingClientRect().height),
+          words: mark.textContent, left: Math.round(mark.getBoundingClientRect().left), h1Left: Math.round(document.querySelector("h1").getBoundingClientRect().left), height: Math.round(mark.getBoundingClientRect().height),
           weight: getComputedStyle(mark.querySelector("span")).fontWeight };
       });
       check("brand: on the sign-in screen the brand is not a link (no href, no aria-current), with the brand's look", bare.tag !== "a" && !bare.href && !bare.current &&
-        !bare.label && bare.words === "ninben" && bare.height >= 44 && bare.weight === "600", JSON.stringify(bare));
+        !bare.label && bare.words === "ninben" && Math.abs(bare.left - bare.h1Left) <= 1 && bare.height >= 44 && bare.weight === "600", JSON.stringify(bare));
       await snapshot(page, "sign-in-email", "formulario");
       const violations = await axeViolations(page);
       if (violations) check("login: axe has no violations", violations.length === 0, violations.join(", "));
@@ -1507,10 +1507,11 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         if (!a) return null;
         const box = a.getBoundingClientRect(), text = a.querySelector("span");
         return { tag: a.tagName.toLowerCase(), href: a.getAttribute("href"), label: a.getAttribute("aria-label"), height: Math.round(box.height),
+          edge: Math.round(box.left) - Math.round(document.querySelector("h1").getBoundingClientRect().left),
           words: text && text.textContent, weight: text && getComputedStyle(text).fontWeight, svg: Boolean(a.querySelector("svg")) };
       });
       check(`${tag}: the brand is a link home named «ninben, ir a Tus proyectos», 44 px high, in the brand's type`, brand && brand.tag === "a" && brand.href === "#/" &&
-        brand.label === "ninben, ir a Tus proyectos" && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
+        brand.label === "ninben, ir a Tus proyectos" && Math.abs(brand.edge) <= 1 && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
       const fixed = await stuckOf(page);
       check(`${tag}: nothing fixed or sticky is on screen one screen down`, fixed.stuck.length === 0, JSON.stringify(fixed));
       return { context, page, at };
@@ -2586,6 +2587,11 @@ async function projectPageChecks(browser, base, html) {
     }));
     check("home-projects: at 672 every row carries its label on the right edge, as the project lists carry the state",
       wide.length === 2 && wide.every((gap) => gap !== null && gap <= 1), JSON.stringify(wide));
+    // A list in which no row has a meta line (every project another person's) has two equal columns, title · state, at 1056 and up.
+    await page.setViewportSize({ width: 1056, height: 900 });
+    await page.evaluate(() => document.querySelectorAll(".rows .row-meta").forEach((el) => el.remove()));
+    listColumnChecks("home-projects (no meta line in any row)", 1056, "light", await listColumns(page));
+    await page.reload({ waitUntil: "networkidle" });
     await page.setViewportSize({ width: 360, height: 780 });
     await page.screenshot({ path: join(outDir, "home-projects-360.png"), fullPage: true });
     await snapshot(page, "home-projects", "lista");
@@ -3427,21 +3433,22 @@ function listColumnChecks(name, width, scheme, rows) {
   const detail = JSON.stringify(rows.map((r) => [r.text, r.row && [r.row.x, r.row.der], r.title && [r.title.x, r.title.der, r.title.top],
     r.meta && [r.meta.x, r.meta.der, r.meta.top], r.state && [r.state.x, r.state.der, r.state.top]]));
   if (width >= 1056) {
-    const metas = rows.filter((r) => r.meta), bare = rows.filter((r) => !r.meta);
-    // A row without a meta line (another person's project: only a title and what is left to answer) does not leave the middle
-    // column empty: its state starts where the meta column starts, on the same x down every such row.
+    const metas = rows.filter((r) => r.meta);
+    // The columns are decided by the list: with a meta line in any row the list has three columns and every state falls on the
+    // same x, a row without a meta line leaving that cell empty (a mixed list, like home with an owned project and another's);
+    // with none, two equal columns, title · state.
     check(`${tag}: the rows are columns, title · meta · state, each column aligned down the list`, ok && same(rows.map((r) => r.title.x)) &&
-      same(metas.map((r) => r.meta.x)) && (!metas.length || same(metas.map((r) => r.state.x))) && (!bare.length || same(bare.map((r) => r.state.x))) &&
+      (!metas.length || same(metas.map((r) => r.meta.x))) && same(rows.map((r) => r.state.x)) &&
       rows.every((r) => near(r.title.x, r.row.x) && (!r.meta || r.meta.x > r.title.der) && r.state.x > (r.meta ? r.meta.der : r.title.der) &&
         r.state.top < r.title.bottom && (!r.meta || r.meta.top < r.title.bottom)), detail);
-    // Three equal columns: from the title to the meta, from the meta to the state and from the state to the row's end (plus
-    // the gap between columns) is the same step: a third of the row and one gap. A row without meta has two parts: the state
-    // takes the second and third columns, from one step in.
-    check(`${tag}: the row's width is shared in three equal columns, the state two thirds into the row, not on its far edge`, ok &&
-      rows.every((r) => { const step = (r.row.der - r.row.x + r.gap) / 3;
-        return r.meta ? Math.abs(r.meta.x - r.title.x - step) <= 2 && Math.abs(r.state.x - r.meta.x - step) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2
-          : Math.abs(r.state.x - r.title.x - step) <= 2; }),
-      JSON.stringify({ gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
+    // Equal columns: three when any row has a meta line (from the title to the meta, from the meta to the state and from the state
+    // to the row's end, plus the gap, the same step: a third of the row and one gap), two when none has (the state half way in).
+    const parts = metas.length ? 3 : 2;
+    check(`${tag}: the row's width is shared in ${parts} equal columns, the state ${metas.length ? "two thirds" : "half way"} into the row, not on its far edge`, ok &&
+      rows.every((r) => { const step = (r.row.der - r.row.x + r.gap) / parts;
+        return Math.abs(r.state.x - r.title.x - step * (parts - 1)) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2 &&
+          (!r.meta || Math.abs(r.meta.x - r.title.x - step) <= 2); }),
+      JSON.stringify({ parts, gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
   } else if (width >= 672) {
     check(`${tag}: as before the columns, the title on the row's left, the meta under it, the state on the row's right edge`, ok &&
       rows.every((r) => near(r.title.x, r.row.x) && near(r.state.der, r.row.der) && (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
