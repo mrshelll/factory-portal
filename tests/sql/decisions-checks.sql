@@ -272,7 +272,11 @@ begin
   v_elem := public.decision_projects();
   perform set_config('role', v_admin, true);
   perform set_config('request.jwt.claims', '', true);
-  if (select count(*) from jsonb_object_keys(v_res)) <> 2
+  -- The keys: last_opened_at and points; from 20261029120000_decisions_my_proposals also proposals, here
+  -- still empty (checked there): these checks pass before and after that migration.
+  if not v_res ?& array['last_opened_at', 'points']
+     or exists (select 1 from jsonb_object_keys(v_res) as k(name) where k.name not in ('last_opened_at', 'points', 'proposals'))
+     or (v_res ? 'proposals' and v_res -> 'proposals' is distinct from '[]'::jsonb)
      or v_res -> 'last_opened_at' is distinct from 'null'::jsonb
      or jsonb_array_length(v_res -> 'points') <> 3
      or v_res -> 'points' -> 0 is distinct from jsonb_build_object(
