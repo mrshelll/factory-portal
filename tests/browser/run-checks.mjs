@@ -1485,6 +1485,13 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     check(`${tag}: with the failed save showing, the h1 ends at ${PHONE_FRAME_MAX} px or less`, failed && failed.title.bottom <= PHONE_FRAME_MAX, JSON.stringify(failed));
     const live = await page.textContent("#main > [role=status]");
     check(`${tag}: the live region announces the failed save`, live === SAVE_ERROR_ES, live);
+    // A change too long to keep: its line too goes in that row and the h1 still ends at PHONE_FRAME_MAX px or less.
+    const quota = await page.evaluate(async () => (await import("./js/bridge.js")).STORAGE_QUOTA_CHARS);
+    if (frame) await frame.evaluate((n) => { responder("q-003", "cambio"); escribir("q-003", "texto", "x".repeat(n)); }, quota);
+    const tooLarge = await waitFor(() => lineOf(page, TOO_LARGE_ES), 5000);
+    check(`${tag}: a change too long to save says so in the row of «← Volver», on its right, above the title`, inBackRow(tooLarge), JSON.stringify(tooLarge));
+    check(`${tag}: with «${TOO_LARGE_ES}» showing, the h1 ends at ${PHONE_FRAME_MAX} px or less`, tooLarge && tooLarge.title.bottom <= PHONE_FRAME_MAX,
+      JSON.stringify(tooLarge));
     await context.close();
   }
 
@@ -1717,7 +1724,7 @@ async function sentLineChecks(browser, base, html) {
 // A change too long for the piece's storage (the real quota): the status line says it was not saved,
 // a save of the draft from before the refusal does not bring back «Guardado», and a shorter text does.
 const SAVE_ERROR_ES = "Sin guardar: no hay conexión. Lo intentamos de nuevo solos.";
-const TOO_LARGE_ES = "Sin guardar: lo que escribiste es demasiado largo para guardarlo. Acorta tu último texto o descarga una copia.";
+const TOO_LARGE_ES = "Sin guardar: texto muy largo. Acórtalo o descarga una copia.";
 async function tooLargeAppChecks(browser, base, html) {
   const backend = newBackend(html);
   backend.saveDelayMs = 600; // the draft from before the refusal lands after it
@@ -1746,7 +1753,7 @@ async function tooLargeAppChecks(browser, base, html) {
   check("too large: the long text never reached save_draft", backend.drafts.every((d) => !JSON.stringify(d.p_storage).includes("x".repeat(1000))));
   await frame.evaluate(() => escribir("q-003", "texto", "Más corto"));
   const back = await waitFor(async () => ((await statusText()).includes("Guardado") ? statusText() : null), 5000);
-  check("too large: a shorter text is saved and the line says «Guardado» again", back && !back.includes("demasiado largo") &&
+  check("too large: a shorter text is saved and the line says «Guardado» again", back && back !== TOO_LARGE_ES &&
     JSON.parse(backend.draft[QUESTIONS_KEY]).respuestas["q-003"].texto === "Más corto", back || await statusText());
   const savedValue = await frame.evaluate((k) => localStorage.getItem(k), QUESTIONS_KEY);
   await frame.evaluate((n) => escribir("q-003", "texto", "w".repeat(n)), quota);
@@ -1755,7 +1762,7 @@ async function tooLargeAppChecks(browser, base, html) {
   // a time, so the write is done by hand, as a piece without that stamp would): the line must leave «too large».
   await frame.evaluate(([k, v]) => localStorage.setItem(k, v), [QUESTIONS_KEY, savedValue]);
   const undone = await waitFor(async () => ((await statusText()).includes("Guardado") ? statusText() : null), 5000);
-  check("too large: going back to the saved text says «Guardado» again", undone && !undone.includes("demasiado largo"), undone || await statusText());
+  check("too large: going back to the saved text says «Guardado» again", undone && undone !== TOO_LARGE_ES, undone || await statusText());
   check("too large: no page errors", errors.length === 0, errors.join(" | "));
   await context.close();
 }
