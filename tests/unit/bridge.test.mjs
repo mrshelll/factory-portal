@@ -484,10 +484,15 @@ function layout({ height = 640, innerHeight = 150, innerWidth = 320 } = {}) {
     constructor(fn) { this.fn = fn; this.targets = []; observers.push(this); }
     observe(target) { this.targets.push(target); }
   }
+  const mutationObservers = [];
+  class FakeMutationObserver {
+    constructor(fn) { this.fn = fn; this.targets = []; mutationObservers.push(this); }
+    observe(target, options) { this.targets.push({ target, options }); }
+  }
   const ids = {};
   const env = {
     window: {
-      innerHeight, innerWidth, scrollY: 0, location, Element: FakeElement, ResizeObserver: FakeResizeObserver,
+      innerHeight, innerWidth, scrollY: 0, location, Element: FakeElement, ResizeObserver: FakeResizeObserver, MutationObserver: FakeMutationObserver,
       scrollTo(...args) { calls.push({ scrollTo: args }); },
       scroll(...args) { calls.push({ scroll: args }); },
     },
@@ -495,8 +500,10 @@ function layout({ height = 640, innerHeight = 150, innerWidth = 320 } = {}) {
   };
   // The browser's layout pass: every observer gets its callback.
   const resized = () => observers.forEach((o) => o.fn([]));
+  // The piece changed its DOM: every mutation observer gets its callback.
+  const mutated = () => mutationObservers.forEach((o) => o.fn([{ type: "childList" }]));
   // bind(win): focus() then dispatches focusin on that bridge's window.
-  return Object.assign(L, { env, root, calls, ids, observers, FakeElement, resized, locationWrites, bind(win) { L.win = win; return win; } });
+  return Object.assign(L, { env, root, calls, ids, observers, mutationObservers, FakeElement, resized, mutated, locationWrites, bind(win) { L.win = win; return win; } });
 }
 const heights = (of) => of("factory:height").map((m) => m.height);
 // A plain primary click on target.
@@ -570,6 +577,38 @@ test("a growth that only follows the iframe's own growth is not posted (no feedb
   // A change of the piece's own, in a later frame, goes out as usual.
   L.root.height = 300; L.resized();
   assert.deepEqual(heights(of), [166, 300]);
+});
+
+test("a change of the piece's own in the same frame as the iframe's resize is posted once that frame is over", async () => {
+  // The piece is 1000 px; while the portal gives the iframe those 1000 px, the piece adds 200 px of its own (its DOM changes).
+  const L = layout({ height: 1000, innerHeight: 462 });
+  const { win, of } = runBridge({}, L.env);
+  assert.deepEqual(L.mutationObservers.map((o) => o.targets.map((t) => [t.target === L.root, t.options.subtree])), [[[true, true]]]);
+  win.innerHeight = 1000; win.dispatch("resize");
+  L.mutated(); L.root.height = 1200; L.resized();
+  assert.deepEqual(heights(of), [1000], "held back in that frame, like a growth that follows the frame");
+  await tick();
+  assert.deepEqual(heights(of), [1000, 1200], "measured again after the frame: the piece's own growth goes out");
+});
+
+test("a piece that changes its DOM and grows with its frame on every resize grows one step at most, then a change of its own goes out", async () => {
+  // 100vh + 16 px, and the piece also touches its DOM on each resize (as a piece that recomputes something there).
+  const L = layout({ height: 166, innerHeight: 150 });
+  const { win, of } = runBridge({}, L.env);
+  win.innerHeight = 166; win.dispatch("resize");
+  L.mutated(); L.root.height = 182; L.resized();
+  await tick();
+  assert.deepEqual(heights(of), [166, 182], "one second measure");
+  win.innerHeight = 182; win.dispatch("resize");
+  L.mutated(); L.root.height = 198; L.resized();
+  await tick();
+  assert.deepEqual(heights(of), [166, 182], "not a second one in a row: no loop");
+  // A change of the piece's own, outside a resize of its frame, goes out, and a held-back change may be measured again after it.
+  L.mutated(); L.root.height = 400; L.resized();
+  win.innerHeight = 400; win.dispatch("resize");
+  L.mutated(); L.root.height = 420; L.resized();
+  await tick();
+  assert.deepEqual(heights(of), [166, 182, 400, 420]);
 });
 
 test("the loop guard holds when the frame got its first size without a resize event (Chrome, at open)", () => {

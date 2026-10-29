@@ -58,7 +58,8 @@
 //    whole px, the root's border-box height (not its scrollHeight, which never drops below the
 //    iframe's height), never 0 (no layout yet), never the same value twice in a row. Loop guard: a
 //    change in the same direction as a change of the iframe's height alone, in the same rendering
-//    frame, is not posted (it follows the frame, as a piece sized with vh would). The piece's
+//    frame, is not posted (it follows the frame, as a piece sized with vh would); if the piece's DOM
+//    changed meanwhile, it measures once more after that frame (a growth of its own then goes out). The piece's
 //    scrolling becomes `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, px from the piece's
 //    top: `scrollTo` / `scroll` (numbers or options; only when a top is asked) and `scrollIntoView`
 //    (the element's top; with block "nearest" also bottom and ifNeeded) still run and then post; a
@@ -311,26 +312,45 @@ function bridgeRuntime(cfg) {
   // A new width (the phone turned) reflows the piece for real, so it does not mark. The frame size it compares
   // with is also taken at every measure: Chrome may give an isolated frame its first size without a resize
   // event, and against the 0 x 0 of the start the next resize would look like a new width.
+  //
+  // A change of the piece's own can come in that same rendering frame too (the piece grew again while the portal
+  // was giving the iframe its last height), and the guard holds it back as well. So when the guard held a measure
+  // back and the piece's DOM changed since the last height posted (a MutationObserver on <html>), the bridge
+  // measures once more when that frame is over. Once: if that measure is held back again, nothing more until a
+  // height goes out outside a resize of the frame, so a piece that touches its DOM and grows with its frame on
+  // every resize grows one step at most, never in a loop. Without MutationObserver nothing is measured again.
   var frameW = window.innerWidth;
   var frameH = window.innerHeight;
   var frameMoved = 0; // +1 / -1: the frame's height alone grew / shrank in this rendering frame
   var resizes = 0;
+  var heldBack = false; // the guard held a measure back in this rendering frame
+  var changed = false;  // the piece's DOM changed since the last height posted
+  var again = false;    // the last height posted was the second measure after a held-back one
   window.addEventListener("resize", function () {
     var w = window.innerWidth;
     var h = window.innerHeight;
     var token = ++resizes;
     frameMoved = w === frameW && h !== frameH ? (h > frameH ? 1 : -1) : 0;
     frameW = w; frameH = h;
-    if (frameMoved) setTimeout(function () { if (token === resizes) frameMoved = 0; }, 0);
+    if (frameMoved) setTimeout(function () {
+      if (token !== resizes) return;
+      frameMoved = 0;
+      var held = heldBack;
+      heldBack = false;
+      if (held && changed && !again) sendHeight(true);
+    }, 0);
   });
 
-  function sendHeight() {
+  // second: true only for the measure after a held-back one (the observer passes its entries, load its event).
+  function sendHeight(second) {
     frameW = window.innerWidth; frameH = window.innerHeight; // the size this measure saw (see the loop guard)
     if (opening) return; // the first one goes right after factory:ready
     var h = measureHeight();
     if (h === null || h === lastHeight) return;
-    if (lastHeight !== null && frameMoved && (h - lastHeight) * frameMoved > 0) return; // follows the frame
+    if (lastHeight !== null && frameMoved && (h - lastHeight) * frameMoved > 0) { heldBack = true; return; } // follows the frame
     lastHeight = h;
+    changed = false;
+    again = second === true;
     post({ type: "factory:height", height: h });
   }
   // The observer reports every change in the rendering frame where it happened, where the loop guard sees it.
@@ -340,6 +360,12 @@ function bridgeRuntime(cfg) {
     try { new ResizeObserver(function () { sendHeight(); }).observe(root); observed = true; } catch (e) { observed = false; }
   }
   if (!observed) window.addEventListener("load", sendHeight);
+  if (observed && typeof MutationObserver === "function") {
+    try {
+      new MutationObserver(function () { changed = true; })
+        .observe(root, { subtree: true, childList: true, attributes: true, characterData: true });
+    } catch (e) { /* without it, a held-back measure is not taken again */ }
+  }
 
   // Where something is, in px from the piece's top (the frame does not scroll inside, but count it if it did).
   function box(el) {
