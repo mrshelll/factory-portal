@@ -63,9 +63,10 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    title. The brand in the masthead is a link to home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"`
    on home itself). Below 672 px the project's page has no «← Volver» (home is one tap on the brand), so a name of
    two lines ends its title at 141 px. One point of «Decisiones» as the owner reads it goes back to its project, so it
-   keeps «← Volver» on a phone, and its title band takes the piece screen's: the point's counts in the row of
-   «← Volver», on its right in small text, and the point's title below in the piece title's type (16 px), so a title of
-   60 characters (the most the factory publishes) ends at 151 px; from 672 px, the frame's band as on every screen. The iframe is as
+   keeps «← Volver» on a phone, on its own row; then its band reads as every list's: the point's title as the h1, and its
+   counts under it as the list's data line (each count whole on one line). On a phone the h1 is 16 px, the largest step
+   of the type scale with which a title of 60 characters (the most the factory publishes) ends at 160 px or less (153 px;
+   at the lists' 24 px it would end at 203 px); from 672 px, the frame's band as on every screen. The iframe is as
    tall as the piece (the height the bridge posts; until the first one, what is left of the screen under the frame)
    and the portal's page scrolls, never the piece: nothing of the frame is fixed or sticky, so on a phone it goes up
    with the page. The piece's scroll requests move the portal's page (`followPiece` in `js/app.js`): a position is
@@ -417,7 +418,7 @@ the title band ends at 160 px or less, with a title of `TITLE_MAX` characters to
 the screen; one screen down nothing fixed or sticky is on screen; the project's page, the owner's project page and the
 owner's piece screen (with a title of `TITLE_MAX` characters too) end their band at 160 px or less, with «← Volver»
 in one line named after where it goes, and so does the owner's point of «Decisiones» (a title of `DECISION_TITLE_MAX`, 60,
-characters too, in two lines, with its counts in the row of «← Volver»); «Guardado» and a failed save («Sin guardar: …», without connection or too long to keep, announced by the status region)
+characters too, in two lines, with its counts under the h1; in English with five kinds of answer in two digits too); «Guardado» and a failed save («Sin guardar: …», without connection or too long to keep, announced by the status region)
 in the row of «← Volver», on its right and above the title, with the h1 ending at 160 px or less with either showing and the
 whole band with «Guardado» too (a title of `TITLE_MAX` characters); a scroll request below the piece's last height is
 done when the new height arrives; a short piece's box ends at the screen's bottom with nothing to scroll; at the bottom of a step «Siguiente» shows the new step's title, and a link of the flows' index its group; the

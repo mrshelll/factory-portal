@@ -87,25 +87,20 @@ main { padding-block: var(--space-6) var(--space-7); }
    title takes its place, so a name of two lines (24 px each) still ends the band at 160 px or less (MAR-14). */
 main.context-wide { padding-top: var(--space-4); }
 .page-context--wide { display: none; }
-/* A way back elsewhere (the owner's point of «Decisiones», back to its project) stays on a phone, inside the title band, and
-   the band takes the piece screen's (.piece-bar, MAR-14): «← Volver» right under the masthead, its 44 px target the only gap;
-   the line under the title (the point's counts) in its row, on its right and in small text, so it never takes a row of its
-   own under a title of two lines; and the title across the row below, in the piece title's type (16 px, 600), so a title
-   of 60 characters (the most the factory publishes) ends in two lines at 160 px or less. A longer line wraps inside its row
-   and the row grows, nothing is cut. From 672 px, the frame's title band as on every screen, «volver» above the title. */
+/* A way back elsewhere (the owner's point of «Decisiones», back to its project) stays on a phone, «← Volver» on its own row right
+   under the masthead (its 44 px target the only gap); then the title band reads as every list's: the h1, and the counts under
+   it as the list's data line. On a phone the h1 takes the body size, the largest step of the type scale with which a point's
+   title of 60 characters (the most the factory publishes) ends at 160 px or less (MAR-14; at the lists' 24 px it ends at
+   203 px). At that size it drops the h1's tight tracking, so it never takes the brand name's type (the brand is 16 px, 600 and
+   tracked tight: NAV-08). From 672 px, the frame's title band as on every screen. Each count of the data line stays whole on
+   one line: the line wraps between two counts. */
 main.context-back { padding-top: 0; }
-main.context-back .page-head { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-3); }
-main.context-back .page-context { grid-area: 1 / 1; justify-self: start; margin-bottom: 0; }
-main.context-back .page-head h1 { grid-area: 2 / 1 / 3 / 3; min-width: 0; font-size: var(--text-body); line-height: 1.3; letter-spacing: normal; }
-main.context-back .page-meta { grid-area: 1 / 2; align-self: center; margin-top: 0; text-align: end; font-size: var(--text-small); line-height: 1.15; }
+main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: normal; }
 .page-meta .count { white-space: nowrap; }
 @media (min-width: 672px) {
   main:is(.context-wide, .context-back) { padding-top: var(--space-6); }
   .page-context--wide { display: block; }
-  main.context-back .page-head { display: block; }
-  main.context-back .page-context { margin-bottom: var(--space-1); }
-  main.context-back .page-head h1 { font-size: var(--text-title); line-height: 1.25; letter-spacing: -0.02em; }
-  main.context-back .page-meta { margin-top: var(--space-2); text-align: start; font-size: inherit; line-height: inherit; }
+  main.context-back .page-head h1 { font-size: var(--text-title); letter-spacing: -0.02em; }
 }
 .page-note { max-width: var(--measure-text); color: var(--muted); }
 .page-note + .section { margin-top: var(--space-between-blocks); }

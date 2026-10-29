@@ -1716,7 +1716,8 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
           text: back.innerText.trim().replace(/\s+/g, " "), label: back.getAttribute("aria-label"), height: Math.round(back.getBoundingClientRect().height) } };
     }, headSelector);
     // noBack: the project's page has no «volver» on a phone (its destination is home, which the brand links to).
-    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false } = {}) => {
+    // backText, brandLabel: the link's words and the brand's name in the screen's language (Spanish unless said).
+    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false, backText = "← Volver", brandLabel = "ninben, ir a Tus proyectos" } = {}) => {
       const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO", frameScreen });
       const page = await context.newPage();
       await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
@@ -1728,8 +1729,8 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         const shown = await page.evaluate(() => [...document.querySelectorAll(".back-link")].filter((el) => el.getBoundingClientRect().height > 0).length);
         check(`${tag}: there is no «volver» on a phone`, shown === 0, String(shown));
       } else {
-        check(`${tag}: «← Volver» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
-          at.back.text === "← Volver" && at.back.label === label, JSON.stringify(at.back));
+        check(`${tag}: «${backText}» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
+          at.back.text === backText && at.back.label === label, JSON.stringify(at.back));
       }
       // The brand is the link home, on every screen: its name says where, it is a 44 px target, its words keep the brand's type.
       const brand = await page.evaluate(() => {
@@ -1740,8 +1741,8 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
           edge: Math.round(box.left) - Math.round(document.querySelector("h1").getBoundingClientRect().left),
           words: text && text.textContent, weight: text && getComputedStyle(text).fontWeight, svg: Boolean(a.querySelector("svg")) };
       });
-      check(`${tag}: the brand is a link home named «ninben, ir a Tus proyectos», 44 px high, in the brand's type`, brand && brand.tag === "a" && brand.href === "#/" &&
-        brand.label === "ninben, ir a Tus proyectos" && Math.abs(brand.edge) <= 1 && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
+      check(`${tag}: the brand is a link home named «${brandLabel}», 44 px high, in the brand's type`, brand && brand.tag === "a" && brand.href === "#/" &&
+        brand.label === brandLabel && Math.abs(brand.edge) <= 1 && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
       const fixed = await stuckOf(page);
       check(`${tag}: nothing fixed or sticky is on screen one screen down`, fixed.stuck.length === 0, JSON.stringify(fixed));
       return { context, page, at };
@@ -1785,26 +1786,56 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       }
     } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
     // One point of «Decisiones» as the owner reads it keeps «← Volver» too: it goes back to the project, not home (the
-    // brand's destination). Its h1 is the point's title, in the piece screen's title type on a phone: the fixture's, the
-    // longest the factory publishes, and the pieces' earliest-breaking title of that length (two lines, never three).
-    for (const [what, title] of [["the screens' title", OTITLE.trips], [`a title of ${DECISION_TITLE_MAX} characters`, DECISION_TITLE_AT_MAX],
-      [`the earliest-breaking title of ${DECISION_TITLE_MAX} characters`, TITLE_AT_MAX]]) {
+    // brand's destination). Then its band reads as every list's: «← Volver» on its own row, the h1 (the point's title), and the
+    // counts under it as the list's data line, at the h1's x. The h1 takes the largest step of the type scale with which a
+    // title of DECISION_TITLE_MAX characters still ends at 160 px or less: the lists' 24 px does not (the check measures it),
+    // 16 px does. Cases: the fixture's title, one of DECISION_TITLE_MAX characters, the pieces' earliest-breaking title of
+    // that length, and that title in English with the five kinds of answer counted in two digits (the longest counts line).
+    const englishWorst = (b) => {
+      const entry = b.decisions[IDS.ownedProject];
+      for (const project of [b.ownerView[IDS.ownedProject].project, ...b.projects.filter((x) => x.id === IDS.ownedProject)]) project.language = "en";
+      ["yes", "change", "no", "unsure", "none"].forEach((value, k) => {
+        for (let i = 0; i < 12; i += 1) {
+          const id = `f${k}${String(i).padStart(2, "0")}0000-0000-4000-8000-000000000000`;
+          entry.members.push({ id, display_name: `Person ${k}-${i}`, role: "stakeholder", created_at: `2026-10-0${(k % 7) + 2}T13:${String(i).padStart(2, "0")}:00.000Z` });
+          entry.audience.push(id);
+          if (value !== "none") entry.answers.push({ id: randomUUID(), member_id: id, key: OKEY.trips, version: entry.points[0].version, value,
+            comment: value === "yes" ? null : "Ok.", created_at: OAT.first });
+        }
+      });
+    };
+    for (const [what, title, setup] of [["the screens' title", OTITLE.trips, null], [`a title of ${DECISION_TITLE_MAX} characters`, DECISION_TITLE_AT_MAX, null],
+      [`the earliest-breaking title of ${DECISION_TITLE_MAX} characters`, TITLE_AT_MAX, null],
+      [`the earliest-breaking title of ${DECISION_TITLE_MAX} characters, in English, five kinds of answer in two digits`, TITLE_AT_MAX, englishWorst]]) {
       const b = ownerDecisionsBackend(html);
       b.decisions[IDS.ownedProject].points[0].title = title;
+      if (setup) setup(b);
+      const english = Boolean(setup);
       const tag = `phone ${engineName}: owner's point of «Decisiones» with ${what}`;
-      const screen = await phoneScreen(tag, b, `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".page-head h1, .page-meta", `Volver a ${PROJECT.owned}`,
-        () => document.querySelector(".page-head h1")?.textContent.length > 0 && document.querySelectorAll(".owner-answer").length > 0);
+      const screen = await phoneScreen(tag, b, `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".page-head h1", english ? `Back to ${PROJECT.owned}` : `Volver a ${PROJECT.owned}`,
+        () => document.querySelector(".page-head h1")?.textContent.length > 0 && document.querySelectorAll(".owner-answer").length > 0,
+        english ? { backText: "← Back", brandLabel: "ninben, go to Your projects" } : {});
       check(`${tag}: the title is whole (${title.length} characters, never cut)`, screen.at.h1Text === title, JSON.stringify(screen.at));
-      const type = await screen.page.evaluate(() => { const cs = getComputedStyle(document.querySelector(".page-head h1")); return `${cs.fontSize} ${cs.fontWeight}`; });
-      check(`${tag}: the title takes the piece screen's title type (16px 600)`, type === "16px 600", type);
-      // The counts go in the row of «← Volver», on its right, as the piece screen's line (never a row of their own).
-      const row = await screen.page.evaluate(() => {
+      if (title.length === DECISION_TITLE_MAX) check(`${tag}: it wraps to ${screen.at.h1Lines} lines (two at most)`, screen.at.h1Lines <= 2, JSON.stringify(screen.at));
+      const head = await screen.page.evaluate(() => {
+        window.scrollTo(0, 0);
         const box = (s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) }; };
-        return { back: box("[data-rol=marco] .back-link"), meta: box(".page-meta"), h1: box(".page-head h1"), text: document.querySelector(".page-meta")?.textContent };
+        const h1 = document.querySelector(".page-head h1"), cs = getComputedStyle(h1);
+        // The lists' title size, tried on this h1: where it would end.
+        const size = cs.fontSize, lineHeight = cs.lineHeight;
+        h1.style.fontSize = getComputedStyle(document.documentElement).getPropertyValue("--text-title").trim();
+        h1.style.lineHeight = "1.25";
+        const atTitleSize = Math.round(h1.getBoundingClientRect().bottom);
+        h1.style.fontSize = ""; h1.style.lineHeight = "";
+        return { back: box("[data-rol=marco] .back-link"), h1: box(".page-head h1"), meta: box(".page-meta"), text: document.querySelector(".page-meta")?.textContent,
+          type: `${size} ${cs.fontWeight}`, lineHeight, atTitleSize };
       });
-      check(`${tag}: the counts go in the row of «← Volver», on its right, above the title`, row.back && row.meta && row.h1 && row.meta.left > row.back.right &&
-        row.meta.top >= row.back.top && row.meta.bottom <= row.h1.top && row.text === "Va: 1 · No va: 1 · Sin respuesta: 1", JSON.stringify(row));
-      // Where the row wraps, it wraps between two counts, never inside one («Sin respuesta:» on a line and its number on the next).
+      check(`${tag}: the h1 is in 16px 600, the largest step of the type scale that keeps a title of ${DECISION_TITLE_MAX} characters within ${PHONE_FRAME_MAX} px (at the lists' 24 px it would end at ${head.atTitleSize} px)`,
+        head.type === "16px 600" && (title.length !== DECISION_TITLE_MAX || head.atTitleSize > PHONE_FRAME_MAX), JSON.stringify(head));
+      const counts = english ? "Works: 13 · I would change it: 12 · Does not work: 13 · Not sure: 12 · No answer: 13" : "Va: 1 · No va: 1 · Sin respuesta: 1";
+      check(`${tag}: «← Volver» on its own row, then the h1, then the counts under it as the list's data line, at the h1's x`, head.back && head.h1 && head.meta &&
+        head.back.bottom <= head.h1.top && head.h1.bottom <= head.meta.top && Math.abs(head.meta.left - head.h1.left) <= 1 && head.text === counts, JSON.stringify(head));
+      // Where the counts wrap, they wrap between two counts, never inside one («Sin respuesta:» on a line and its number on the next).
       const split = await screen.page.evaluate(() => {
         const meta = document.querySelector(".page-meta");
         if (!meta) return null;
@@ -1824,7 +1855,6 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         return out;
       });
       check(`${tag}: no count is split across two lines`, Array.isArray(split) && split.length === 0, JSON.stringify(split));
-      if (title.length === DECISION_TITLE_MAX) check(`${tag}: it wraps to ${screen.at.h1Lines} lines (two at most)`, screen.at.h1Lines <= 2, JSON.stringify(screen.at));
       await screen.context.close();
     }
   }
