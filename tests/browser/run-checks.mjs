@@ -3831,6 +3831,27 @@ async function decisionsChecks(browser, base, html) {
     await context.close();
   }
 
+  // decisions-forced-colors: with the system's forced colours (Windows contrast themes) the chosen answer still shows: its mark
+  // does not look like the marks of the answers not chosen (the confirmed point comes back with «Va» chosen).
+  {
+    const backend = decisionsBackend(html);
+    const { context, page } = await openMocked(browser, base, backend, `#/project/${IDS.project}`, 768);
+    await sectionShown(page);
+    await page.emulateMedia({ forcedColors: "active" });
+    await sleep(200);
+    const point = page.locator(`.decision[data-key="${DKEY.c}"]`);
+    const chosen = await point.locator('input[value="yes"]').evaluate((el) => el.checked).catch(() => false);
+    // What the mark paints once the system's colours are forced: its fill, its ring and its inner ring.
+    const look = (value) => point.locator(`label.choice:has(input[value="${value}"]) .choice-mark`).evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return `${cs.backgroundColor} | ${cs.borderColor} | ${cs.boxShadow}`;
+    }).catch(() => null);
+    const [yes, change, no] = [await look("yes"), await look("change"), await look("no")];
+    check("decisions-forced-colors: under forced colours the chosen answer's mark is painted unlike the others', which look alike", chosen && yes && change && no &&
+      yes !== change && change === no, JSON.stringify({ chosen, yes, change, no }));
+    await context.close();
+  }
+
   // section-after-pieces, owner-sees-line, the marks, the choices, comment-required-for-change, answer-sent-confirmed-in-page,
   // propose-always-available and opened-once-per-visit, on one visit.
   {

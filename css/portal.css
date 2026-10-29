@@ -200,6 +200,11 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
   border: 2px solid var(--muted); border-radius: var(--radius-pill); background: var(--sheet); }
 .choice input:checked + .choice-mark { border-color: var(--signal); background: var(--signal); box-shadow: inset 0 0 0 var(--space-1) var(--sheet); }
 .choice:has(input:focus-visible) { outline: 2px solid var(--signal); outline-offset: 2px; }
+/* With the system's forced colours (a contrast theme) the browser paints every mark as the empty ring: the chosen one keeps its
+   fill in the system's highlight colour, and its inner ring in the page's, so the answer chosen still shows. */
+@media (forced-colors: active) {
+  .choice input:checked + .choice-mark { forced-color-adjust: none; border-color: Highlight; background: Highlight; box-shadow: inset 0 0 0 var(--space-1) Canvas; }
+}
 @media (hover: hover) { .choice:hover .choice-mark { border-color: var(--signal); } }
 .decision-notice:empty { display: none; }
 .decision-basis summary { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; color: var(--signal); cursor: pointer; list-style: none; }
