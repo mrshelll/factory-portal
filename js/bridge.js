@@ -42,13 +42,31 @@
 //    "received" or "replaced" when the piece is closed (read-only: the factory already collected it,
 //    or a newer version replaced it), null otherwise; `sentAt` is when the person sent it (an ISO
 //    string) or null. `observer` is true when the project owner is reading the piece (the portal
-//    passes it only with `closed`; false otherwise, so a piece can hide its send controls). With `closed` set the bridge posts no factory:draft, factory:dirty nor
-//    factory:save-failed: the piece may still write the shim (in memory), but nothing leaves the
-//    iframe, so the server draft keeps the person's unsent changes. factory:flush still answers
-//    factory:flushed and factorySubmit still sends (except with `observer`: it resolves rejected and posts nothing) (the server turns it into a late change
-//    request). The fields are sanitized in the parent before injection. It also sets
-//    `data-factory-host="portal"` on the piece's <html> before any of the piece is parsed, so the
-//    piece's CSS can drop its own brand bar inside the portal without a flash.
+//    passes it only with `closed`; false otherwise, so a piece can hide its send controls). With
+//    `closed` set the bridge posts no factory:draft, factory:dirty nor factory:save-failed: the piece
+//    may still write the shim (in memory), but nothing leaves the iframe, so the server draft keeps
+//    the person's unsent changes. factory:flush still answers factory:flushed, and factorySubmit
+//    still sends: the server turns that send into a late change request. With `observer` it does not:
+//    factorySubmit resolves { ok: false, error: "rejected" } and posts nothing. The fields are
+//    sanitized in the parent before injection. It also sets `data-factory-host="portal"` on the
+//    piece's <html> before any of the piece is parsed, so the piece's CSS can drop its own brand bar
+//    inside the portal without a flash.
+//
+// 4. Size and scrolling: the portal sizes the iframe to the piece's height and its own page scrolls,
+//    so the piece never scrolls inside. Right after factory:ready and on every change (ResizeObserver
+//    on <html>; without one, the window's load) the bridge posts `{ type: "factory:height", height }`:
+//    whole px, the root's border-box height (not its scrollHeight, which never drops below the
+//    iframe's height), never 0 (no layout yet), never the same value twice in a row. Loop guard: a
+//    change in the same direction as a change of the iframe's height alone, in the same rendering
+//    frame, is not posted (it follows the frame, as a piece sized with vh would). The piece's
+//    scrolling becomes `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, px from the piece's
+//    top: `scrollTo` / `scroll` (numbers or options; only when a top is asked) and `scrollIntoView`
+//    (the element's top; with block "nearest" also bottom and ifNeeded) still run and then post; a
+//    plain click on a link to `#id` of the piece posts the target's top (`#` and `#top`: 0) and does
+//    not navigate, so the iframe's location.hash stays; `focusin` posts the element's top and bottom
+//    with `ifNeeded: true` (the portal scrolls only if that is out of its window). While the piece opens
+//    nothing of this is posted, so its start-up scrollTo(0, 0) does not move the portal's page.
+//    Closed and observed pieces post both.
 //
 // `bridgeRuntime` is serialized with Function.prototype.toString, so it must stay self-contained
 // (no references to module scope) and must never contain the character sequences "</script" or
@@ -268,7 +286,162 @@ function bridgeRuntime(cfg) {
   window.addEventListener("pagehide", sendDraft);
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") sendDraft(); });
 
-  function opened() { opening = false; post({ type: "factory:ready", persistence: persistence }); }
+  // ---- size and scrolling --------------------------------------------------------------------
+  // The portal sizes the iframe to the piece's height and scrolls its own page, so the piece never scrolls
+  // inside: the bridge tells it the height and turns the piece's scrolling into requests to the portal.
+  var root = document.documentElement;
+  var lastHeight = null; // the last height posted
+
+  // The root's border box: the piece's content (body and its margins), whatever the iframe's height. Not the
+  // root's scrollHeight, which is never less than the iframe's height: once the portal grows the frame, a
+  // shorter step would never shrink it back. 0 is no measure: the frame has no size yet (Chrome lays out an
+  // isolated frame only once it gets one), and the real height follows with the first layout.
+  function measureHeight() {
+    try {
+      var h = root && typeof root.getBoundingClientRect === "function" ? Number(root.getBoundingClientRect().height) : NaN;
+      return isFinite(h) && h > 0 ? Math.ceil(h) : null;
+    } catch (e) { return null; }
+  }
+
+  // Loop guard. A piece whose height depends on its frame's (vh, height: 100%) would grow each time the portal
+  // grows the frame, forever. So a change in the same direction as a change of the frame's height alone (same
+  // width), in the same rendering frame, is not posted: it follows the frame, it is not the piece's. The resize
+  // event and the ResizeObserver callbacks run in the same rendering update; the timer clears the mark after it.
+  // A new width (the phone turned) reflows the piece for real, so it does not mark.
+  var frameW = window.innerWidth;
+  var frameH = window.innerHeight;
+  var frameMoved = 0; // +1 / -1: the frame's height alone grew / shrank in this rendering frame
+  var resizes = 0;
+  window.addEventListener("resize", function () {
+    var w = window.innerWidth;
+    var h = window.innerHeight;
+    var token = ++resizes;
+    frameMoved = w === frameW && h !== frameH ? (h > frameH ? 1 : -1) : 0;
+    frameW = w; frameH = h;
+    if (frameMoved) setTimeout(function () { if (token === resizes) frameMoved = 0; }, 0);
+  });
+
+  function sendHeight() {
+    if (opening) return; // the first one goes right after factory:ready
+    var h = measureHeight();
+    if (h === null || h === lastHeight) return;
+    if (lastHeight !== null && frameMoved && (h - lastHeight) * frameMoved > 0) return; // follows the frame
+    lastHeight = h;
+    post({ type: "factory:height", height: h });
+  }
+  // The observer reports every change in the rendering frame where it happened, where the loop guard sees it.
+  // Only without one, the window's load (late images and fonts) measures again: once, outside that frame.
+  var observed = false;
+  if (typeof ResizeObserver === "function" && root) {
+    try { new ResizeObserver(function () { sendHeight(); }).observe(root); observed = true; } catch (e) { observed = false; }
+  }
+  if (!observed) window.addEventListener("load", sendHeight);
+
+  // Where something is, in px from the piece's top (the frame does not scroll inside, but count it if it did).
+  function box(el) {
+    try {
+      if (!el || typeof el.getBoundingClientRect !== "function" || el.isConnected === false) return null;
+      var r = el.getBoundingClientRect();
+      var y = Number(window.scrollY || window.pageYOffset) || 0;
+      var top = Math.round(r.top + y);
+      var bottom = Math.round(r.bottom + y);
+      if (!isFinite(top) || !isFinite(bottom)) return null;
+      top = Math.max(0, top);
+      return { top: top, bottom: Math.max(top, bottom) };
+    } catch (e) { return null; }
+  }
+
+  // While the piece opens its scrolling stays inside: its start-up scrollTo(0, 0) or autofocus must not
+  // move the portal's page past its header.
+  function askScroll(top, bottom, ifNeeded) {
+    if (opening) return;
+    var message = { type: "factory:scroll", top: Math.max(0, Math.round(top)) };
+    if (ifNeeded) { message.bottom = Math.max(message.top, Math.round(bottom)); message.ifNeeded = true; }
+    post(message);
+  }
+
+  // scrollTo(x, y) / scroll(x, y) or ({ top, left, behavior }). A non-finite y is 0, as in a browser; an
+  // options object without top only scrolls sideways, which the portal does not need.
+  function requestedTop(args) {
+    var first = args[0];
+    var y;
+    if (first !== null && typeof first === "object") {
+      if (first.top === undefined) return null;
+      y = Number(first.top);
+    } else if (args.length >= 2) y = Number(args[1]);
+    else return null;
+    return isFinite(y) ? y : 0;
+  }
+  function wrapWindowScroll(name) {
+    var original;
+    try { original = window[name]; } catch (e) { return; }
+    if (typeof original !== "function") return;
+    try {
+      window[name] = function () {
+        var result = original.apply(window, arguments); // the piece still scrolls (sideways, or inside if it ever can)
+        var top = requestedTop(arguments);
+        if (top !== null) askScroll(top);
+        return result;
+      };
+    } catch (e) { /* read-only: leave it */ }
+  }
+  wrapWindowScroll("scrollTo");
+  wrapWindowScroll("scroll");
+
+  // scrollIntoView still runs (it also scrolls containers inside the piece), then asks the portal for the
+  // element's position. { block: "nearest" } asks only if the element is out of the portal's window.
+  var ElementType = window.Element;
+  if (ElementType && ElementType.prototype && typeof ElementType.prototype.scrollIntoView === "function") {
+    var intoView = ElementType.prototype.scrollIntoView;
+    try {
+      ElementType.prototype.scrollIntoView = function (arg) {
+        var result = intoView.apply(this, arguments);
+        var b = box(this);
+        if (b) askScroll(b.top, b.bottom, !!(arg && typeof arg === "object" && arg.block === "nearest"));
+        return result;
+      };
+    } catch (e) { /* read-only: leave it */ }
+  }
+
+  // A plain click on a link to #id of the piece: the portal scrolls to it, and the iframe neither navigates
+  // nor changes its location.hash. Links to elsewhere, new tabs, downloads, modified clicks and links the piece
+  // already handled (defaultPrevented) are left alone. Listening on the window, the piece's handlers run first.
+  function anchorTarget(id) {
+    var el = null;
+    try {
+      el = id ? document.getElementById(id) : null;
+      if (!el && id && typeof document.getElementsByName === "function") el = document.getElementsByName(id)[0] || null;
+    } catch (e) { el = null; }
+    return el;
+  }
+  window.addEventListener("click", function (event) {
+    if (!event || event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    var target = event.target;
+    var link = target && typeof target.closest === "function" ? target.closest("a[href]") : null;
+    if (!link) return;
+    var href = link.getAttribute("href");
+    if (typeof href !== "string" || href.charAt(0) !== "#") return;
+    var frameTarget = link.getAttribute("target");
+    if ((frameTarget && frameTarget.toLowerCase() !== "_self") || link.hasAttribute("download")) return;
+    event.preventDefault();
+    var id = href.slice(1);
+    try { id = decodeURIComponent(id); } catch (e) { /* keep it raw */ }
+    var el = anchorTarget(id);
+    if (el) { var b = box(el); if (b) askScroll(b.top); }
+    else if (id === "" || id.toLowerCase() === "top") askScroll(0); // the document's top, as in a browser
+  });
+
+  // A control got focus (by keyboard, by the piece, or a tap): the portal brings it into view only if needed;
+  // the bridge does not know the portal's window.
+  window.addEventListener("focusin", function (event) {
+    var target = event && event.target;
+    if (!target || target === document.body || target === root) return;
+    var b = box(target);
+    if (b) askScroll(b.top, b.bottom, true);
+  });
+
+  function opened() { opening = false; post({ type: "factory:ready", persistence: persistence }); sendHeight(); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(opened, 0); });
   else opened();
 }

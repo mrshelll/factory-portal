@@ -82,7 +82,8 @@ function fakeRoot() {
 
 // Runs the built bridge script in a context that plays the piece window. Returns the window, the
 // messages the bridge posted to its parent and a way to post messages back as the parent.
-function runBridge(overrides = {}) {
+// env.window and env.document add what a test needs on top (layout, ResizeObserver, Element, scrollTo).
+function runBridge(overrides = {}, env = {}) {
   const cfg = { parentOrigin: ORIGIN, kind: "questions", storage: {}, nonce: "n-1", host: { reviewerName: null }, ...overrides };
   const script = buildBridgeScript(cfg);
   const source = script.slice("<script>".length, -"</script>".length);
@@ -99,8 +100,12 @@ function runBridge(overrides = {}) {
     },
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
   };
+  Object.assign(win, env.window || {});
+  Object.assign(win.document, env.document || {});
   win.window = win;
   win.dispatchPagehide = () => (listeners.pagehide || []).forEach((fn) => fn());
+  // Dispatches an event on the window (where click and focusin end their bubbling).
+  win.dispatch = (type, event = {}) => (listeners[type] || []).forEach((fn) => fn(event));
   vm.createContext(win);
   vm.runInContext(source, win);
   const fromParent = (data, { origin = ORIGIN, source: src = parent } = {}) =>
@@ -430,4 +435,273 @@ test("observer never posts submit", async () => {
   const { win, of } = runBridge({ host: { closed: "received", observer: true } });
   assert.deepEqual(await plain(win.factorySubmit(questions())), { ok: false, error: "rejected" });
   assert.equal(of("factory:submit").length, 0);
+});
+
+// ---- size and scrolling: the portal sizes the iframe to the piece and scrolls its own page --------------
+
+// A piece with layout: the root's height, elements with a box, a ResizeObserver the test fires by hand, and the
+// window's scrollTo / scroll and Element.prototype.scrollIntoView, which record their calls (the piece still scrolls).
+function layout({ height = 640, innerHeight = 150, innerWidth = 320 } = {}) {
+  const calls = [];
+  const observers = [];
+  const root = {
+    attributes: {}, height,
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getBoundingClientRect() { return { top: 0, bottom: this.height, height: this.height }; },
+  };
+  class FakeElement {
+    constructor({ top = 0, height = 40, tag = "DIV", attrs = {}, parent = null } = {}) { Object.assign(this, { top, height, tagName: tag, attrs, parent }); }
+    getBoundingClientRect() { return { top: this.top, bottom: this.top + this.height, height: this.height }; }
+    getAttribute(name) { return Object.hasOwn(this.attrs, name) ? this.attrs[name] : null; }
+    hasAttribute(name) { return Object.hasOwn(this.attrs, name); }
+    closest(selector) { // only what the bridge asks for
+      assert.equal(selector, "a[href]");
+      for (let el = this; el; el = el.parent) if (el.tagName === "A" && el.hasAttribute("href")) return el;
+      return null;
+    }
+  }
+  FakeElement.prototype.scrollIntoView = function (arg) { calls.push({ scrollIntoView: arg, element: this }); };
+  class FakeResizeObserver {
+    constructor(fn) { this.fn = fn; this.targets = []; observers.push(this); }
+    observe(target) { this.targets.push(target); }
+  }
+  const ids = {};
+  const env = {
+    window: {
+      innerHeight, innerWidth, scrollY: 0, location: { hash: "" }, Element: FakeElement, ResizeObserver: FakeResizeObserver,
+      scrollTo(...args) { calls.push({ scrollTo: args }); },
+      scroll(...args) { calls.push({ scroll: args }); },
+    },
+    document: { documentElement: root, body: new FakeElement({ tag: "BODY" }), getElementById: (id) => ids[id] || null, getElementsByName: () => [] },
+  };
+  // The browser's layout pass: every observer gets its callback.
+  const resized = () => observers.forEach((o) => o.fn([]));
+  return { env, root, calls, ids, observers, FakeElement, resized };
+}
+const heights = (of) => of("factory:height").map((m) => m.height);
+// A plain primary click on target.
+const click = (target, extra = {}) => ({
+  type: "click", target, button: 0, defaultPrevented: false,
+  preventDefault() { this.defaultPrevented = true; }, ...extra,
+});
+
+test("at open the bridge posts factory:height right after factory:ready, with the root's height in whole px", () => {
+  const L = layout({ height: 640.2 });
+  const { posted } = runBridge({}, L.env);
+  assert.deepEqual(posted.map((p) => p.message), [
+    { type: "factory:ready", persistence: true, nonce: "n-1" },
+    { type: "factory:height", height: 641, nonce: "n-1" },
+  ]);
+  assert.equal(L.observers.length, 1);
+  assert.deepEqual(L.observers[0].targets, [L.root], "the root is observed");
+});
+
+test("while the piece opens no height goes out; the first one follows factory:ready", async () => {
+  const L = layout();
+  const { posted, parsed } = runBridge({ readyState: "loading" }, L.env);
+  L.resized();
+  assert.deepEqual(posted, []);
+  parsed();
+  await tick();
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:height"]);
+});
+
+test("a change of height posts another, and the same height is never posted twice in a row", () => {
+  const L = layout({ height: 640 });
+  const { of } = runBridge({}, L.env);
+  L.root.height = 900; L.resized();
+  L.resized();
+  L.root.height = 899.5; L.resized(); // rounds up to the same 900
+  assert.deepEqual(heights(of), [640, 900]);
+  L.root.height = 400; L.resized(); // a shorter step: the frame shrinks too
+  assert.deepEqual(heights(of), [640, 900, 400]);
+});
+
+test("a height of 0 (the frame has no size yet, so no layout) is not posted; the real one follows", () => {
+  const L = layout({ height: 0 });
+  const { posted, of } = runBridge({}, L.env);
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready"]);
+  L.root.height = 520; L.resized();
+  L.root.height = 0; L.resized();
+  assert.deepEqual(heights(of), [520]);
+});
+
+test("without ResizeObserver the window's load posts the height; with it, load does not measure again", () => {
+  const L = layout({ height: 640 });
+  const { win, of } = runBridge({}, { ...L.env, window: { ...L.env.window, ResizeObserver: undefined } });
+  L.root.height = 1200; win.dispatch("load"); // late images
+  assert.deepEqual(heights(of), [640, 1200]);
+  const W = layout({ height: 640 });
+  const withObserver = runBridge({}, W.env);
+  W.root.height = 1200; withObserver.win.dispatch("load"); // the observer reports it in its frame, where the loop guard is
+  assert.deepEqual(heights(withObserver.of), [640]);
+});
+
+test("a growth that only follows the iframe's own growth is not posted (no feedback loop)", async () => {
+  // A piece as tall as its frame plus 16 px (100vh + a margin): each new frame height would make it taller again.
+  const L = layout({ height: 166, innerHeight: 150 });
+  const { win, of } = runBridge({}, L.env);
+  assert.deepEqual(heights(of), [166]);
+  // The portal sizes the iframe to 166: in that same frame the piece grows by as much.
+  win.innerHeight = 166; win.dispatch("resize");
+  L.root.height = 182; L.resized();
+  assert.deepEqual(heights(of), [166], "the growth followed the frame: not posted");
+  await tick();
+  // A change of the piece's own, in a later frame, goes out as usual.
+  L.root.height = 300; L.resized();
+  assert.deepEqual(heights(of), [166, 300]);
+});
+
+test("the loop guard lets through a shrink while the frame grows, and a change that comes with a new width", async () => {
+  const L = layout({ height: 640, innerHeight: 150, innerWidth: 320 });
+  const { win, of } = runBridge({}, L.env);
+  win.innerHeight = 640; win.dispatch("resize");
+  L.root.height = 500; L.resized(); // the frame grew, the piece shrank: not a loop
+  assert.deepEqual(heights(of), [640, 500]);
+  await tick();
+  // The phone turned: a new width reflows the piece, whatever the frame's height did.
+  win.innerWidth = 568; win.innerHeight = 700; win.dispatch("resize");
+  L.root.height = 720; L.resized();
+  assert.deepEqual(heights(of), [640, 500, 720]);
+});
+
+test("without layout (no ResizeObserver, no box) the bridge posts no height and still opens", () => {
+  const { posted, win } = runBridge();
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready"]);
+  assert.equal(typeof win.factorySubmit, "function");
+});
+
+test("scrollTo(0, 0) and scroll(...) ask the portal with factory:scroll and still scroll the piece", () => {
+  const L = layout();
+  const { win, of } = runBridge({}, L.env);
+  win.scrollTo(0, 0);
+  win.scroll({ top: 120.6, behavior: "smooth" });
+  win.scrollTo({ left: 10 }); // sideways only: nothing for the portal
+  win.scrollTo(0, -50);
+  win.scrollTo(0, NaN); // a browser treats it as 0
+  assert.deepEqual(of("factory:scroll"), [
+    { type: "factory:scroll", top: 0, nonce: "n-1" },
+    { type: "factory:scroll", top: 121, nonce: "n-1" },
+    { type: "factory:scroll", top: 0, nonce: "n-1" },
+    { type: "factory:scroll", top: 0, nonce: "n-1" },
+  ]);
+  assert.deepEqual(L.calls.map((c) => c.scrollTo || c.scroll), [[0, 0], [{ top: 120.6, behavior: "smooth" }], [{ left: 10 }], [0, -50], [0, NaN]]);
+});
+
+test("scrollIntoView on an element at 900 px asks the portal for top 900; block nearest asks only if needed", () => {
+  const L = layout();
+  const { win, of } = runBridge({}, L.env);
+  const el = new L.FakeElement({ top: 900, height: 60 });
+  el.scrollIntoView();
+  assert.equal(L.calls.at(-1).element, el, "the piece's own scrollIntoView still runs");
+  win.scrollY = 100; // a piece that scrolled inside anyway: the position is from the piece's top
+  new L.FakeElement({ top: 800, height: 60 }).scrollIntoView({ block: "nearest" });
+  assert.deepEqual(of("factory:scroll"), [
+    { type: "factory:scroll", top: 900, nonce: "n-1" },
+    { type: "factory:scroll", top: 900, bottom: 960, ifNeeded: true, nonce: "n-1" },
+  ]);
+});
+
+test("a click on a link to #x of the piece asks for the position of #x and does not navigate", () => {
+  const L = layout();
+  const { win, of } = runBridge({}, L.env);
+  L.ids.x = new L.FakeElement({ top: 1200 });
+  const link = new L.FakeElement({ tag: "A", attrs: { href: "#x" } });
+  const event = click(new L.FakeElement({ tag: "SPAN", parent: link }));
+  win.dispatch("click", event);
+  assert.equal(event.defaultPrevented, true, "no in-frame navigation");
+  assert.equal(win.location.hash, "", "the iframe's hash does not change");
+  assert.deepEqual(of("factory:scroll"), [{ type: "factory:scroll", top: 1200, nonce: "n-1" }]);
+});
+
+test("#, #top and an encoded id work; a missing anchor does not navigate nor scroll; other links are left alone", () => {
+  const L = layout();
+  const { win, of } = runBridge({}, L.env);
+  L.ids["paso 2"] = new L.FakeElement({ top: 300 });
+  const link = (attrs) => new L.FakeElement({ tag: "A", attrs });
+  for (const href of ["#", "#top", "#paso%202", "#missing"]) {
+    const event = click(link({ href }));
+    win.dispatch("click", event);
+    assert.equal(event.defaultPrevented, true, href);
+  }
+  assert.deepEqual(of("factory:scroll").map((m) => m.top), [0, 0, 300]);
+  L.ids.x = new L.FakeElement({ top: 50 });
+  const untouched = [
+    click(link({ href: "https://example.test/a" })),
+    click(link({ href: "#x", target: "_blank" })),
+    click(link({ href: "#x", download: "" })),
+    click(link({ href: "#x" }), { metaKey: true }),
+    click(link({ href: "#x" }), { ctrlKey: true }),
+    click(link({ href: "#x" }), { shiftKey: true }),
+    click(link({ href: "#x" }), { button: 1 }),
+    click(new L.FakeElement({ tag: "BUTTON" })),
+    click(null),
+  ];
+  for (const event of untouched) win.dispatch("click", event);
+  assert.ok(untouched.every((e) => !e.defaultPrevented));
+  const prevented = click(link({ href: "#x" }), { defaultPrevented: true }); // the piece handled it itself
+  win.dispatch("click", prevented);
+  assert.equal(of("factory:scroll").length, 3);
+});
+
+test("focusin on a control asks the portal to show it only if needed", () => {
+  const L = layout();
+  const { win, of } = runBridge({}, L.env);
+  win.dispatch("focusin", { target: new L.FakeElement({ tag: "INPUT", top: 700.4, height: 44 }) });
+  win.dispatch("focusin", { target: win.document.body });
+  win.dispatch("focusin", { target: win.document.documentElement });
+  win.dispatch("focusin", { target: null });
+  assert.deepEqual(of("factory:scroll"), [{ type: "factory:scroll", top: 700, bottom: 744, ifNeeded: true, nonce: "n-1" }]);
+});
+
+test("scroll requests made while the piece opens stay inside (the portal does not jump on open)", async () => {
+  const L = layout();
+  const { win, posted, parsed } = runBridge({ readyState: "loading" }, L.env);
+  win.scrollTo(0, 0);
+  new L.FakeElement({ top: 300 }).scrollIntoView();
+  win.dispatch("focusin", { target: new L.FakeElement({ tag: "INPUT", top: 400 }) });
+  assert.deepEqual(posted, []);
+  assert.equal(L.calls.length, 2, "the piece still scrolled itself");
+  parsed();
+  await tick();
+  win.scrollTo(0, 0);
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:height", "factory:scroll"]);
+});
+
+test("a closed or observed piece still tells its height and where to scroll", () => {
+  for (const host of [{ closed: "received", sentAt: "2026-10-22T15:00:00Z" }, { closed: "received", observer: true }]) {
+    const L = layout({ height: 500 });
+    const { win, of } = runBridge({ host }, L.env);
+    win.scrollTo(0, 0);
+    assert.deepEqual(heights(of), [500], JSON.stringify(host));
+    assert.equal(of("factory:scroll").length, 1, JSON.stringify(host));
+  }
+});
+
+test("every message the bridge posts carries the nonce, and only to the portal's origin", async () => {
+  const L = layout();
+  const { win, posted, fromParent } = runBridge({}, L.env);
+  L.root.height = 800; L.resized();
+  win.scrollTo(0, 0);
+  new L.FakeElement({ top: 900 }).scrollIntoView();
+  L.ids.x = new L.FakeElement({ top: 10 });
+  win.dispatch("click", click(new L.FakeElement({ tag: "A", attrs: { href: "#x" } })));
+  win.dispatch("focusin", { target: new L.FakeElement({ tag: "SELECT", top: 20 }) });
+  win.localStorage.setItem("k", "v");
+  fromParent({ type: "factory:flush", nonce: "n-1" });
+  win.factorySubmit(questions());
+  const submit = posted.find((p) => p.message.type === "factory:submit").message;
+  fromParent({ type: "factory:submit-result", nonce: "n-1", requestId: submit.requestId, ok: true }); // no 45 s timer left behind
+  const types = new Set(posted.map((p) => p.message.type));
+  for (const type of ["factory:ready", "factory:height", "factory:scroll", "factory:dirty", "factory:draft", "factory:flushed", "factory:submit"]) {
+    assert.ok(types.has(type), type);
+  }
+  assert.ok(posted.every((p) => p.message.nonce === "n-1" && p.origin === ORIGIN));
+});
+
+test("the built script with the size and scroll code still has no </script nor <!--", () => {
+  const script = buildBridgeScript(config);
+  assert.ok(script.includes("factory:height") && script.includes("factory:scroll"));
+  assert.equal(script.match(/<\/script/gi).length, 1, "only the final closing tag");
+  assert.equal(script.match(/<!--/g), null);
 });

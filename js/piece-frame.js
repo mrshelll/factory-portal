@@ -20,8 +20,16 @@ export function randomNonce() {
 // must end with respond(requestId, { ok: true } | { ok: false, error }). onNavigatedAway: the iframe
 // loaded a second document (the piece navigated or reloaded); the frame is already destroyed when it
 // is called. onSaveFailed(reason): the piece tried to keep a change that does not fit ("too-large");
-// the change was not stored. submitTimeoutMs and quotaChars only change in tests.
-export function mountPiece({ container, html, kind, storage, title, host, submitTimeoutMs, quotaChars, onReady, onDirty, onDraft, onSaveFailed, onSubmit, onRejected, onNavigatedAway }) {
+// the change was not stored. onHeight(height): the piece's content is now `height` px tall (a whole number,
+// 0..MAX_PIECE_HEIGHT; the bridge never posts 0). The first comes with or a moment after onReady (in Chrome the
+// frame may get its size only then), then one on every change, never the same twice in a row; the frame can take
+// that height, and the portal's page scrolls instead of the piece. onScroll({ top, bottom,
+// ifNeeded }): the piece asks to show what is at `top` px from its top (whole numbers, 0..MAX_PIECE_HEIGHT,
+// bottom >= top; bottom is top when the piece gave none): with ifNeeded false, bring `top` to the top of the
+// portal's window; with ifNeeded true (a control got focus, or scrollIntoView with block "nearest"), scroll
+// only if top..bottom is not already in view. Both arrive validated (js/host.js parseBridgeMessage).
+// submitTimeoutMs and quotaChars only change in tests.
+export function mountPiece({ container, html, kind, storage, title, host, submitTimeoutMs, quotaChars, onReady, onDirty, onDraft, onSaveFailed, onSubmit, onRejected, onNavigatedAway, onHeight, onScroll }) {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", SANDBOX);
   iframe.setAttribute("title", title);
@@ -42,6 +50,8 @@ export function mountPiece({ container, html, kind, storage, title, host, submit
     else if (message.type === "factory:draft" && onDraft) onDraft(message.storage);
     else if (message.type === "factory:save-failed" && onSaveFailed) onSaveFailed(message.reason);
     else if (message.type === "factory:submit" && onSubmit) onSubmit(message);
+    else if (message.type === "factory:height" && onHeight) onHeight(message.height);
+    else if (message.type === "factory:scroll" && onScroll) onScroll({ top: message.top, bottom: message.bottom, ifNeeded: message.ifNeeded });
     else if (message.type === "factory:flushed") { const w = flushWaiters; flushWaiters = []; w.forEach((r) => r(true)); }
   }
 

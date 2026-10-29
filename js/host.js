@@ -9,6 +9,10 @@ export const SUBMIT_ERRORS = ["invalid", "too-large", "timeout", "network", "ses
 // Why the bridge could not keep a change (factory:save-failed): the storage quota was exceeded.
 export const SAVE_FAILED_REASONS = ["too-large"];
 
+// factory:height and factory:scroll carry px from the piece's top; anything past this is capped (a
+// broken or hostile piece cannot make the portal's page endless).
+export const MAX_PIECE_HEIGHT = 200000;
+
 // The shape a submitted payload must have for each piece kind: `field` must equal `value`, and
 // `list` must be an array. The bridge gets the shape of its kind and checks it before posting.
 export const PAYLOAD_SHAPES = {
@@ -27,6 +31,12 @@ function isPlainObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
+}
+
+// A finite number >= 0, rounded with `round` and capped at MAX_PIECE_HEIGHT; null otherwise.
+function pixels(value, round) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.min(round(value), MAX_PIECE_HEIGHT);
 }
 
 export function isValidPayload(kind, payload) {
@@ -58,6 +68,19 @@ export function parseBridgeMessage(data, kind, nonce) {
       if (!isPlainObject(data.storage)) return no("shape");
       if (!Object.values(data.storage).every((v) => typeof v === "string")) return no("shape");
       return { ok: true, message: { type: data.type, storage: data.storage } };
+    }
+    case "factory:height": {
+      const height = pixels(data.height, Math.ceil); // up: nothing of the piece is cut
+      if (height === null) return no("shape");
+      return { ok: true, message: { type: data.type, height } };
+    }
+    case "factory:scroll": {
+      // bottom defaults to top and ifNeeded to false, so the handler always gets all three.
+      const top = pixels(data.top, Math.round);
+      const bottom = data.bottom === undefined ? top : pixels(data.bottom, Math.round);
+      if (top === null || bottom === null || bottom < top) return no("shape");
+      if (data.ifNeeded !== undefined && typeof data.ifNeeded !== "boolean") return no("shape");
+      return { ok: true, message: { type: data.type, top, bottom, ifNeeded: data.ifNeeded === true } };
     }
     case "factory:submit":
       if (typeof data.requestId !== "string" || !data.requestId || data.requestId.length > 100) return no("shape");

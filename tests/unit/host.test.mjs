@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseBridgeMessage, isValidPayload, createDraftSaver, trySaveAll, MAX_MESSAGE_BYTES, sendNotInDraft } from "../../js/host.js";
+import { parseBridgeMessage, isValidPayload, createDraftSaver, trySaveAll, MAX_MESSAGE_BYTES, MAX_PIECE_HEIGHT, sendNotInDraft } from "../../js/host.js";
 
 const N = "nonce-1";
 const questionsPayload = { formato: "respuestas-fabrica/1", proyecto: "portal-test", respuestas: [] };
@@ -170,4 +170,31 @@ test("sendNotInDraft: a send newer than the saved draft, or with no draft, is no
   assert.equal(sendNotInDraft({ lastSubmittedAt: null, draftUpdatedAt: null }), false, "nothing sent");
   assert.equal(sendNotInDraft({ lastSubmittedAt: "garbage", draftUpdatedAt: null }), false, "an unreadable send time says nothing");
   assert.equal(sendNotInDraft({ lastSubmittedAt: sent, draftUpdatedAt: "garbage" }), true, "an unreadable draft time is as no draft");
+});
+
+test("parseBridgeMessage accepts factory:height in whole px, capped at MAX_PIECE_HEIGHT", () => {
+  const height = (value) => parseBridgeMessage({ nonce: N, type: "factory:height", height: value }, "questions", N);
+  assert.deepEqual(height(640), { ok: true, message: { type: "factory:height", height: 640 } });
+  assert.deepEqual(height(0), { ok: true, message: { type: "factory:height", height: 0 } });
+  assert.equal(height(640.2).message.height, 641, "rounded up, so nothing is cut");
+  assert.equal(height(5e9).message.height, MAX_PIECE_HEIGHT);
+  assert.equal(MAX_PIECE_HEIGHT, 200000);
+  for (const bad of [undefined, null, -1, NaN, Infinity, "640", true, [640], { h: 1 }]) {
+    assert.deepEqual(height(bad), { ok: false, reason: "shape" }, String(bad));
+  }
+  assert.equal(parseBridgeMessage({ type: "factory:height", height: 640 }, "questions", N).ok, false, "needs the nonce");
+});
+
+test("parseBridgeMessage accepts factory:scroll with top, an optional bottom and an optional ifNeeded", () => {
+  const scroll = (fields) => parseBridgeMessage({ nonce: N, type: "factory:scroll", ...fields }, "questions", N);
+  assert.deepEqual(scroll({ top: 0 }), { ok: true, message: { type: "factory:scroll", top: 0, bottom: 0, ifNeeded: false } });
+  assert.deepEqual(scroll({ top: 700.4, bottom: 744.6, ifNeeded: true }), { ok: true, message: { type: "factory:scroll", top: 700, bottom: 745, ifNeeded: true } });
+  assert.deepEqual(scroll({ top: 900, ifNeeded: false }).message, { type: "factory:scroll", top: 900, bottom: 900, ifNeeded: false });
+  assert.deepEqual(scroll({ top: 5e9, bottom: 6e9 }).message, { type: "factory:scroll", top: MAX_PIECE_HEIGHT, bottom: MAX_PIECE_HEIGHT, ifNeeded: false });
+  for (const bad of [{}, { top: -1 }, { top: NaN }, { top: "0" }, { top: null }, { top: Infinity },
+    { top: 10, bottom: 5 }, { top: 10, bottom: -1 }, { top: 10, bottom: "20" }, { top: 10, bottom: null },
+    { top: 0, ifNeeded: "yes" }, { top: 0, ifNeeded: 1 }, { top: 0, ifNeeded: null }]) {
+    assert.deepEqual(scroll(bad), { ok: false, reason: "shape" }, JSON.stringify(bad));
+  }
+  assert.equal(parseBridgeMessage({ type: "factory:scroll", top: 0 }, "questions", N).ok, false, "needs the nonce");
 });

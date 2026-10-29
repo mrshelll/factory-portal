@@ -46,7 +46,7 @@ const harness = {
       host: options.host, submitTimeoutMs: options.submitTimeoutMs, quotaChars: options.quotaChars,
       onReady: record("ready"), onDirty: record("dirty"), onDraft: record("draft"), onSaveFailed: record("save-failed"),
       onSubmit: (message) => { onSubmit(message); if (options.autoRespond) mounted.respond(message.requestId, { ok: true }); },
-      onRejected: record("rejected"), onNavigatedAway: record("navigated"),
+      onRejected: record("rejected"), onNavigatedAway: record("navigated"), onHeight: record("height"), onScroll: record("scroll"),
     });
     frame = mounted;
     return frame;

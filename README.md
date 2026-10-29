@@ -82,10 +82,11 @@ storage of a change request. A person whose only responses are partial, or whose
 `storage`, shows state and date but no link to open: the piece is never seeded with a draft. An old piece
 (stored before the bridge had the observer mode) still opens closed and read only.
 
-**How «La abrió» is recorded.** The first time the assigned person opens the piece in the portal, the portal calls
-`mark_piece_opened`, which sets `first_opened_at` on that assignment once (a second open keeps the first date;
-status and `updated_at` do not change). It does not count when the person opens the email, nor when the owner
-opens someone's piece. An assignment from before the migration has no date and shows none. If the call fails
+**How «La abrió» is recorded.** The first time the assigned person opens the piece in the portal while it is open
+(not closed: neither received nor replaced), the portal calls `mark_piece_opened`, which sets `first_opened_at` on
+that assignment once (a second open keeps the first date; status and `updated_at` do not change). Opening a closed
+piece records nothing. It does not count when the person opens the email, nor when the owner opens someone's
+piece. An assignment from before the migration has no date and shows none. If the call fails
 (network, expired session, a database without the function) the piece opens and works anyway.
 
 All of this reads through `security definer` functions that first check the caller is the project's owner
@@ -153,10 +154,32 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   memory), but nothing leaves the iframe, so the server draft keeps the person's unsent changes.
   `factory:flush` still answers `factory:flushed`, and `factorySubmit` still sends (the server turns a
   send after the close into a late change request). Old pieces ignore both fields.
+- **Size and scrolling.** The portal sizes the iframe to the piece's height and its own page scrolls,
+  so the piece never scrolls inside. Right after `factory:ready`, and on every change after it
+  (a `ResizeObserver` on the piece's `<html>`; without one, the window's `load`), the bridge posts
+  `{ type: "factory:height", height }`: whole px, the height of the piece's `<html>` box (not its
+  `scrollHeight`, which never drops below the iframe's own height, so a shorter step could never
+  shrink the frame back), never the same value twice in a row, and never 0: in Chrome the frame can
+  have no size yet when the piece opens, and the first real height then comes with its first layout,
+  a moment after `factory:ready`. A change in the same direction as a change of the iframe's height
+  alone, in the same rendering frame, is not posted: it follows the frame (a piece sized with `vh`
+  would grow forever otherwise). The piece's scrolling becomes
+  `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, in px from the piece's top:
+  `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call
+  `scrollTo(0, 0)` on every step change), `scrollIntoView` (the element's top; with
+  `block: "nearest"` also its bottom and `ifNeeded`), a plain click on a link to `#id` of the piece
+  (the target's top, `0` for `#` and `#top`; the iframe neither navigates nor changes its hash) and
+  `focusin` on a control (its top and bottom with `ifNeeded: true`: the portal scrolls only if that
+  stretch is out of its window). The piece's own calls still run. While the piece opens nothing of
+  this is posted, so its start-up `scrollTo(0, 0)` does not move the portal's page. The portal
+  rounds heights and positions and caps them at 200,000 px (`MAX_PIECE_HEIGHT`) and gives `mountPiece` handlers
+  `onHeight(height)` and `onScroll({ top, bottom, ifNeeded })` (`bottom` is `top` when the piece
+  gave none).
 - **Messages.** Each mounted piece gets a random nonce (`crypto.getRandomValues`) inside its
   injected config. The portal only accepts messages whose `event.source` is the piece iframe and that
   carry that nonce, with a known type (`factory:ready`, `factory:dirty`, `factory:draft`,
-  `factory:save-failed`, `factory:submit`, `factory:flushed`), the expected shape and under 1 MB. The bridge only posts to the
+  `factory:save-failed`, `factory:submit`, `factory:flushed`, `factory:height`, `factory:scroll`),
+  the expected shape and under 1 MB. The bridge only posts to the
   portal's origin and only accepts messages (`factory:flush`, `factory:submit-result`) from its
   parent, from the portal's origin, with the nonce. If the iframe loads a
   second document (the piece navigated away or reloaded), the portal removes it and offers to reopen.
@@ -404,7 +427,7 @@ portal at the width a person sees them.
 | `js/app.js` | Router and screens: sign in, home, a project's page (and the owner's part), piece |
 | `js/project.js` | Routes and the states the owner reads, as pure functions |
 | `js/api.js` | Supabase queries and RPCs |
-| `js/bridge.js` | Script injected into each piece (storage shim, `factorySubmit`, `factoryHost`) |
+| `js/bridge.js` | Script injected into each piece (storage shim, `factorySubmit`, `factoryHost`, height and scroll messages) |
 | `js/piece-frame.js` | Mounts a piece in the sandboxed iframe and speaks the bridge protocol |
 | `js/host.js` | Message validation and the draft save queue |
 | `js/auth-errors.js`, `js/i18n.js`, `js/dom.js`, `js/supabase-client.js` | Helpers |
