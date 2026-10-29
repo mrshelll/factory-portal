@@ -449,11 +449,30 @@ function layout({ height = 640, innerHeight = 150, innerWidth = 320 } = {}) {
     setAttribute(name, value) { this.attributes[name] = String(value); },
     getBoundingClientRect() { return { top: 0, bottom: this.height, height: this.height }; },
   };
+  const L = {};
+  const locationWrites = [];
+  let hash = "";
+  // Records every write, so a test can tell the bridge never touched it.
+  const location = {
+    get hash() { return hash; }, set hash(value) { locationWrites.push(["hash", value]); hash = String(value); },
+    assign(url) { locationWrites.push(["assign", url]); }, replace(url) { locationWrites.push(["replace", url]); },
+  };
+  // What a browser focuses without a tabindex (enough for these tests).
+  const NATIVELY_FOCUSABLE = ["INPUT", "SELECT", "TEXTAREA", "BUTTON"];
   class FakeElement {
     constructor({ top = 0, height = 40, tag = "DIV", attrs = {}, parent = null } = {}) { Object.assign(this, { top, height, tagName: tag, attrs, parent }); }
     getBoundingClientRect() { return { top: this.top, bottom: this.top + this.height, height: this.height }; }
     getAttribute(name) { return Object.hasOwn(this.attrs, name) ? this.attrs[name] : null; }
     hasAttribute(name) { return Object.hasOwn(this.attrs, name); }
+    setAttribute(name, value) { this.attrs[name] = String(value); }
+    // Like a browser: only a focusable element takes focus, and focusin bubbles to the window.
+    focus(options) {
+      const focusable = NATIVELY_FOCUSABLE.includes(this.tagName) || (this.tagName === "A" && this.hasAttribute("href")) || this.hasAttribute("tabindex");
+      if (!focusable) return;
+      this.focusOptions = options;
+      env.document.activeElement = this;
+      if (L.win) { L.win.document.activeElement = this; L.win.dispatch("focusin", { target: this }); }
+    }
     closest(selector) { // only what the bridge asks for
       assert.equal(selector, "a[href]");
       for (let el = this; el; el = el.parent) if (el.tagName === "A" && el.hasAttribute("href")) return el;
@@ -468,15 +487,16 @@ function layout({ height = 640, innerHeight = 150, innerWidth = 320 } = {}) {
   const ids = {};
   const env = {
     window: {
-      innerHeight, innerWidth, scrollY: 0, location: { hash: "" }, Element: FakeElement, ResizeObserver: FakeResizeObserver,
+      innerHeight, innerWidth, scrollY: 0, location, Element: FakeElement, ResizeObserver: FakeResizeObserver,
       scrollTo(...args) { calls.push({ scrollTo: args }); },
       scroll(...args) { calls.push({ scroll: args }); },
     },
-    document: { documentElement: root, body: new FakeElement({ tag: "BODY" }), getElementById: (id) => ids[id] || null, getElementsByName: () => [] },
+    document: { documentElement: root, body: new FakeElement({ tag: "BODY" }), activeElement: null, getElementById: (id) => ids[id] || null, getElementsByName: () => [] },
   };
   // The browser's layout pass: every observer gets its callback.
   const resized = () => observers.forEach((o) => o.fn([]));
-  return { env, root, calls, ids, observers, FakeElement, resized };
+  // bind(win): focus() then dispatches focusin on that bridge's window.
+  return Object.assign(L, { env, root, calls, ids, observers, FakeElement, resized, locationWrites, bind(win) { L.win = win; return win; } });
 }
 const heights = (of) => of("factory:height").map((m) => m.height);
 // A plain primary click on target.
@@ -552,6 +572,19 @@ test("a growth that only follows the iframe's own growth is not posted (no feedb
   assert.deepEqual(heights(of), [166, 300]);
 });
 
+test("the loop guard holds when the frame got its first size without a resize event (Chrome, at open)", () => {
+  // The frame has no size when the bridge starts; Chrome may lay it out at 390 x 150 without firing resize.
+  const L = layout({ height: 300, innerHeight: 0, innerWidth: 0 });
+  const { win, of } = runBridge({}, L.env);
+  win.innerWidth = 390; win.innerHeight = 150;
+  L.resized(); // the first layout: the same 300, nothing new to post
+  assert.deepEqual(heights(of), [300]);
+  // The portal sizes the frame to 300 (same width): a piece of 200vh follows it to 600 in that frame.
+  win.innerHeight = 300; win.dispatch("resize");
+  L.root.height = 600; L.resized();
+  assert.deepEqual(heights(of), [300], "the growth followed the frame: not posted");
+});
+
 test("the loop guard lets through a shrink while the frame grows, and a change that comes with a new width", async () => {
   const L = layout({ height: 640, innerHeight: 150, innerWidth: 320 });
   const { win, of } = runBridge({}, L.env);
@@ -610,8 +643,48 @@ test("a click on a link to #x of the piece asks for the position of #x and does 
   const event = click(new L.FakeElement({ tag: "SPAN", parent: link }));
   win.dispatch("click", event);
   assert.equal(event.defaultPrevented, true, "no in-frame navigation");
-  assert.equal(win.location.hash, "", "the iframe's hash does not change");
+  assert.deepEqual(L.locationWrites, [], "the iframe's location (and its hash) is never written");
   assert.deepEqual(of("factory:scroll"), [{ type: "factory:scroll", top: 1200, nonce: "n-1" }]);
+});
+
+test("after an anchor click focus moves to the target without scrolling, as a browser's fragment navigation does", () => {
+  const L = layout();
+  const { win, of } = runBridge({}, L.env);
+  L.bind(win);
+  const go = (href) => win.dispatch("click", click(new L.FakeElement({ tag: "A", attrs: { href } })));
+  // A heading (not focusable): it gets tabindex -1 so it can take focus, keyboard and screen reader users land there.
+  L.ids.group = new L.FakeElement({ tag: "H2", top: 800 });
+  go("#group");
+  assert.equal(win.document.activeElement, L.ids.group);
+  assert.equal(L.ids.group.getAttribute("tabindex"), "-1");
+  assert.equal(L.ids.group.focusOptions.preventScroll, true, "the portal scrolls, not the focus");
+  // A control keeps its own tabindex behaviour: no tabindex added.
+  L.ids.field = new L.FakeElement({ tag: "INPUT", top: 900 });
+  go("#field");
+  assert.equal(win.document.activeElement, L.ids.field);
+  assert.equal(L.ids.field.hasAttribute("tabindex"), false);
+  // An element with a tabindex of its own keeps it.
+  L.ids.card = new L.FakeElement({ top: 1000, attrs: { tabindex: "0" } });
+  go("#card");
+  assert.equal(win.document.activeElement, L.ids.card);
+  assert.equal(L.ids.card.getAttribute("tabindex"), "0");
+  // The focus the bridge moves asks for no second scroll: one factory:scroll per click.
+  assert.deepEqual(of("factory:scroll"), [
+    { type: "factory:scroll", top: 800, nonce: "n-1" },
+    { type: "factory:scroll", top: 900, nonce: "n-1" },
+    { type: "factory:scroll", top: 1000, nonce: "n-1" },
+  ]);
+  // A focus the person makes afterwards still asks as usual.
+  new L.FakeElement({ tag: "BUTTON", top: 50 }).focus();
+  assert.deepEqual(of("factory:scroll").at(-1), { type: "factory:scroll", top: 50, bottom: 90, ifNeeded: true, nonce: "n-1" });
+});
+
+test("#, #top and a missing anchor move no focus", () => {
+  const L = layout();
+  const { win } = runBridge({}, L.env);
+  L.bind(win);
+  for (const href of ["#", "#top", "#missing"]) win.dispatch("click", click(new L.FakeElement({ tag: "A", attrs: { href } })));
+  assert.equal(win.document.activeElement, null);
 });
 
 test("#, #top and an encoded id work; a missing anchor does not navigate nor scroll; other links are left alone", () => {

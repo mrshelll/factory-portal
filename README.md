@@ -168,7 +168,9 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call
   `scrollTo(0, 0)` on every step change), `scrollIntoView` (the element's top; with
   `block: "nearest"` also its bottom and `ifNeeded`), a plain click on a link to `#id` of the piece
-  (the target's top, `0` for `#` and `#top`; the iframe neither navigates nor changes its hash) and
+  (the target's top, `0` for `#` and `#top`; the iframe neither navigates nor changes its hash, and
+  focus moves to the target as a browser would, without scrolling, with `tabindex="-1"` added only
+  to a target that takes no focus and has no tabindex) and
   `focusin` on a control (its top and bottom with `ifNeeded: true`: the portal scrolls only if that
   stretch is out of its window). The piece's own calls still run. While the piece opens nothing of
   this is posted, so its start-up `scrollTo(0, 0)` does not move the portal's page. The portal

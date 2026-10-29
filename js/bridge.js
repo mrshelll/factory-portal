@@ -63,7 +63,8 @@
 //    top: `scrollTo` / `scroll` (numbers or options; only when a top is asked) and `scrollIntoView`
 //    (the element's top; with block "nearest" also bottom and ifNeeded) still run and then post; a
 //    plain click on a link to `#id` of the piece posts the target's top (`#` and `#top`: 0) and does
-//    not navigate, so the iframe's location.hash stays; `focusin` posts the element's top and bottom
+//    not navigate, so the iframe's location.hash stays; focus moves to the target as in a browser
+//    (preventScroll, tabindex="-1" when it takes no focus and has no tabindex); `focusin` posts the element's top and bottom
 //    with `ifNeeded: true` (the portal scrolls only if that is out of its window). While the piece opens
 //    nothing of this is posted, so its start-up scrollTo(0, 0) does not move the portal's page.
 //    Closed and observed pieces post both.
@@ -307,7 +308,9 @@ function bridgeRuntime(cfg) {
   // grows the frame, forever. So a change in the same direction as a change of the frame's height alone (same
   // width), in the same rendering frame, is not posted: it follows the frame, it is not the piece's. The resize
   // event and the ResizeObserver callbacks run in the same rendering update; the timer clears the mark after it.
-  // A new width (the phone turned) reflows the piece for real, so it does not mark.
+  // A new width (the phone turned) reflows the piece for real, so it does not mark. The frame size it compares
+  // with is also taken at every measure: Chrome may give an isolated frame its first size without a resize
+  // event, and against the 0 x 0 of the start the next resize would look like a new width.
   var frameW = window.innerWidth;
   var frameH = window.innerHeight;
   var frameMoved = 0; // +1 / -1: the frame's height alone grew / shrank in this rendering frame
@@ -322,6 +325,7 @@ function bridgeRuntime(cfg) {
   });
 
   function sendHeight() {
+    frameW = window.innerWidth; frameH = window.innerHeight; // the size this measure saw (see the loop guard)
     if (opening) return; // the first one goes right after factory:ready
     var h = measureHeight();
     if (h === null || h === lastHeight) return;
@@ -428,15 +432,33 @@ function bridgeRuntime(cfg) {
     var id = href.slice(1);
     try { id = decodeURIComponent(id); } catch (e) { /* keep it raw */ }
     var el = anchorTarget(id);
-    if (el) { var b = box(el); if (b) askScroll(b.top); }
+    if (el) { var b = box(el); if (b) askScroll(b.top); focusAnchorTarget(el); }
     else if (id === "" || id.toLowerCase() === "top") askScroll(0); // the document's top, as in a browser
   });
+
+  // preventDefault also drops the browser's move of focus to the target, so the bridge makes it: keyboard and
+  // screen reader users go on from the target, not from the link (which may now be hidden, as in a closed
+  // index). Without scrolling: the portal scrolls. A target that does not take focus gets tabindex="-1", only
+  // when it has no tabindex of its own. This focusin asks the portal for nothing: the click already did.
+  var movingFocus = false;
+  function focusAnchorTarget(el) {
+    if (typeof el.focus !== "function") return;
+    movingFocus = true;
+    try {
+      el.focus({ preventScroll: true });
+      if (document.activeElement !== el && typeof el.hasAttribute === "function" && !el.hasAttribute("tabindex")) {
+        el.setAttribute("tabindex", "-1");
+        el.focus({ preventScroll: true });
+      }
+    } catch (e) { /* focus is a courtesy: the scroll already went out */ }
+    finally { movingFocus = false; }
+  }
 
   // A control got focus (by keyboard, by the piece, or a tap): the portal brings it into view only if needed;
   // the bridge does not know the portal's window.
   window.addEventListener("focusin", function (event) {
     var target = event && event.target;
-    if (!target || target === document.body || target === root) return;
+    if (movingFocus || !target || target === document.body || target === root) return;
     var b = box(target);
     if (b) askScroll(b.top, b.bottom, true);
   });
