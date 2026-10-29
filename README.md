@@ -46,7 +46,7 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    at `#/piece/<id>`. Then, for a person in the project's list, the **«Decisiones»** section: each point the
    factory published (what was decided, and «En qué se apoya» folded), answered with «Va», «Lo cambiaría»,
    «No va» or «No sé» and a comment (optional with «Va», required with the others), and «¿Falta algo?» to
-   propose what is missing. A point already answered on the version shown is folded to its answer line and
+   propose what is missing, with what they already proposed listed as «Lo que propusiste». A point already answered on the version shown is folded to its answer line and
    «Cambiar respuesta». A project with only the section (no pieces for the person) is listed at home too.
    The owner's part comes last, with the section's counts and what people proposed; each point opens at
    `#/project/<id>/decisions/<key>`, how each person answered it (read only). See **The owner's part** below.
@@ -371,7 +371,7 @@ Steps in the Supabase panel (the owner does them; the app password is typed in t
   owner's read-only `owner_decisions` (it checks first that the caller is the project's `owner`). Factory-only
   (execute for `service_role`): `factory_publish_decisions`, `factory_fetch_decisions`,
   `factory_mark_decisions_fetched`. `factory_publish`, `owner_project` and `save_draft` are not touched. It is
-  idempotent (safe to run twice). **Not applied yet.**
+  idempotent (safe to run twice). Applied to `factory` on 2026-10-29.
   - Dry run first, as one request against `factory` (Supabase SQL editor, MCP `execute_sql`, or psql as `postgres`):
     `begin;`, then the whole migration, then the whole `tests/sql/decisions-checks.sql`. The checks file ends with
     `rollback;`, which undoes the migration too (its own `begin;` only warns that a transaction is open). It must
@@ -388,11 +388,34 @@ Steps in the Supabase panel (the owner does them; the app password is typed in t
 
     Then run `tests/sql/decisions-checks.sql` alone against `factory` (it rolls back its own data): `decisions: ok 15
     checks`.
+- `20261029120000_decisions_my_proposals.sql` lets a person see what they proposed: it replaces `my_decisions` only
+  (same signature, security and grant: execute for `authenticated`), which keeps every field it had and adds
+  `proposals`, the caller's own proposals for the project, oldest first, each `{id, text, created_at}` (never anybody
+  else's, never an email). The page lists them as «Lo que propusiste» under «¿Falta algo?». It builds on
+  `20261028120000_decisions.sql` (never edit that one: it is applied). It is idempotent (safe to run twice). **Not
+  applied yet.**
+  - Dry run first, as one request against `factory`: `begin;`, then the whole migration, then the whole
+    `tests/sql/decisions-my-proposals-checks.sql` (its `rollback;` undoes the migration too). It must print the NOTICE
+    and return one row `decisions_my_proposals: ok 6 checks`.
+  - Apply: one transaction with the migration and its history row:
+
+    ```sql
+    begin;
+    -- the whole of supabase/migrations/20261029120000_decisions_my_proposals.sql
+    insert into supabase_migrations.schema_migrations (version, name)
+      values ('20261029120000', 'decisions_my_proposals') on conflict (version) do nothing;
+    commit;
+    ```
+
+    Then run `tests/sql/decisions-my-proposals-checks.sql` alone (`decisions_my_proposals: ok 6 checks`; again, and it
+    passes again) and `tests/sql/decisions-checks.sql` (`decisions: ok 15 checks`: it accepts the new `proposals`
+    field).
 
 `tests/sql/factory-connection-checks.sql` checks the factory connection migration,
 `tests/sql/piece-closure-checks.sql` checks the piece closure, `tests/sql/project-page-checks.sql`
-checks the project page and `tests/sql/decisions-checks.sql` checks «Decisiones» (15 checks), all against the
-database (see their headers).
+checks the project page, `tests/sql/decisions-checks.sql` checks «Decisiones» (15 checks) and
+`tests/sql/decisions-my-proposals-checks.sql` checks a person's own proposals (6 checks), all against the database
+(see their headers).
 
 ## Keeping Supabase awake
 
@@ -538,7 +561,7 @@ portal at the width a person sees them.
 | `index.html`, `css/portal.css` | Page shell and the portal's own styles (on top of the brand and its components) |
 | `brand/` | Generated copy of the ninben brand (`ninben.css`, `ninben-components.css`, `logo.svg`, `fonts/`) |
 | `scripts/sync-brand.mjs` | Copies the brand from the software factory repo, or checks the copy |
-| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection, the piece closure, the project page and «Decisiones» (`20261028120000_decisions.sql`) |
+| `supabase/migrations/` | Schema: the baseline recovery snapshot, the factory connection, the piece closure, the project page and «Decisiones» (`20261028120000_decisions.sql`, `20261029120000_decisions_my_proposals.sql`) |
 | `supabase/templates/` | The sign-in code email: `otp-code.html` and `otp-code.subject.txt` (pasted in the Supabase panel) |
 | `.github/workflows/keep-alive.yml` | Calls `keep_alive()` every 3 days so Supabase does not pause |
 | `config.js` | Public Supabase configuration |
