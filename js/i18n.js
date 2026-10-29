@@ -7,6 +7,7 @@ export const DEFAULT_LANGUAGE = "es";
 export const dictionaries = {
   es: {
     brand: "ninben",
+    brandHome: "ninben, ir a Tus proyectos",
     dismiss: "Cerrar aviso",
     retry: "Reintentar",
 
@@ -143,6 +144,7 @@ export const dictionaries = {
   },
   en: {
     brand: "ninben",
+    brandHome: "ninben, go to Your projects",
     dismiss: "Dismiss notice",
     retry: "Try again",
 

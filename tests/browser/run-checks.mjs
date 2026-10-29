@@ -1262,6 +1262,8 @@ const LONG_PROJECT = "Biblioteca del barrio San Martín de Porres: préstamos, s
 // normal Spanish running-text titles take a third line from 66 to 74 characters on, title-case ones from 65; 60 keeps
 // a margin for an unlucky break. The check's title is the earliest-breaking of those, at exactly TITLE_MAX characters.
 const TITLE_MAX = 60;
+// A project name of two lines of running text at 320 px (24 px type); PROJECT_TITLE_MAX is the longest that keeps two lines.
+const PROJECT_TWO_LINES = "Tienda virtual de artesanías";
 const TITLE_AT_MAX = "Demo de la tienda virtual de artesanías: catálogo y compras.";
 if (TITLE_AT_MAX.length !== TITLE_MAX) throw new Error(`TITLE_AT_MAX is ${TITLE_AT_MAX.length} characters, not ${TITLE_MAX}`);
 // A piece of 1000 px that grows 200 px from inside the resize event of its iframe reaching 1000 px: its growth comes in
@@ -1466,7 +1468,8 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         back: back && { lines: rects.length && rects.every((r) => Math.abs(r.top - rects[0].top) < r.height / 2) ? 1 : rects.length,
           text: back.innerText.trim().replace(/\s+/g, " "), label: back.getAttribute("aria-label"), height: Math.round(back.getBoundingClientRect().height) } };
     }, headSelector);
-    const phoneScreen = async (tag, backend, hash, headSelector, label, ready) => {
+    // noBack: the project's page has no «volver» on a phone (its destination is home, which the brand links to).
+    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false } = {}) => {
       const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO" });
       const page = await context.newPage();
       await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
@@ -1474,27 +1477,65 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       await sleep(200);
       const at = await bandOf(page, headSelector);
       check(`${tag}: at rest the h1 and the title band end at ${PHONE_FRAME_MAX} px or less`, at.h1 !== null && at.h1 <= PHONE_FRAME_MAX && at.band > 0 && at.band <= PHONE_FRAME_MAX, JSON.stringify(at));
-      check(`${tag}: «← Volver» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
-        at.back.text === "← Volver" && at.back.label === label, JSON.stringify(at.back));
+      if (noBack) {
+        const shown = await page.evaluate(() => [...document.querySelectorAll(".back-link")].filter((el) => el.getBoundingClientRect().height > 0).length);
+        check(`${tag}: there is no «volver» on a phone`, shown === 0, String(shown));
+      } else {
+        check(`${tag}: «← Volver» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
+          at.back.text === "← Volver" && at.back.label === label, JSON.stringify(at.back));
+      }
+      // The brand is the link home, on every screen: its name says where, it is a 44 px target, its words keep the brand's type.
+      const brand = await page.evaluate(() => {
+        const a = document.querySelector("[data-rol=marca-producto]");
+        if (!a) return null;
+        const box = a.getBoundingClientRect(), text = a.querySelector("span");
+        return { tag: a.tagName.toLowerCase(), href: a.getAttribute("href"), label: a.getAttribute("aria-label"), height: Math.round(box.height),
+          words: text && text.textContent, weight: text && getComputedStyle(text).fontWeight, svg: Boolean(a.querySelector("svg")) };
+      });
+      check(`${tag}: the brand is a link home named «ninben, ir a Tus proyectos», 44 px high, in the brand's type`, brand && brand.tag === "a" && brand.href === "#/" &&
+        brand.label === "ninben, ir a Tus proyectos" && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
       const fixed = await stuckOf(page);
       check(`${tag}: nothing fixed or sticky is on screen one screen down`, fixed.stuck.length === 0, JSON.stringify(fixed));
       return { context, page, at };
     };
-    let screen = await phoneScreen(`phone ${engineName}: project page`, ownerBackend(html), `#/project/${IDS.project}`, ".page-head", "Volver a tus proyectos", () => document.querySelector(".page-head h1")?.textContent === "Portal de prueba");
-    await screen.context.close();
-    screen = await phoneScreen(`phone ${engineName}: owner's project page`, ownerBackend(html), `#/project/${IDS.ownedProject}`, ".page-head", "Volver a tus proyectos", () => document.querySelector(".page-head h1")?.textContent === PROJECT.owned);
-    await screen.context.close();
-    for (const [what, title] of [["a short title", OWNED_TITLES[OWNED.questions]], [`a title of ${TITLE_MAX} characters`, TITLE_AT_MAX]]) {
-      // The owner's backend takes the title from OWNED_TITLES when it is built.
-      OWNED_TITLES[OWNED.questions] = title;
-      const b = ownerViewBackend(html, null, null, {});
-      const tag = `phone ${engineName}: owner's piece with ${what}`;
-      screen = await phoneScreen(tag, b, ownerHref(IDS.ownedProject, OWNED.questions, PEOPLE.luis), "h1.piece-title, .piece-status", `Volver a ${PROJECT.owned}`,
-        () => document.querySelector("h1.piece-title") && document.querySelector(".piece-status")?.textContent.startsWith("Lo que envió"));
-      check(`${tag}: the title is whole (${title.length} characters, never cut) and the line says whose send it is`, screen.at.h1Text === title, JSON.stringify(screen.at));
+    const projectReady = () => document.querySelector(".page-head h1")?.textContent.length > 0;
+    // The project's page, the person's and the owner's, with a name that fits one line, two lines of running text, and two
+    // lines of wide letters: the h1 ends at 160 px or less and no «volver» shows.
+    const WIDE_NAME = "WWWWW WWWWW WWWWW";
+    for (const [what, name] of [["a short name", null], ["a name of two lines", PROJECT_TWO_LINES], ["a name of two lines of wide letters", WIDE_NAME]]) {
+      const person = ownerBackend(html);
+      if (name) person.projects.find((p) => p.id === IDS.project).name = name;
+      const personName = name || PROJECT.name;
+      let screen = await phoneScreen(`phone ${engineName}: project page, ${what}`, person, `#/project/${IDS.project}`, ".page-head", "", projectReady, { noBack: true });
+      check(`phone ${engineName}: project page, ${what}: the name is whole`, screen.at.h1Text === personName, JSON.stringify(screen.at));
+      if (name) check(`phone ${engineName}: project page, ${what}: it wraps to ${screen.at.h1Lines} lines (two)`, screen.at.h1Lines === 2, JSON.stringify(screen.at));
       await screen.context.close();
-      OWNED_TITLES[OWNED.questions] = "Preguntas para el equipo";
+      const owner = ownerBackend(html);
+      if (name) { owner.ownerView[IDS.ownedProject].project.name = name; owner.projects.find((p) => p.id === IDS.ownedProject).name = name; }
+      screen = await phoneScreen(`phone ${engineName}: owner's project page, ${what}`, owner, `#/project/${IDS.ownedProject}`, ".page-head", "", projectReady, { noBack: true });
+      check(`phone ${engineName}: owner's project page, ${what}: the name is whole`, screen.at.h1Text === (name || PROJECT.owned), JSON.stringify(screen.at));
+      await screen.context.close();
     }
+    // The owner's piece screen keeps «← Volver» (it goes back to the project): a short title, a title of TITLE_MAX characters,
+    // and a send by a person of ~60 characters of name: the band, with its line «Lo que envió … el …», ends at 160 px or less.
+    const LONG_NAME = "María de los Ángeles Fernández de la Vega y Rodríguez Pérez";
+    const savedTitle = OWNED_TITLES[OWNED.questions], savedName = PEOPLE.luis.name;
+    try {
+      for (const [what, title, person] of [["a short title", savedTitle, savedName], [`a title of ${TITLE_MAX} characters`, TITLE_AT_MAX, savedName],
+        [`a sender of ${LONG_NAME.length} characters`, savedTitle, LONG_NAME], [`a title of ${TITLE_MAX} characters and a sender of ${LONG_NAME.length}`, TITLE_AT_MAX, LONG_NAME]]) {
+        // The owner's backend takes the title and the name when it is built.
+        OWNED_TITLES[OWNED.questions] = title;
+        PEOPLE.luis.name = person;
+        const b = ownerViewBackend(html, null, null, {});
+        const tag = `phone ${engineName}: owner's piece with ${what}`;
+        const screen = await phoneScreen(tag, b, ownerHref(IDS.ownedProject, OWNED.questions, PEOPLE.luis), "h1.piece-title, .piece-status", `Volver a ${PROJECT.owned}`,
+          () => document.querySelector("h1.piece-title") && document.querySelector(".piece-status")?.textContent.startsWith("Lo que envió"));
+        const line = await screen.page.evaluate(() => document.querySelector(".piece-status")?.textContent);
+        check(`${tag}: the title is whole (${title.length} characters, never cut) and the line says whose send it is`, screen.at.h1Text === title &&
+          line.startsWith(`Lo que envió ${person} el `) && /\d/.test(line.slice(`Lo que envió ${person} el `.length)), JSON.stringify({ at: screen.at, line }));
+        await screen.context.close();
+      }
+    } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
   }
 
   // The flows' review: its index takes the page to the group.

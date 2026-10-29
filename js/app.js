@@ -75,7 +75,9 @@ function visuallyHiddenStatus() {
 // <div> inside the screen's single <header>).
 function masthead(headerActions = [], tag = "header") {
   return h(tag, { class: "masthead" },
-    h("p", { class: "brand", "data-rol": "marca-producto" }, logo(), h("span", {}, t("brand"))),
+    // The brand is a link home, on every screen (the logo is the way to «Tus proyectos»); on home itself it is the current page.
+    h("a", { class: "brand", "data-rol": "marca-producto", href: "#/", "aria-label": t("brandHome"),
+      "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, logo(), h("span", {}, t("brand"))),
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
 }
 
@@ -98,9 +100,9 @@ function frameLayout({ title, meta = [], headerActions = [], back = null }) {
   const live = visuallyHiddenStatus();
   replaceChildren(root, h("div", { class: "frame" },
     masthead(headerActions),
-    h("main", { id: "main", class: back ? "has-context" : null },
+    h("main", { id: "main", class: back ? (back.fromWide ? "context-wide" : "has-context") : null },
       h("div", { "data-rol": "marco" },
-        back ? h("p", { class: "page-context" }, backLink(back, { short: true })) : null,
+        back ? h("p", { class: back.fromWide ? "page-context page-context--wide" : "page-context" }, backLink(back, { short: true })) : null,
         h("div", { class: "page-head", "data-rol": "cabecera" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
@@ -655,7 +657,7 @@ async function showProject(projectId, viewId) {
   const user = state.session.user;
   const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
   setTitle(t("opening"));
-  let layout = frameLayout({ title: t("opening"), headerActions: [signOutButton()], back: homeBack() });
+  let layout = frameLayout({ title: t("opening"), headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
   layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
 
   let loaded;
@@ -668,7 +670,7 @@ async function showProject(projectId, viewId) {
     if (viewId !== state.viewId) return;
     if (isAuthExpired(error)) return sessionEnded();
     setTitle(t("pieceLoadErrorTitle"));
-    layout = frameLayout({ title: t("pieceLoadErrorTitle"), headerActions: [signOutButton()], back: homeBack() });
+    layout = frameLayout({ title: t("pieceLoadErrorTitle"), headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
     showNotice(layout.notices, { tone: "error", text: t("pieceLoadError"), actions: [{ label: t("retry"), onClick: route }], dismissible: false });
     return;
   }
@@ -677,7 +679,7 @@ async function showProject(projectId, viewId) {
   const project = loaded.project || (owner && owner.project) || null;
   if (!project) {
     setTitle(t("projectNotFoundTitle"));
-    layout = frameLayout({ title: t("projectNotFoundTitle"), headerActions: [signOutButton()], back: homeBack() });
+    layout = frameLayout({ title: t("projectNotFoundTitle"), headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
     showNotice(layout.notices, { tone: "info", text: t("projectNotFound"), dismissible: false });
     return;
   }
@@ -685,7 +687,7 @@ async function showProject(projectId, viewId) {
   setLanguage(project.language || browserLanguage);
   const name = project.name || project.slug || t("untitled");
   setTitle(name);
-  layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
+  layout = frameLayout({ title: name, headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
   unsavedWarning(layout.notices);
   const ownerSection = owner ? ownerPart(projectId, owner) : null;
   if (items.length || !owner) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));

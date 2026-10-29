@@ -55,8 +55,9 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    of two lines ends the band at 160 px or less of a 640 px screen; the factory's publisher keeps titles to that); and
    the save line goes on the title's last line when it fits, or right below it, in small text. On the owner's screen
    the line «Lo que envió … el …» goes in the row of «← Volver», on its right, so a title of 60 characters still ends
-   the band at 150 px. The project's page does the same below 672 px: «← Volver» (named «Volver a tus proyectos») right
-   under the masthead, and the title ends at 151 px. The iframe is as
+   the band at 150 px. The brand in the masthead is a link to home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"`
+   on home itself). Below 672 px the project's page has no «← Volver» (home is one tap on the brand), so a name of
+   two lines ends its title at 141 px. The iframe is as
    tall as the piece (the height the bridge posts; until the first one, what is left of the screen under the frame)
    and the portal's page scrolls, never the piece: nothing of the frame is fixed or sticky, so on a phone it goes up
    with the page. The piece's scroll requests move the portal's page (`followPiece` in `js/app.js`): a position is
