@@ -319,6 +319,8 @@ function bridgeRuntime(cfg) {
   // measures once more when that frame is over. Once: if that measure is held back again, nothing more until a
   // height goes out outside a resize of the frame, so a piece that touches its DOM and grows with its frame on
   // every resize grows one step at most, never in a loop. Without MutationObserver nothing is measured again.
+  // A growth that changes no DOM (a font swap) is measured by the window's load and document.fonts.ready, once each
+  // (see below); if the guard holds that measure back, it is taken again once its frame is over, also once.
   var frameW = window.innerWidth;
   var frameH = window.innerHeight;
   var frameMoved = 0; // +1 / -1: the frame's height alone grew / shrank in this rendering frame
@@ -326,6 +328,7 @@ function bridgeRuntime(cfg) {
   var heldBack = false; // the guard held a measure back in this rendering frame
   var changed = false;  // the piece's DOM changed since the last height posted
   var again = false;    // the last height posted was the second measure after a held-back one
+  var lateHeld = false; // the guard held back the measure of load or fonts.ready in this rendering frame
   window.addEventListener("resize", function () {
     var w = window.innerWidth;
     var h = window.innerHeight;
@@ -336,30 +339,52 @@ function bridgeRuntime(cfg) {
       if (token !== resizes) return;
       frameMoved = 0;
       var held = heldBack;
+      var late = lateHeld;
       heldBack = false;
-      if (held && changed && !again) sendHeight(true);
+      lateHeld = false;
+      if (late || (held && changed && !again)) sendHeight(true);
     }, 0);
   });
 
-  // second: true only for the measure after a held-back one (the observer passes its entries, load its event).
+  // second: true only for the measure after a held-back one (the observer passes its entries). Returns true when
+  // the loop guard held the measure back.
   function sendHeight(second) {
     frameW = window.innerWidth; frameH = window.innerHeight; // the size this measure saw (see the loop guard)
-    if (opening) return; // the first one goes right after factory:ready
+    if (opening) return false; // the first one goes right after factory:ready
     var h = measureHeight();
-    if (h === null || h === lastHeight) return;
-    if (lastHeight !== null && frameMoved && (h - lastHeight) * frameMoved > 0) { heldBack = true; return; } // follows the frame
+    if (h === null || h === lastHeight) return false;
+    if (lastHeight !== null && frameMoved && (h - lastHeight) * frameMoved > 0) { heldBack = true; return true; } // follows the frame
     lastHeight = h;
     changed = false;
     again = second === true;
     post({ type: "factory:height", height: h });
+    return false;
   }
   // The observer reports every change in the rendering frame where it happened, where the loop guard sees it.
-  // Only without one, the window's load (late images and fonts) measures again: once, outside that frame.
   var observed = false;
   if (typeof ResizeObserver === "function" && root) {
     try { new ResizeObserver(function () { sendHeight(); }).observe(root); observed = true; } catch (e) { observed = false; }
   }
-  if (!observed) window.addEventListener("load", sendHeight);
+  // The window's load (late images and fonts) and document.fonts.ready measure once each, with or without the observer:
+  // a growth the observer saw while the guard held it back, and that changed no DOM (the brand's font arriving as the
+  // portal resizes the iframe), is not measured again by anything else. Each fires once, so neither can loop.
+  function measureOnce() {
+    var done = false;
+    return function () {
+      if (done) return;
+      done = true;
+      if (sendHeight()) lateHeld = true;
+    };
+  }
+  window.addEventListener("load", measureOnce());
+  // Taken when the piece has opened, not now: at the top of <head> no font has been asked for yet, so the promise of this
+  // moment is already resolved and would miss the brand's font.
+  function whenFontsReady() {
+    try {
+      var fonts = document.fonts;
+      if (fonts && fonts.ready && typeof fonts.ready.then === "function") fonts.ready.then(measureOnce(), function () {});
+    } catch (e) { /* without document.fonts, load still measures */ }
+  }
   if (observed && typeof MutationObserver === "function") {
     try {
       new MutationObserver(function () { changed = true; })
@@ -489,7 +514,7 @@ function bridgeRuntime(cfg) {
     if (b) askScroll(b.top, b.bottom, true);
   });
 
-  function opened() { opening = false; post({ type: "factory:ready", persistence: persistence }); sendHeight(); }
+  function opened() { opening = false; post({ type: "factory:ready", persistence: persistence }); sendHeight(); whenFontsReady(); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(opened, 0); });
   else opened();
 }

@@ -171,7 +171,8 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   send after the close into a late change request). Old pieces ignore both fields.
 - **Size and scrolling.** The portal sizes the iframe to the piece's height and its own page scrolls,
   so the piece never scrolls inside. Right after `factory:ready`, and on every change after it
-  (a `ResizeObserver` on the piece's `<html>`; without one, the window's `load`), the bridge posts
+  (a `ResizeObserver` on the piece's `<html>`), and once on the window's `load` and once on
+  `document.fonts.ready` (with or without the observer), the bridge posts
   `{ type: "factory:height", height }`: whole px, the height of the piece's `<html>` box (not its
   `scrollHeight`, which never drops below the iframe's own height, so a shorter step could never
   shrink the frame back), never the same value twice in a row, and never 0: in Chrome the frame can
@@ -182,7 +183,10 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   grew again while the portal gave the iframe its last height): when the guard held a measure back
   and the piece's DOM changed since the last height posted (a `MutationObserver` on `<html>`), the
   bridge measures once more when that frame is over, once, so a piece that touches its DOM and
-  grows with its frame on every resize grows one step at most. The portal gives the iframe exactly
+  grows with its frame on every resize grows one step at most. A growth that changes no DOM (the
+  brand's font arriving as the portal resizes the iframe) is what `load` and `fonts.ready` catch: each
+  measures once, and if the guard holds that measure back, it is taken again once that frame is over,
+  also once, so neither can loop. The portal gives the iframe exactly
   that height and nothing else (no minimum of the screen's): the guard counts on it. The piece's scrolling becomes
   `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, in px from the piece's top:
   `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call

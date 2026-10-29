@@ -553,15 +553,78 @@ test("a height of 0 (the frame has no size yet, so no layout) is not posted; the
   assert.deepEqual(heights(of), [520]);
 });
 
-test("without ResizeObserver the window's load posts the height; with it, load does not measure again", () => {
+test("the window's load posts the height once, with or without ResizeObserver", () => {
   const L = layout({ height: 640 });
   const { win, of } = runBridge({}, { ...L.env, window: { ...L.env.window, ResizeObserver: undefined } });
   L.root.height = 1200; win.dispatch("load"); // late images
   assert.deepEqual(heights(of), [640, 1200]);
+  L.root.height = 1300; win.dispatch("load");
+  assert.deepEqual(heights(of), [640, 1200], "once: a second load measures nothing");
   const W = layout({ height: 640 });
   const withObserver = runBridge({}, W.env);
-  W.root.height = 1200; withObserver.win.dispatch("load"); // the observer reports it in its frame, where the loop guard is
-  assert.deepEqual(heights(withObserver.of), [640]);
+  W.root.height = 1200; withObserver.win.dispatch("load"); // a growth the observer did not report (held back, or no callback)
+  assert.deepEqual(heights(withObserver.of), [640, 1200]);
+  W.root.height = 1300; withObserver.win.dispatch("load");
+  assert.deepEqual(heights(withObserver.of), [640, 1200], "once: a second load measures nothing");
+});
+
+// document.fonts.ready, resolved by the test.
+function fontsReady() {
+  let resolve;
+  const ready = new Promise((r) => { resolve = r; });
+  return { fonts: { ready }, resolve: () => { resolve(); return tick(); } };
+}
+
+test("document.fonts.ready measures once: a font swap that changed no DOM, held back in the frame of a resize, goes out", async () => {
+  const F = fontsReady();
+  const L = layout({ height: 1000, innerHeight: 462 });
+  const { win, of } = runBridge({}, { ...L.env, document: { ...L.env.document, fonts: F.fonts } });
+  // The portal gives the iframe its 1000 px and, in that frame, Inter arrives and the text grows 40 px (no DOM change).
+  win.innerHeight = 1000; win.dispatch("resize");
+  L.root.height = 1040; L.resized();
+  await tick();
+  assert.deepEqual(heights(of), [1000], "held back, and the DOM did not change: not measured again");
+  await F.resolve();
+  assert.deepEqual(heights(of), [1000, 1040], "fonts.ready measures it");
+  L.root.height = 1060; await F.resolve();
+  assert.deepEqual(heights(of), [1000, 1040], "once");
+});
+
+test("document.fonts.ready is taken once the piece has opened, not at the top of <head>", async () => {
+  const F = fontsReady();
+  let reads = 0;
+  const fonts = { get ready() { reads += 1; return F.fonts.ready; } };
+  const L = layout({ height: 640 });
+  const { of, parsed } = runBridge({ readyState: "loading" }, { ...L.env, document: { ...L.env.document, fonts } });
+  assert.equal(reads, 0, "not while the piece opens: no font has been asked for yet");
+  parsed();
+  await tick();
+  assert.ok(reads > 0, "taken when the piece has opened");
+  L.root.height = 700; await F.resolve();
+  assert.deepEqual(heights(of), [640, 700]);
+});
+
+test("a measure of load or fonts.ready held back by the guard is taken again once that frame is over, and only once", async () => {
+  const F = fontsReady();
+  const L = layout({ height: 1000, innerHeight: 462 });
+  const { win, of } = runBridge({}, { ...L.env, document: { ...L.env.document, fonts: F.fonts } });
+  // fonts.ready resolves inside the frame of the iframe's resize (before its timer): held back, then measured again.
+  win.innerHeight = 1000; win.dispatch("resize");
+  L.root.height = 1040;
+  F.resolve();
+  await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(heights(of), [1000], "held back in that frame");
+  await tick(); await tick();
+  assert.deepEqual(heights(of), [1000, 1040], "measured again after the frame");
+  // The same with load; and a piece that grows with its frame is held back again after that second measure: no loop.
+  win.innerHeight = 1040; win.dispatch("resize");
+  L.root.height = 1080; win.dispatch("load");
+  await tick();
+  assert.deepEqual(heights(of), [1000, 1040, 1080]);
+  win.innerHeight = 1080; win.dispatch("resize");
+  L.root.height = 1120; L.resized();
+  await tick();
+  assert.deepEqual(heights(of), [1000, 1040, 1080], "a growth that follows the frame right after a second measure: not posted");
 });
 
 test("a growth that only follows the iframe's own growth is not posted (no feedback loop)", async () => {
