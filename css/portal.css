@@ -278,6 +278,9 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
   .owner-answers .owner-answer-value { grid-area: 1 / 3; }
   .owner-answers .owner-answer .row-meta { grid-area: 1 / 2; }
   .owner-answers .owner-answer :is(.owner-answer-comment, .owner-history) { grid-column: 2; }
+  /* A proposal is not a row of the table: its author and date, then its text, both on the row's start as below 1056 (the
+     lists' rule above would send the author line to a column of its own). */
+  .owner-proposals .owner-proposal .row-meta { grid-area: auto; }
   /* The «Decisiones» section takes the page's column as the pieces' list does: each point's three parts side by side in the
      same three equal columns, its title (and its mark under it) · what was decided, with the fold «En qué se apoya» and when
      she answered under it · the answer, which starts where the pieces' states do: the part spans its column (MAR-12) and

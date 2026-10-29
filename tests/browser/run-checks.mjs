@@ -4576,6 +4576,23 @@ async function ownerDecisionsChecks(browser, base, html) {
     await context.close();
   }
 
+  // owner-decisions-proposals-aligned: «Lo que propusieron agregar» has one anatomy at every width: each proposal's author and
+  // date line on the row's start, and its text under it on the same x, down the list.
+  for (const width of [320, 1056, 1440]) {
+    const backend = ownerDecisionsBackend(html);
+    const { context, page } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`, width);
+    await waitFor(async () => { const s = await ownerDecisionsSummary(page); return s && s.proposals.length ? s : null; }, 10000);
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".owner-proposal")].map((li) => {
+      const left = (el) => { if (!el) return null; const r = document.createRange(); r.selectNodeContents(el);
+        const xs = [...r.getClientRects()].filter((x) => x.width > 0).map((x) => x.left); return xs.length ? Math.round(Math.min(...xs)) : null; };
+      return { row: Math.round(li.getBoundingClientRect().left), by: left(li.querySelector(".row-meta")), text: left(li.querySelector(".owner-proposal-text")) };
+    }));
+    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+    check(`owner-decisions-proposals-aligned ${width}px: every author line and every proposal start on the row's start, one x down the list`,
+      rows.length === 2 && rows.every((r) => near(r.by, r.row) && near(r.text, r.row) && near(r.by, rows[0].by)), JSON.stringify(rows));
+    await context.close();
+  }
+
   // owner-decisions-hierarchy: squinting, the point's title stands out: no other text of the screen (the section's heading,
   // a name, an answer) has the h1's size and weight, at a phone's width (where the h1 is 16 px) and at a wide one. Links are
   // apart: «← Volver» keeps the frame's link type on every screen, set off by the link colour.
