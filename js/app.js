@@ -98,16 +98,17 @@ const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backT
 // One frame for every screen: masthead, then inside <main> the title band, the notice zone and
 // the body. The frame's box is the .frame (the masthead's too); inside <main>, its data-rol="marco" holds
 // the title band, the notices and the body, as the visual manual's anatomy puts them (marco.md). `back`
-// ({ href, text, label }) puts the way back first, as the manual's optional «contexto» zone, without a data-rol.
+// ({ href, text, label }) puts the way back first, as the manual's optional «contexto» zone, without a data-rol; only from
+// 672 px: the screens that have it (a project's page) go back home, which the brand links to on a phone (portal.css).
 function frameLayout({ title, meta = [], headerActions = [], back = null }) {
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const body = h("div", { class: "body", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
   replaceChildren(root, h("div", { class: "frame" },
     masthead(headerActions),
-    h("main", { id: "main", class: back ? (back.fromWide ? "context-wide" : "has-context") : null },
+    h("main", { id: "main", class: back ? "context-wide" : null },
       h("div", { "data-rol": "marco" },
-        back ? h("p", { class: back.fromWide ? "page-context page-context--wide" : "page-context" }, backLink(back, { short: true })) : null,
+        back ? h("p", { class: "page-context page-context--wide" }, backLink(back, { short: true })) : null,
         h("div", { class: "page-head", "data-rol": "cabecera" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
@@ -662,7 +663,7 @@ async function showProject(projectId, viewId) {
   const user = state.session.user;
   const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
   setTitle(t("opening"));
-  let layout = frameLayout({ title: t("opening"), headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
+  let layout = frameLayout({ title: t("opening"), headerActions: [signOutButton()], back: homeBack() });
   layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
 
   let loaded;
@@ -675,7 +676,7 @@ async function showProject(projectId, viewId) {
     if (viewId !== state.viewId) return;
     if (isAuthExpired(error)) return sessionEnded();
     setTitle(t("pieceLoadErrorTitle"));
-    layout = frameLayout({ title: t("pieceLoadErrorTitle"), headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
+    layout = frameLayout({ title: t("pieceLoadErrorTitle"), headerActions: [signOutButton()], back: homeBack() });
     showNotice(layout.notices, { tone: "error", text: t("pieceLoadError"), actions: [{ label: t("retry"), onClick: route }], dismissible: false });
     return;
   }
@@ -684,7 +685,7 @@ async function showProject(projectId, viewId) {
   const project = loaded.project || (owner && owner.project) || null;
   if (!project) {
     setTitle(t("projectNotFoundTitle"));
-    layout = frameLayout({ title: t("projectNotFoundTitle"), headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
+    layout = frameLayout({ title: t("projectNotFoundTitle"), headerActions: [signOutButton()], back: homeBack() });
     showNotice(layout.notices, { tone: "info", text: t("projectNotFound"), dismissible: false });
     return;
   }
@@ -692,7 +693,7 @@ async function showProject(projectId, viewId) {
   setLanguage(project.language || browserLanguage);
   const name = project.name || project.slug || t("untitled");
   setTitle(name);
-  layout = frameLayout({ title: name, headerActions: [signOutButton()], back: { ...homeBack(), fromWide: true } });
+  layout = frameLayout({ title: name, headerActions: [signOutButton()], back: homeBack() });
   unsavedWarning(layout.notices);
   const ownerSection = owner ? ownerPart(projectId, owner) : null;
   if (items.length || !owner) layout.body.append(h("p", { class: "page-note" }, t("projectOwnerSees")));
@@ -727,9 +728,9 @@ function saverFor(pieceId) {
 
 // The frame of the piece screen: the same masthead as every screen, then the way back (to the piece's project, or home
 // until it is known) and the title band on the same left edge, the notices, and the piece below (it drops its own brand
-// bar in the portal). sentLine: the owner's screen, whose permanent line «Lo que envió … el …» goes beside «Volver» on a
-// phone (portal.css), so the title band stays short with a title of two lines.
-function pieceLayout(titleText, back = homeBack(), { sentLine = false } = {}) {
+// bar in the portal). The line next to the title (whether the draft was saved; on the owner's screen «Lo que envió … el …»)
+// goes beside «Volver» on a phone (portal.css), so the title band stays short with a title of two lines.
+function pieceLayout(titleText, back = homeBack()) {
   // A notice that stays for the whole visit (a replaced version); the zone below takes the passing ones.
   const pinned = h("div", { class: "notices", "data-rol": "aviso-fijo" });
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
@@ -738,7 +739,7 @@ function pieceLayout(titleText, back = homeBack(), { sentLine = false } = {}) {
   const main = h("main", { id: "main", class: "piece-main", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
   main.append(live);
-  replaceChildren(root, h("div", { class: sentLine ? "piece-layout piece-layout--sent" : "piece-layout" },
+  replaceChildren(root, h("div", { class: "piece-layout" },
     h("div", { class: "frame", "data-rol": "marco" },
       h("header", {},
         masthead([], "div"),
@@ -1125,7 +1126,7 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
   const projectName = project && (project.name || project.slug);
   layout = pieceLayout(pieceTitle, projectName
     ? { href: projectHref(projectId), text: projectName, label: t("backTo", { name: projectName }) }
-    : homeBack(), { sentLine: true });
+    : homeBack());
   const date = formatDate(state.lang, response.submitted_at);
   layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
   const follow = followPiece(() => (frame ? frame.iframe : null));

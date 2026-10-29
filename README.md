@@ -49,13 +49,18 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
    normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
    screen, then the way back to the piece's project («← <project name>»; «← Tus proyectos» when its name cannot be
-   read) and the piece's title with its save line («Guardando…», «Guardado»), all on the brand's left edge. On a
+   read) and the piece's title with its save line («Guardando…», «Guardado»), the way back and the title on the brand's
+   left edge. On a
    phone (below 672 px) the frame takes the least it can, with nothing cut (the manual's MAR-14): the way back reads
    «← Volver», one line, and its accessible name says where («Volver a <project>»); the title is never cut (a title
    of two lines ends the band at 160 px or less of a 640 px screen; the factory's publisher keeps titles to that); and
-   the save line goes on the title's last line when it fits, or right below it, in small text. On the owner's screen
-   the line «Lo que envió … el …» goes in the row of «← Volver», on its right, so a title of 60 characters still ends
-   the band at 150 px. The brand in the masthead is a link to home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"`
+   the line next to the title, the save line («Guardando…», «Guardado») or on the owner's screen «Lo que envió … el …»,
+   goes in the row of «← Volver», on its right and set to the row's end, in small text, so it never takes a row of its
+   own under the title: with a title of 60 characters the band ends at 151 px at rest and with «Guardado» showing (on the
+   owner's screen too, 155 px with a sender's name of 59 characters, which wraps in that row); a failed save
+   wraps in that row as well: without connection («Sin guardar: no hay conexión. …», two lines) the title still ends at
+   151 px; the longest, a change too long to keep (four lines), pushes it to 171 px while it shows. From 672 px the line goes under the
+   title. The brand in the masthead is a link to home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"`
    on home itself). Below 672 px the project's page has no «← Volver» (home is one tap on the brand), so a name of
    two lines ends its title at 141 px. The iframe is as
    tall as the piece (the height the bridge posts; until the first one, what is left of the screen under the frame)
@@ -63,8 +68,10 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    with the page. The piece's scroll requests move the portal's page (`followPiece` in `js/app.js`): a position is
    kept inside the piece's last height, a request with `ifNeeded` scrolls only if its stretch is out of the window
    (the visual viewport, which a phone's keyboard shortens), and the page scrolls at once, so a step's
-   `scrollTo(0, 0)` and its title's focus right after it move the page once. A failed save is said where it was:
-   the save line and the notices, announced to screen readers; nothing floats or stays fixed for it. The
+   `scrollTo(0, 0)` and its title's focus right after it move the page once. A failed save is said on the save line
+   («Sin guardar: …», in the row of «← Volver» on a phone, where it may wrap; under the title from 672 px) and
+   announced to screen readers by the screen's status region; it is not a notice, and nothing floats or stays fixed
+   for it. The
    iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it), and the factory's pieces, inside the portal, start their content at the frame's
    margin (16 px, 24 px from 672 px), on the brand's edge, keeping their reading measure. The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
@@ -398,13 +405,16 @@ banner inside the piece; a piece opened and left alone says nothing about saving
 and «Enviada el …» only for a send the saved draft cannot show. Each piece opened on its own still
 shows its bar. Below 672 px the review captures are 320 × 640 (`host-<piece>-w320-light.png` included). The
 piece screen on a phone (MAR-14, `phoneFrameChecks`), at 320 × 640 with a project of a long name, in Chromium and
-also in WebKit when playwright-core has its build installed (otherwise a `NOTE` line says it did not run): at rest
+also in WebKit when playwright-core has its build installed (otherwise a `NOTE` line says it did not run; Playwright's
+WebKit emulates the screen of the top page only, so there the piece's iframe is given the phone's screen too): at rest
 the title band ends at 160 px or less, with a title of `TITLE_MAX` characters too; «← Volver» is one line named
 «Volver a <project>»; the iframe is as tall as the piece, which does not scroll inside, and the page is taller than
 the screen; one screen down nothing fixed or sticky is on screen; the project's page, the owner's project page and the
 owner's piece screen (with a title of `TITLE_MAX` characters too) end their band at 160 px or less, with «← Volver»
-in one line named after where it goes; «Guardado» on the title's last line or right below
-it; at the bottom of a step «Siguiente» shows the new step's title, and a link of the flows' index its group; the
+in one line named after where it goes; «Guardado» and a failed save («Sin guardar: …», announced by the status region)
+in the row of «← Volver», on its right and above the title, with the h1 ending at 160 px or less with either showing and the
+whole band with «Guardado» too (a title of `TITLE_MAX` characters); a scroll request below the piece's last height is
+done when the new height arrives; a short piece's box ends at the screen's bottom with nothing to scroll; at the bottom of a step «Siguiente» shows the new step's title, and a link of the flows' index its group; the
 step's last field, focused, is in the window; an opened `<details>` grows the iframe; and a piece that grows again
 in the same rendering frame as the portal's resize of its iframe ends as tall as the iframe, with the resize event
 before the ResizeObserver there. Screenshots in `<out>`: `piece-view-<width>-<scheme>.png` (questions),

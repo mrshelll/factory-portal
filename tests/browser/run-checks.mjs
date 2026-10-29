@@ -530,8 +530,17 @@ function tokenSubject(request) {
   try { return match ? JSON.parse(Buffer.from(match[2], "base64url").toString("utf8")).sub || null : null; } catch { return null; }
 }
 
-async function mockedContext(browser, { width = 360, height = 780, locale = "en-US", backend }) {
+// frameScreen: { width, height } the piece's iframe reads as its screen. Playwright's WebKit emulates the screen of the top
+// page only (inside an iframe, window.screen is the computer's: 1440 high), and on a phone an iframe's screen is the phone's,
+// so the phone checks in WebKit give the iframes the viewport's.
+async function mockedContext(browser, { width = 360, height = 780, locale = "en-US", backend, frameScreen = null }) {
   const context = await browser.newContext({ viewport: { width, height }, locale });
+  if (frameScreen) await context.addInitScript((size) => {
+    if (window.top === window) return;
+    for (const [name, value] of [["width", size.width], ["availWidth", size.width], ["height", size.height], ["availHeight", size.height]]) {
+      Object.defineProperty(Screen.prototype, name, { configurable: true, get: () => value });
+    }
+  }, frameScreen);
   await context.addInitScript(([key, value]) => {
     if (window.top !== window) return; // never touch the sandboxed piece
     try { if (!localStorage.getItem(key)) localStorage.setItem(key, value); } catch { /* ignore */ }
@@ -1298,12 +1307,13 @@ addEventListener("resize", () => {
 </script></body></html>`;
 
 async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
+  const frameScreen = engineName === "webkit" ? { width: PHONE.width, height: PHONE.height } : null;
   const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
   async function openPhone(pieceId, ready, setup = () => {}) {
     const backend = newBackend(html, flowHtml);
     backend.projects[0].name = LONG_PROJECT;
     setup(backend);
-    const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO" });
+    const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO", frameScreen });
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -1332,7 +1342,9 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     const top = Math.round(box.top + offset), bottom = Math.round(box.bottom + offset);
     return { selector, top, bottom, vh, inside: top >= 0 && bottom <= vh };
   };
-  // The frame at rest: the title band's bottom, the title's, and «Volver» (its lines, its text and its name).
+  // The frame at rest: the title band's bottom (what its items reach: «Volver», the title and the line next to it when it
+  // shows; on a phone the heading gives its box up to the bar's grid, so its own box is not the band), the title's, and
+  // «Volver» (its lines, its text and its name).
   const restOf = (page) => page.evaluate(() => {
     window.scrollTo(0, 0);
     const bottom = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().bottom) : null; };
@@ -1340,7 +1352,10 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     const range = document.createRange();
     if (back) range.selectNodeContents(back);
     const rects = back ? [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0) : [];
-    return { heading: bottom(".piece-heading"), title: bottom("h1.piece-title"), titleText: document.querySelector("h1.piece-title")?.textContent,
+    const status = document.querySelector(".piece-status");
+    const band = [back, document.querySelector("h1.piece-title"), status && !status.hidden ? status : null].filter(Boolean)
+      .map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => Math.round(r.bottom));
+    return { heading: band.length ? Math.max(...band) : null, title: bottom("h1.piece-title"), titleText: document.querySelector("h1.piece-title")?.textContent,
       back: back && { lines: rects.length && rects.every((r) => Math.abs(r.top - rects[0].top) < r.height / 2) ? 1 : rects.length,
         text: back.innerText.trim(), label: back.getAttribute("aria-label") } };
   });
@@ -1364,25 +1379,31 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     check(`${tag}: «← Volver» is one line and its name is «Volver a ${name.length > 30 ? name.slice(0, 30) + "…" : name}»`,
       at.back && at.back.lines === 1 && at.back.text.replace(/\s+/g, " ") === "← Volver" && at.back.label === `Volver a ${name}` && named === 1, JSON.stringify({ ...at.back, named }));
   };
-  // The first change makes the portal say «Guardado»: on the title's last line when it fits (inside that line, after its
-  // text), or right below it on the title's left edge (the brand's).
+  // The line next to the title on a phone: in the row of «← Volver», on its right and ending on the bar's right edge (the
+  // title's box), above the title; the title's bottom and the whole band's, with the line showing. text: what it must say.
+  const lineOf = (page, text) => page.evaluate((text) => {
+    window.scrollTo(0, 0);
+    const s = document.querySelector(".piece-status"), t = document.querySelector("h1.piece-title"), back = document.querySelector(".back-link");
+    if (!s || s.hidden || !s.textContent.includes(text) || !t || !back) return null;
+    // The words' right edge, not the box's: the line is set to the row's end.
+    const range = document.createRange(); range.selectNodeContents(s);
+    const words = [...range.getClientRects()].filter((r) => r.width > 0);
+    const box = s.getBoundingClientRect(), title = t.getBoundingClientRect(), b = back.getBoundingClientRect();
+    const round = (r) => ({ top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) });
+    return { status: round(box), wordsRight: Math.round(Math.max(...words.map((r) => r.right))), lines: new Set(words.map((r) => Math.round(r.top))).size,
+      back: round(b), title: round(title), band: Math.round(Math.max(box.bottom, title.bottom, b.bottom)), text: s.textContent };
+  }, text);
+  const inBackRow = (m) => Boolean(m) && m.status.left >= m.back.right && Math.abs(m.wordsRight - m.title.right) <= 1 &&
+    m.status.top >= m.back.top - 2 && m.status.bottom <= m.title.top + 1 &&
+    Math.abs((m.status.top + m.status.bottom) / 2 - (m.back.top + m.back.bottom) / 2) <= 2;
+  // The first change makes the portal say «Guardado»: in the row of «← Volver», on its right, so it never takes a line of its
+  // own under the title, and the band (the title included) still ends at PHONE_FRAME_MAX px or less.
   const savedLine = async (tag, page, frame) => {
     if (frame) await frame.evaluate(() => responder("q-001", "si"));
-    const saved = await waitFor(() => page.evaluate(() => {
-      window.scrollTo(0, 0);
-      const s = document.querySelector(".piece-status"), t = document.querySelector("h1.piece-title");
-      if (!s || s.hidden || !s.textContent.includes("Guardado")) return null;
-      const range = document.createRange(); range.selectNodeContents(t);
-      const lines = [...range.getClientRects()].filter((r) => r.width > 0);
-      const last = lines[lines.length - 1], box = s.getBoundingClientRect();
-      return { status: { top: Math.round(box.top), bottom: Math.round(box.bottom), left: Math.round(box.left) }, titleLeft: Math.round(lines[0].left),
-        lastLine: { top: Math.round(last.top), bottom: Math.round(last.bottom), right: Math.round(last.right) } };
-    }), 5000);
-    const sameLine = saved && saved.status.top < saved.lastLine.bottom;
-    check(`${tag}: «Guardado» goes on the title's last line when it fits, or right below it on the title's edge`, saved && (sameLine
-      ? saved.status.top >= saved.lastLine.top - 2 && saved.status.bottom <= saved.lastLine.bottom + 2 && saved.status.left >= saved.lastLine.right
-      : Math.abs(saved.status.left - saved.titleLeft) <= 1 && saved.status.top >= saved.lastLine.bottom - 1 && saved.status.top <= saved.lastLine.bottom + 8),
-      JSON.stringify({ ...saved, sameLine }));
+    const saved = await waitFor(() => lineOf(page, "Guardado"), 5000);
+    check(`${tag}: «Guardado» goes in the row of «← Volver», on its right and set to the row's end, above the title`, inBackRow(saved), JSON.stringify(saved));
+    check(`${tag}: with «Guardado» showing, the h1 and the whole title band end at ${PHONE_FRAME_MAX} px or less`,
+      saved && saved.title.bottom <= PHONE_FRAME_MAX && saved.band <= PHONE_FRAME_MAX, JSON.stringify(saved));
     return saved;
   };
   const fitCheck = async (tag, what, page, frame) => {
@@ -1451,18 +1472,68 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
   // A title of TITLE_MAX characters still ends the title band at 160 px or less.
   {
     const tag = `phone ${engineName}: a title of ${TITLE_MAX} characters`;
-    const { context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = TITLE_AT_MAX; });
+    const { backend, context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = TITLE_AT_MAX; });
     await rest(tag, page, { title: TITLE_AT_MAX });
     await savedLine(tag, page, frame);
+    // The save fails (no connection): its line wraps inside the row of «← Volver», the h1 still ends at PHONE_FRAME_MAX px
+    // or less, and the live region still says it.
+    backend.saveFails = true;
+    if (frame) await frame.evaluate(() => responder("q-001", "no_se"));
+    const failed = await waitFor(() => lineOf(page, "Sin guardar"), 8000);
+    check(`${tag}: a failed save says so in the row of «← Volver», on its right, above the title`, inBackRow(failed) && failed.text === SAVE_ERROR_ES,
+      JSON.stringify(failed));
+    check(`${tag}: with the failed save showing, the h1 ends at ${PHONE_FRAME_MAX} px or less`, failed && failed.title.bottom <= PHONE_FRAME_MAX, JSON.stringify(failed));
+    const live = await page.textContent("#main > [role=status]");
+    check(`${tag}: the live region announces the failed save`, live === SAVE_ERROR_ES, live);
     await context.close();
   }
 
-  // A short title: «Guardado» fits after it, on its line.
+  // A scroll request past the piece's last height (the piece grew and asked to go into what it added before its new height
+  // went out) is done once that height arrives: the page ends where the piece asked, not clamped to the old bottom.
+  {
+    const tag = `phone ${engineName}: a scroll request below the piece's last height`;
+    const { context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function");
+    const asked = frame && await frame.evaluate(() => {
+      const before = Math.ceil(document.documentElement.getBoundingClientRect().height);
+      const more = document.createElement("div");
+      more.style.height = "2000px";
+      document.body.append(more);
+      window.scrollTo(0, before + 1000); // posted at once; the new height follows in the next rendering frame
+      return before;
+    }).catch(() => null);
+    const pend = asked && await waitFor(() => page.evaluate((top) => {
+      const f = document.querySelector("iframe.piece-frame");
+      const start = Math.round(f.getBoundingClientRect().top + window.scrollY);
+      const y = Math.round(window.scrollY);
+      return Math.abs(y - (start + top)) <= 2 ? { y, start, top } : null;
+    }, asked + 1000), 3000);
+    const where = await page.evaluate(() => ({ y: Math.round(window.scrollY),
+      start: Math.round(document.querySelector("iframe.piece-frame").getBoundingClientRect().top + window.scrollY),
+      frame: Math.round(document.querySelector("iframe.piece-frame").getBoundingClientRect().height) }));
+    check(`${tag}: is done when the new height arrives (the page at the piece's ${asked} + 1000 px)`, Boolean(pend), JSON.stringify({ asked, ...where }));
+    await context.close();
+  }
+
+  // A short piece: its box fills the screen under the frame (the container's own fill, with no floor of its own), and the
+  // page does not scroll.
+  {
+    const tag = `phone ${engineName}: a short piece`;
+    const short = '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Corta</title></head><body><main><p>Una línea.</p></main></body></html>';
+    const { context, page, frame } = await openPhone(IDS.questions, () => document.readyState === "complete", (b) => { b.html[IDS.questions] = short; });
+    const m = frame && await fitCheck(tag, "open", page, frame);
+    const box = await page.evaluate(() => ({ main: Math.round(document.querySelector(".piece-main").getBoundingClientRect().bottom),
+      frame: Math.round(document.querySelector("iframe.piece-frame").getBoundingClientRect().bottom),
+      vh: window.innerHeight, scroll: document.documentElement.scrollHeight }));
+    check(`${tag}: the piece's box ends at the screen's bottom and the page does not scroll`, Boolean(m) && Math.abs(box.main - box.vh) <= 1 &&
+      box.scroll <= box.vh + 1 && box.frame < box.vh, JSON.stringify(box));
+    await context.close();
+  }
+
+  // A short title: «Guardado» still goes in the row of «← Volver» (one place for it, whatever the title).
   {
     const tag = `phone ${engineName}: a short title`;
     const { context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = "Preguntas del proyecto"; });
-    const saved = await savedLine(tag, page, frame);
-    check(`${tag}: «Guardado» fits on the title's line, and goes there`, saved && saved.status.top < saved.lastLine.bottom, JSON.stringify(saved));
+    await savedLine(tag, page, frame);
     await context.close();
   }
 
@@ -1487,7 +1558,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     }, headSelector);
     // noBack: the project's page has no «volver» on a phone (its destination is home, which the brand links to).
     const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false } = {}) => {
-      const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO" });
+      const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO", frameScreen });
       const page = await context.newPage();
       await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
       await waitFor(() => page.evaluate(ready).catch(() => false), 10000);
@@ -1645,6 +1716,7 @@ async function sentLineChecks(browser, base, html) {
 
 // A change too long for the piece's storage (the real quota): the status line says it was not saved,
 // a save of the draft from before the refusal does not bring back «Guardado», and a shorter text does.
+const SAVE_ERROR_ES = "Sin guardar: no hay conexión. Lo intentamos de nuevo solos.";
 const TOO_LARGE_ES = "Sin guardar: lo que escribiste es demasiado largo para guardarlo. Acorta tu último texto o descarga una copia.";
 async function tooLargeAppChecks(browser, base, html) {
   const backend = newBackend(html);
