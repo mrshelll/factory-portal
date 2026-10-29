@@ -3945,9 +3945,11 @@ async function decisionsChecks(browser, base, html) {
   }
 
   // decisions-va-optional-comment and decisions-sign-out-unsent: with «Va» the comment is optional (spec §4.2): written and not
-  // sent, «Salir» asks; sent, it goes with the answer (and «Va» with none sends none).
+  // sent, «Salir» asks; sent, it goes with the answer (and «Va» with none sends none); and a form opened again with «Cambiar
+  // respuesta» and edited makes «Salir» ask too.
   {
     const backend = decisionsBackend(html);
+    backend.decisions[IDS.project].answers.find((a) => a.key === DKEY.c).comment = "Bien así.";
     const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
     await sectionShown(page);
     const asked = () => waitFor(async () => page.evaluate((text) => {
@@ -3968,6 +3970,15 @@ async function decisionsChecks(browser, base, html) {
     const sent = decisionCalls(backend, "answer_decision").at(-1);
     check("decisions-va-optional-comment: «Va» with a comment written sends it with the answer", sent && sent.p_key === DKEY.d && sent.p_value === "yes" &&
       sent.p_comment === "Bien, siempre que haya web después.", JSON.stringify(sent));
+    // c, answered «Va» with «Bien así.»: opened again with «Cambiar respuesta», its comment edited: asks.
+    const c = page.locator(`.decision[data-key="${DKEY.c}"]`);
+    await c.locator(".decision-change").click({ timeout: 3000 }).catch(() => {});
+    const reopened = await c.locator("textarea").inputValue().catch(() => null);
+    await c.locator("textarea").fill("Bien así, pero por mes.", { timeout: 3000 }).catch(() => {});
+    await signOut();
+    check("decisions-sign-out-unsent: a form opened again with «Cambiar respuesta» and edited makes «Salir» ask", reopened === "Bien así." && Boolean(await asked()),
+      JSON.stringify({ reopened }));
+    await stay();
     check("decisions-va-optional-comment: no page errors", errors.length === 0, errors.join(" | "));
     await context.close();
   }
