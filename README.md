@@ -36,6 +36,8 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    Length" in the Supabase dashboard (this project uses 8). The session
    persists and refreshes on its own (supabase-js defaults). Supabase allows one email per 60 s; the
    code screen shows the countdown and survives a reload (the pending email is kept for one hour).
+   Signing in with the same Gmail address that sends the portal's emails (the custom SMTP user, below): Gmail files the
+   code only under «Enviados» (Sent), never in the inbox, so look there.
 2. **Home** («Tus proyectos»): the projects the person belongs to, one row each, with what is left to
    answer; a project the person owns says so (with its people and the last response).
    The lists never fetch `pieces.html`; it is fetched only when a piece is opened.
@@ -325,7 +327,8 @@ Steps in the Supabase panel (the owner does them; the app password is typed in t
    Supabase sends it with the "Magic link" template to an existing address and with "Confirm sign up" to a new one: paste the
    subject from `otp-code.subject.txt` and the body from `otp-code.html` into both.
 6. Test: ask for a code from the portal with an address that is not Gmail's own and check the email arrives (and not in Junk),
-   with the code first.
+   with the code first. Signing in with that Gmail address itself works too, but Gmail files a message it sent to itself
+   only under «Enviados» (Sent), not in the inbox: the code is there.
 
 ## Database migrations
 
