@@ -832,7 +832,7 @@ async function showProject(projectId, viewId) {
       h("ul", { class: "rows" }, sorted.map(pieceRow))));
   }
   if (points.length) {
-    layout.body.append(decisionsSection({ projectId, viewId, points, live: layout.live }));
+    layout.body.append(decisionsSection({ projectId, viewId, points, proposals: decisions.proposals, live: layout.live }));
     // «Abrió la sección», once per visit, after the section was read (the marks «Nuevo» count from the previous opening).
     // Not awaited, and it never throws: the section works whatever happens to that call.
     markDecisionsOpened(supabase, projectId);
@@ -894,7 +894,7 @@ function basisFold(basis) {
 // point the server refused because it changed while she read it (PT409) shows as changed for the rest of the visit, until
 // she answers it again. A point whose answer is on its way stays sending through a reload (sending), and what comes back
 // is said on the point as it is shown then (shown): the one sent, or the one a reload put in its place.
-function decisionsSection({ projectId, viewId, points, live }) {
+function decisionsSection({ projectId, viewId, points, proposals = [], live }) {
   const drafts = new Map(); // point key -> { value, comment }
   const stale = new Set();  // point keys refused as changed on this visit
   const sending = new Set(); // point keys whose answer is on its way
@@ -919,6 +919,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
     if (viewId !== state.viewId) return true;
     if (!next || !next.points.length) { route(); return true; }
     render(next.points);
+    showProposed(next.proposals);
     if (focusKey) {
       const title = [...list.querySelectorAll(".decision")].find((el) => el.dataset.key === focusKey)?.querySelector(".decision-title");
       if (title) title.focus();
@@ -1113,8 +1114,33 @@ function decisionsSection({ projectId, viewId, points, live }) {
     return item;
   }
 
-  // «¿Falta algo?»: what the person would add and is in no point. Always at the end of the section. Sent, the form empties
-  // and says it arrived (COM-16); it stays for another one.
+  // «Lo que propusiste»: what she already proposed here, oldest first, each with its date, its text as text (never markup).
+  // Nothing when she has proposed nothing. When she comes back she finds it (FOR-09), as an answered point says what she said.
+  const proposedList = h("ul", { class: "rows decisions-proposed-list" });
+  const proposed = h("div", { class: "decisions-proposed", hidden: true },
+    h("h4", { class: "decisions-proposed-title" }, t("proposedTitle")), proposedList);
+  function showProposed(rows) {
+    const mine = (Array.isArray(rows) ? rows : []).filter((x) => x && typeof x.text === "string");
+    replaceChildren(proposedList, mine.map((x) => h("li", { class: "row decisions-proposed-item" },
+      h("p", { class: "row-meta" }, t("proposedOn", { date: formatDate(state.lang, x.created_at) })),
+      h("p", { class: "decisions-proposed-text" }, x.text))));
+    proposed.hidden = mine.length === 0;
+  }
+  // After a send: the section's proposals read again, so the new one shows as the server keeps it. If that read fails, the
+  // one just sent is added as she wrote it (the server took it).
+  async function readProposalsAgain(sentText) {
+    let next = null;
+    try { next = await loadMyDecisions(supabase, projectId); } catch { next = null; }
+    if (viewId !== state.viewId) return;
+    if (next) { showProposed(next.proposals); return; }
+    proposedList.append(h("li", { class: "row decisions-proposed-item" },
+      h("p", { class: "row-meta" }, t("proposedOn", { date: formatDate(state.lang, new Date().toISOString()) })),
+      h("p", { class: "decisions-proposed-text" }, sentText)));
+    proposed.hidden = false;
+  }
+
+  // «¿Falta algo?»: what the person would add and is in no point. Always at the end of the section, with what she already
+  // proposed above its form. Sent, the form empties and says it arrived (COM-16); it stays for another one.
   function proposeForm() {
     const input = h("textarea", { id: "decisions-propose-text", name: "proposal", rows: "4", maxlength: String(DECISION_TEXT_MAX),
       "aria-describedby": "decisions-propose-error" });
@@ -1147,6 +1173,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
         sent.hidden = false;
         live.textContent = t("proposeSent");
         if (!document.activeElement || document.activeElement === document.body) button.focus();
+        await readProposalsAgain(text);
         return;
       }
       if (result.error === "denied") { route(); return; }
@@ -1157,6 +1184,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
     return h("div", { class: "decisions-propose" },
       h("div", { class: "decisions-propose-head" }, h("h3", { id: "decisions-propose-title" }, t("proposeTitle"))),
       h("section", { class: "decisions-propose-main" },
+        proposed,
         h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit, "aria-labelledby": "decisions-propose-title" },
           h("div", { class: "field" }, h("label", { for: input.id }, t("proposeLead")), input, error),
           failure, button),
@@ -1164,6 +1192,7 @@ function decisionsSection({ projectId, viewId, points, live }) {
   }
 
   render(points);
+  showProposed(proposals);
   return h("section", { class: "section decisions", "aria-labelledby": "decisions-title" },
     h("h2", { id: "decisions-title" }, t("decisionsTitle")),
     h("p", { class: "decisions-lead" }, t("decisionsLead")),

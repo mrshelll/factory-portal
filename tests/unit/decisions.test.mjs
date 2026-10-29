@@ -124,9 +124,14 @@ test("the loaders call their RPCs: not-for-this-person is null or [], other erro
   await assert.rejects(loadDecisionProjects(fake({ data: null, error: { code: "XX000" } })));
   assert.equal(await loadMyDecisions(fake({ data: null, error: { code: "42501" } }), A), null);
   const mine = fake({ data: { last_opened_at: null, points: [{ key: "k" }] }, error: null });
-  assert.deepEqual(await loadMyDecisions(mine, A), { last_opened_at: null, points: [{ key: "k" }] });
+  // A server from before 20261029120000_decisions_my_proposals has no proposals: none.
+  assert.deepEqual(await loadMyDecisions(mine, A), { last_opened_at: null, points: [{ key: "k" }], proposals: [] });
   assert.deepEqual(mine.calls, [["my_decisions", { p_project_id: A }]]);
   await assert.rejects(loadMyDecisions(fake({ data: null, error: { code: "XX000" } }), A));
+  // Her own proposals, as the server sends them; an entry that is not an object or has no text is left out.
+  const withProposals = fake({ data: { last_opened_at: null, points: [], proposals: [{ id: "p1", text: "<b>x</b>", created_at: "2026-10-29T12:00:00Z" }, null, { id: "p2" }, "t"] }, error: null });
+  assert.deepEqual((await loadMyDecisions(withProposals, A)).proposals, [{ id: "p1", text: "<b>x</b>", created_at: "2026-10-29T12:00:00Z" }]);
+  assert.deepEqual((await loadMyDecisions(fake({ data: { points: [], proposals: { id: "p" } }, error: null }), A)).proposals, []);
   assert.equal(await loadOwnerDecisions(fake({ data: null, error: { code: "42501" } }), A), null);
   const owner = fake({ data: { points: [], people: [], proposals: [{ text: "t" }] }, error: null });
   assert.deepEqual(await loadOwnerDecisions(owner, A), { points: [], people: [], proposals: [{ text: "t" }] });

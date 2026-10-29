@@ -775,7 +775,9 @@ function decisionsServer(backend, rpc, body, sub) {
       return { key: p.key, version: p.version, position: p.position, title: p.title, decided: p.decided, basis: p.basis, mark,
         answer: mine ? { value: mine.value, comment: mine.comment, version: mine.version, created_at: mine.created_at } : null };
     });
-    return { data: { last_opened_at: opened, points } };
+    // Her own proposals, oldest first (20261029120000_decisions_my_proposals): id, text and created_at only.
+    const proposals = entry.proposals.filter((x) => x.member_id === memberId).sort(byTime).map((x) => ({ id: x.id, text: x.text, created_at: x.created_at }));
+    return { data: { last_opened_at: opened, points, proposals } };
   }
   if (rpc === "mark_decisions_opened") {
     entry.opens[memberId] = new Date().toISOString();
@@ -3698,6 +3700,8 @@ const DECISIONS = {
   basis: "En qué se apoya",
   commentLabel: "Comentario",
   commentLabelOptional: "Comentario (opcional)",
+  proposedTitle: "Lo que propusiste",
+  proposedOn: (date) => `Enviada el ${date}`,
   commentRequired: "Cuéntanos qué cambiarías y por qué.",
   commentRequiredNo: "Cuéntanos por qué no va.",
   commentRequiredUnsure: "Cuéntanos qué te falta para decidir.",
@@ -3717,6 +3721,8 @@ const DECISIONS = {
 };
 const DIDS = { project: "12121212-1212-4212-8212-121212121212", member: "13131313-1313-4313-8313-131313131313" };
 const DKEY = { a: "0a0a0a0a0a0a", b: "0b0b0b0b0b0b", c: "0c0c0c0c0c0c", d: "0d0d0d0d0d0d" };
+// A proposal of hers that is markup: shown as text, it never runs (window.__p stays undefined).
+const PROPOSAL_HTML = '<img src=x onerror="window.__p=1">Falta el horario de los domingos.';
 const DAT = { oldPublish: "2026-10-10T12:00:00.000Z", answered: "2026-10-12T12:00:00.000Z", opened: "2026-10-20T12:00:00.000Z", newPublish: "2026-10-25T12:00:00.000Z" };
 const QUOTE = "Un viaje se confirma entre los dos";
 // Four points, one per mark: a, published after the person last opened the section and never answered (new); b, answered
@@ -3789,6 +3795,11 @@ const decisionsSection = (page) => page.evaluate((title) => {
         basis: basis ? { summary: basis.querySelector("summary")?.textContent || null, open: basis.open, text: basis.textContent } : null,
       };
     }),
+    // «Lo que propusiste»: each proposal's date line and text, as shown; markup inside a text would be an element.
+    proposed: propose && shown(propose.querySelector(".decisions-proposed")) ? {
+      title: propose.querySelector(".decisions-proposed-title")?.textContent || null,
+      items: [...propose.querySelectorAll(".decisions-proposed-item")].map((li) => ({ on: li.querySelector(".row-meta")?.textContent || null,
+        text: li.querySelector(".decisions-proposed-text")?.textContent ?? null, markup: li.querySelectorAll(".decisions-proposed-text *").length })) } : null,
     propose: propose ? { title: propose.querySelector("h3")?.textContent || null, field: field(propose.querySelector("textarea")),
       error: text(propose.querySelector(".field-error")), sent: text(propose.querySelector(".decisions-propose-sent")),
       notice: text(propose.querySelector(".notice p")), button: button(propose.querySelector("button[type=submit]")) } : null,
@@ -3944,6 +3955,29 @@ async function decisionsChecks(browser, base, html) {
     await context.close();
   }
 
+  // decisions-my-proposals: what she proposed before shows when she opens the page, oldest first, each with its date and its
+  // text as text (one is markup: it never runs nor becomes an element); another person's proposal never shows.
+  {
+    const backend = decisionsBackend(html);
+    const entry = backend.decisions[IDS.project];
+    entry.proposals.push(
+      { id: randomUUID(), member_id: IDS.member, text: PROPOSAL_HTML, created_at: DAT.opened },
+      { id: randomUUID(), member_id: IDS.member, text: "Falta el horario de la noche.", created_at: DAT.answered },
+      { id: randomUUID(), member_id: "99999999-9999-4999-8999-999999999999", text: "Lo de otra persona", created_at: DAT.answered });
+    const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
+    const s = await waitFor(async () => { const t = await decisionsSection(page); return t && t.proposed ? t : null; }, 10000);
+    const items = s ? s.proposed.items : [];
+    const on = async (iso) => DECISIONS.proposedOn(await formatIn(page, iso));
+    check("decisions-my-proposals: on opening the page, «Lo que propusiste» lists her own, oldest first, each with its date", s &&
+      s.proposed.title === DECISIONS.proposedTitle && JSON.stringify(items.map((x) => [x.on, x.text])) ===
+      JSON.stringify([[await on(DAT.answered), "Falta el horario de la noche."], [await on(DAT.opened), PROPOSAL_HTML]]), JSON.stringify(items));
+    check("decisions-my-proposals: a proposal that is markup shows as its literal text and never runs", items.length === 2 && items.every((x) => x.markup === 0) &&
+      (await page.evaluate(() => window.__p)) === undefined, JSON.stringify(items));
+    check("decisions-my-proposals: another person's proposal never shows", !JSON.stringify(items).includes("otra persona"), JSON.stringify(items));
+    check("decisions-my-proposals: no page errors", errors.length === 0, errors.join(" | "));
+    await context.close();
+  }
+
   // decisions-va-optional-comment and decisions-sign-out-unsent: with «Va» the comment is optional (spec §4.2): written and not
   // sent, «Salir» asks; sent, it goes with the answer (and «Va» with none sends none); and a form opened again with «Cambiar
   // respuesta» and edited makes «Salir» ask too.
@@ -4094,6 +4128,7 @@ async function decisionsChecks(browser, base, html) {
     let s = await decisionsSection(page);
     check("decisions: propose-always-available: «¿Falta algo?» closes the section, with its field and its send", s && s.last === DECISIONS.proposeTitle &&
       s.propose.field && s.propose.field.label === DECISIONS.proposeLabel && s.propose.button && s.propose.button.text === DECISIONS.proposeSend, JSON.stringify(s && s.propose));
+    check("decisions-my-proposals: with nothing proposed yet, nothing more shows under «¿Falta algo?»", s && s.proposed === null, JSON.stringify(s && s.proposed));
     await page.click(".decisions-propose button[type=submit]").catch(() => {});
     s = await decisionsSection(page);
     check("decisions: propose-always-available: empty, nothing is sent; the error says why and the field takes the focus", s && s.propose.error === DECISIONS.proposeEmpty &&
@@ -4106,6 +4141,11 @@ async function decisionsChecks(browser, base, html) {
       s && s.propose.sent === DECISIONS.proposeSent && s.propose.field && s.propose.field.value === "" && !s.propose.error && s.last === DECISIONS.proposeTitle &&
       (await liveText(page)) === DECISIONS.proposeSent && decisionCalls(backend, "propose_decision").length === 1 &&
       decisionCalls(backend, "propose_decision")[0].p_text === proposal && dialogs.length === 0, JSON.stringify({ propose: s && s.propose, calls: decisionCalls(backend, "propose_decision") }));
+    const listed = await waitFor(async () => { const t = await decisionsSection(page); return t && t.proposed ? t : null; }, 5000);
+    const sentOn = DECISIONS.proposedOn(await formatIn(page, new Date().toISOString()));
+    check("decisions-my-proposals: sent, the section is read again and «Lo que propusiste» shows it, with its date",
+      listed && listed.proposed.title === DECISIONS.proposedTitle && JSON.stringify(listed.proposed.items) === JSON.stringify([{ on: sentOn, text: proposal, markup: 0 }]),
+      JSON.stringify(listed && listed.proposed));
 
     // opened-once-per-visit: answering and proposing record nothing more; coming back is a new visit.
     check("decisions: opened-once-per-visit: answering and proposing record no other opening", decisionCalls(backend, "mark_decisions_opened").length === 1,
@@ -4114,6 +4154,8 @@ async function decisionsChecks(browser, base, html) {
     await page.click(`a[href="#/project/${IDS.project}"]`).catch(() => {});
     const again = await sectionShown(page);
     await sleep(300);
+    check("decisions-my-proposals: coming back, what she proposed is still listed", again && again.proposed && again.proposed.items.length === 1 &&
+      again.proposed.items[0].text === proposal, JSON.stringify(again && again.proposed));
     check("decisions: opened-once-per-visit: coming back is another visit, with one more opening; the points she answered come back answered",
       again && decisionCalls(backend, "mark_decisions_opened").length === 2 && pointOf(again, DKEY.a).mark === null && pointOf(again, DKEY.a).checked === "no" &&
       pointOf(again, DKEY.d).mark === DECISIONS.marks.confirmed, JSON.stringify({ calls: decisionCalls(backend, "mark_decisions_opened").length, marks: again && again.points.map((x) => x.mark) }));
@@ -4339,11 +4381,15 @@ async function decisionsScreens(browser, base, html) {
   {
     const backend = decisionsBackend(html);
     plain(backend.decisions[IDS.project]);
+    // One proposal she already sent, so «Lo que propusiste» shows under «¿Falta algo?».
+    backend.decisions[IDS.project].proposals.push({ id: randomUUID(), member_id: IDS.member, text: PLAIN.proposal, created_at: DAT.opened });
     const { context, page, errors } = await openMocked(browser, base, backend, `#/project/${IDS.project}`);
     await sectionShown(page);
     await page.check(radioSel(DKEY.a, "change")).catch(() => {});
     await page.fill(commentSel(DKEY.a), PLAIN.comment).catch(() => {});
     let s = await decisionsSection(page);
+    check("screens: project-decisions: «Lo que propusiste» lists the proposal she sent", s && s.proposed && s.proposed.items.length === 1 &&
+      s.proposed.items[0].text === PLAIN.proposal, JSON.stringify(s && s.proposed));
     check("screens: project-decisions: the four marks, and the first point with «Lo cambiaría» and its comment open", s &&
       JSON.stringify(s.points.map((p) => p.mark)) === JSON.stringify([DECISIONS.marks.new, DECISIONS.marks.changed, DECISIONS.marks.confirmed, null]) &&
       s.points[0].checked === "change" && s.points[0].comment && s.points[0].comment.value === PLAIN.comment, JSON.stringify(s && s.points.map(({ mark, checked, comment }) => ({ mark, checked, comment }))));

@@ -187,7 +187,12 @@ export async function loadMyDecisions(client, projectId) {
     throw error;
   }
   if (!isPlainObject(data)) return null;
-  return { last_opened_at: data.last_opened_at || null, points: Array.isArray(data.points) ? data.points.filter(isPlainObject) : [] };
+  // proposals: her own (20261029120000_decisions_my_proposals); none from a server before it.
+  return {
+    last_opened_at: data.last_opened_at || null,
+    points: Array.isArray(data.points) ? data.points.filter(isPlainObject) : [],
+    proposals: Array.isArray(data.proposals) ? data.proposals.filter((x) => isPlainObject(x) && typeof x.text === "string") : [],
+  };
 }
 
 // What a failed send is, by the server's code: PT409 the point changed while the person read it («stale»), 22023 the

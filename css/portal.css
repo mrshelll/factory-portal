@@ -220,6 +220,12 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .decisions-propose, .decisions-propose-main { display: grid; gap: var(--space-3); }
 .decisions-propose { margin-top: var(--space-5); }
 .decisions-propose h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
+/* «Lo que propusiste», above the form: a small label (as a point's mark), then each proposal as a row of a list (the base's
+   rule between rows), its date in muted small text over its text, which keeps its line breaks, the reading measure and
+   breaks anywhere (a long address never widens the page). */
+.decisions-proposed-title { margin: 0 0 var(--space-2); font-size: var(--text-small); font-weight: 600; }
+.decisions-proposed-item { display: grid; gap: var(--space-1); padding-block: var(--space-3); }
+.decisions-proposed-text { max-width: var(--measure-text); white-space: pre-line; overflow-wrap: anywhere; }
 
 /* The owner's view of the section (app.js ownerDecisionsPart, showOwnerDecision: the manual's «lista»). On the project's
    page, after the pieces' part, its title and lead, then one row per point as the pieces' rows read: the point's title,
@@ -285,7 +291,7 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
   .owner-answers .owner-answer :is(.owner-answer-comment, .owner-history) { grid-column: 2; }
   /* A proposal is not a row of the table: its author and date, then its text, both on the row's start as below 1056 (the
      lists' rule above would send the author line to a column of its own). */
-  .owner-proposals .owner-proposal .row-meta { grid-area: auto; }
+  .owner-proposals .owner-proposal .row-meta, .decisions-proposed .decisions-proposed-item .row-meta { grid-area: auto; }
   /* The «Decisiones» section takes the page's column as the pieces' list does: each point's three parts side by side in the
      same three equal columns, its title (and its mark under it) · what was decided, with the fold «En qué se apoya» and when
      she answered under it · the answer, which starts where the pieces' states do: the part spans its column (MAR-12) and
