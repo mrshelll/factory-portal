@@ -436,7 +436,7 @@ pause again a week later.
 
 ```sh
 npm test   # node --test: bridge, message validation, draft queue, errors, i18n, closure, project routes and states, sync-brand, the browser checks' server
-node tests/browser/run-checks.mjs --questions <questions-piece.html> --flow <flow-review-piece.html> \
+node tests/browser/run-checks.mjs --questions <questions-piece.html> [--flow <flow-review-piece.html>] \
   --demo <demo-sheet.html> --out <dir> --factory <path to the software factory repo>
 node scripts/sync-brand.mjs --from <path to the software factory repo> --check
 ```
@@ -488,9 +488,12 @@ before the ResizeObserver there. Screenshots in `<out>`: `piece-view-<width>-<sc
 `piece-view-flow-start-<768|1440>.png`, `piece-view-flow-final-<768|1440>.png` and
 `piece-view-demo-1440-<scheme>.png`.
 
-**The pieces.** The checks do not generate pieces: pass the three files with `--questions`, `--flow`
+**The pieces.** The checks do not generate pieces: pass the questions sheet and the demo sheet with `--questions`
 and `--demo`. Emit them from the factory's current templates into a scratch folder (never into either
-repo), with `F` the software factory repo and `T` the scratch folder:
+repo), with `F` the software factory repo and `T` the scratch folder. The factory retired the flow review piece in
+its 1.46.0 and no longer emits one, but the portal still lists and opens the ones already published: without
+`--flow`, the checks use `tests/fixtures/legacy-flow.html`, the last flow piece the factory emitted (1.45.0), frozen
+here. `--flow <file>` still replaces it.
 
 ```sh
 # questions: a copy of the factory's mini project, renamed portal-test, with four questions for Ana Pérez
@@ -503,16 +506,13 @@ for i in 1 2 3 4; do
 done
 python3 "$F/factory-orchestrator/assets/preguntas.py" emitir --proyecto "$T/project" --para "Ana Pérez"
 cp "$T/project/.factory/preguntas/ronda-1-ana-perez.html" "$T/questions.html"
-# flow review
-python3 "$F/ux-flows/assets/emit-recorrido.py" \
-  --datos "$F/ux-flows/evals/recorrido-flujos/fixtures/golden-recorrido.json" --salida "$T/flow.html"
 # demo sheet (without an expected reviewer: the name comes from the portal member)
 D="$F/design-system/evals/demo-aprobacion/fixtures"
 python3 "$F/design-system/assets/emit-aprobacion.py" --guion "$D/guion.json" --versiones "$D/versiones.json" \
   --respuestas "$D/revisiones" --enlace https://example.com/prototype --responsable "Ana Gómez" \
   --proyecto-titulo "la biblioteca" --salida "$T/demo.html"
 
-node tests/browser/run-checks.mjs --questions "$T/questions.html" --flow "$T/flow.html" --demo "$T/demo.html" \
+node tests/browser/run-checks.mjs --questions "$T/questions.html" --demo "$T/demo.html" \
   --out "$T/checks" --factory "$F"
 ```
 
@@ -523,14 +523,14 @@ options so the timeout and the storage quota can be lowered for a check. `tests/
 **The project page and the owner's part.** With `--questions`, the checks cover home «Tus proyectos» and a
 project's page (its own items, the note about what the owner sees, a person who owns one project and is asked things in another,
 the owner who also has a piece assigned in their own project, and `mark_piece_opened` failing: the piece opens
-anyway). With `--questions`, `--flow` and `--demo` together, the owner's part: every state and date, the three
+anyway). With `--questions` and `--demo` (and the flow piece, the frozen one unless `--flow` is given), the owner's part: every state and date, the three
 kinds of piece opened read only, a send kept without its storage (no link), an old piece, and that the owner's
 screens save, send and ask nothing and never read a draft.
 
 **Visual manual.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
 `sign-in-code.html` (pattern `formulario`) and `home-empty.html` (pattern `lista`); with `--questions`, also
 `home-projects.html` and `project-page.html` (`lista`) and `project-received.html` (`lista`, a project with closed
-pieces); with `--questions`, `--flow` and `--demo`, also `project-owner.html` (`lista`, an owned project with the
+pieces); with `--questions` and `--demo`, also `project-owner.html` (`lista`, an owned project with the
 owner's part). With `--questions`, also the «Decisiones» screens, all `lista` (the section's forms inside are marked
 `data-medida="formulario"`): `project-decisions.html` (a person's section with the four marks and a comment open),
 `project-decisions-errors.html` (its error states), `project-decisions-only.html` (a project with the section and no

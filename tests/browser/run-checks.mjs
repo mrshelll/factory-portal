@@ -1,6 +1,7 @@
 // Browser checks for the portal and the bridge. Dev-only; nothing here is served to users.
 //
 //   node tests/browser/run-checks.mjs --questions <piece.html> [--flow <piece.html>] [--demo <piece.html>] [--out <dir>]
+//     (without --flow: tests/fixtures/legacy-flow.html, the last flow piece the factory emitted, 1.45.0)
 //                                     [--factory <software factory repo>]
 //
 // Serves the repo with tests/browser/static-server.mjs (127.0.0.1, a free port), drives system Chrome
@@ -42,6 +43,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((pairs, value, i, all) => (value.startsWith("--") ? [...pairs, [value.slice(2), all[i + 1]]] : pairs), []),
 );
+// The factory retired the flow review piece in its 1.46.0 and no longer emits one, but the portal still lists and opens the
+// ones already published. Without --flow, the flow checks and the owner's page use a frozen copy of the last flow piece
+// the factory emitted (marketplace 1.45.0), so the owner's screen is still captured and measured.
+if (!args.flow) args.flow = join(root, "tests", "fixtures", "legacy-flow.html");
 const outDir = resolve(args.out || join(os.tmpdir(), "factory-portal-checks"));
 mkdirSync(outDir, { recursive: true });
 const screensDir = join(outDir, "screens");
