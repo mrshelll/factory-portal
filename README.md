@@ -5,7 +5,11 @@ with their email and an 8-digit code, and work the HTML "pieces" the factory gen
 sheets, flow reviews, demo reviews) directly in the browser. Progress is saved as a draft and the
 result is sent to Supabase, instead of downloading a JSON file and sending it by chat.
 
-Served with GitHub Pages at https://mrshelll.github.io/factory-portal/.
+Served by Cloudflare (Workers static assets) at https://portal.ninben.app/. Workers Builds deploys every
+push to `main`; `wrangler.jsonc` names the domain and `.assetsignore` keeps tests, scripts, migrations and
+repo files out of what is published (only `index.html`, `config.js`, `css/`, `js/` and `brand/` go out).
+The old GitHub Pages address (https://mrshelll.github.io/factory-portal/) only redirects to the new one, so
+invitations already sent keep working.
 
 ## What is (and is not) in this repository
 

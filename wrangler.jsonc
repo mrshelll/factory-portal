@@ -1,0 +1,12 @@
+// Cloudflare serves the portal as static files at portal.ninben.app (Workers static assets, no Worker code).
+// Workers Builds deploys on every push to main. What is NOT published is listed in .assetsignore.
+{
+  "name": "factory-portal",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "."
+  },
+  "routes": [
+    { "pattern": "portal.ninben.app", "custom_domain": true }
+  ]
+}
