@@ -58,8 +58,9 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    `#/project/<id>/decisions/<key>`, how each person answered it (read only). See **The owner's part** below.
 4. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
-   The popup flags let a piece open a `target="_blank"` link (the demo sheet opens the prototype) as a
-   normal tab. The screen keeps the portal's frame: the same masthead with the ninben brand as every
+   The popup flags let a piece open a `target="_blank"` link as a normal tab. (The demo sheet used to open its
+   prototype that way; it now shows each key screen inside itself, in a nested iframe with `sandbox="allow-scripts"`
+   on a `blob:` URL.) The screen keeps the portal's frame: the same masthead with the ninben brand as every
    screen, then the way back to the piece's project («← <project name>»; «← Tus proyectos» when its name cannot be
    read) and the piece's title with its save line («Guardando…», «Guardado»), the way back and the title on the brand's
    left edge. On a
@@ -452,9 +453,16 @@ factory cache) and cover: the sign-in screen at 320,
 font), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
 change was saved, a session that comes back while the piece hands over its draft, a change too long
-to keep). With `--demo` as well: the demo sheet sends through the app (a failure shows its error and
+to keep). With `--demo` as well, the demo sheet in the harness: the sheet carries the prototype and shows each key
+screen as the prototype itself, decoded once into a `blob:` URL and opened in an iframe with `sandbox="allow-scripts"`
+at `<blob URL>#<screen id>`, nested in the piece's own sandboxed iframe. That nesting is checked for real in Chromium
+(Safari is checked by hand): one iframe per key screen of the sheet, in order, all on the same `blob:` URL at their own
+hash; each one loads the prototype (its title), shows exactly the screen of its hash (the prototype marks its screens
+with `data-pantalla`) with a laid-out box and visible text, and runs with an opaque origin that cannot read the piece;
+the piece stays open in the portal, with no page or console errors. The sheet also sends through the app (a failure shows its error and
 never «Tu revisión llegó»; the retry arrives once), and a replaced version opened from an old email shows its
-fixed notice, links to the newer version and still sends. With `--questions`, the piece closure, at
+fixed notice, links to the newer version and still sends (its first «Aprobar esta pantalla» saves a draft that reads
+«Guardado aquí, sin enviar»). With `--questions`, the piece closure, at
 320, 768 and 1440 px, light and dark: the list with a received piece, a replaced version that was sent
 and a change request (`list-received-<width>-<scheme>.png`); a received piece read only with its notice
 (`closed-received-…`); the request form sent empty (`request-empty-error-…`), failing (network, and a
@@ -493,36 +501,28 @@ before the ResizeObserver there. Screenshots in `<out>`: `piece-view-<width>-<sc
 `piece-view-demo-1440-<scheme>.png`.
 
 **The pieces.** The checks do not generate pieces: pass the questions sheet and the demo sheet with `--questions`
-and `--demo`. Emit them from the factory's current templates into a scratch folder (never into either
-repo), with `F` the software factory repo and `T` the scratch folder. The factory retired the flow review piece in
-its 1.46.0 and no longer emits one, but the portal still lists and opens the ones already published: without
-`--flow`, the checks use `tests/fixtures/legacy-flow.html`, the last flow piece the factory emitted (1.45.0), frozen
-here. `--flow <file>` still replaces it.
+and `--demo`. Emit them with the factory's own emitter, from its current templates, into a scratch folder (never
+into either repo), with `F` the software factory repo and `T` the scratch folder (it is created if missing and may
+contain spaces):
 
 ```sh
-# questions: a copy of the factory's mini project, renamed portal-test, with four questions for Ana Pérez
-cp -R "$F/factory-orchestrator/evals/preguntas/fixtures/proyecto-mini" "$T/project"
-python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["proyecto"]="portal-test"; json.dump(d,open(p,"w"))' "$T/project/project-manifest.json"
-for i in 1 2 3 4; do
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["para"]="Ana Pérez"; json.dump(d,open(sys.argv[2],"w"))' \
-    "$F/factory-orchestrator/evals/preguntas/fixtures/entrada-$i.json" "$T/q$i.json"
-  python3 "$F/factory-orchestrator/assets/preguntas.py" agregar --proyecto "$T/project" --archivo "$T/q$i.json" --por prd
-done
-python3 "$F/factory-orchestrator/assets/preguntas.py" emitir --proyecto "$T/project" --para "Ana Pérez"
-cp "$T/project/.factory/preguntas/ronda-1-ana-perez.html" "$T/questions.html"
-# demo sheet (without an expected reviewer: the name comes from the portal member)
-D="$F/design-system/evals/demo-aprobacion/fixtures"
-python3 "$F/design-system/assets/emit-aprobacion.py" --guion "$D/guion.json" --versiones "$D/versiones.json" \
-  --respuestas "$D/revisiones" --enlace https://example.com/prototype --responsable "Ana Gómez" \
-  --proyecto-titulo "la biblioteca" --salida "$T/demo.html"
-
-node tests/browser/run-checks.mjs --questions "$T/questions.html" --demo "$T/demo.html" \
+bash "$F/design-system/evals/piezas-html/emit-pieces.sh" "$T"
+node tests/browser/run-checks.mjs --questions "$T/portal-questions.html" --demo "$T/portal-demo.html" \
   --out "$T/checks" --factory "$F"
 ```
 
-The checks expect these fixtures (the questions sheet for Ana Pérez in `portal-test`, the demo link on
-`https://example.com/`). Re-emit the pieces whenever a template changes in the factory. The harness takes `submitTimeoutMs` and `quotaChars`
-options so the timeout and the storage quota can be lowered for a check. `tests/harness.html` can also be opened by hand in any browser to try a piece file.
+`emit-pieces.sh` emits the factory's own eval pieces and, for these checks, the pair `$T/portal-questions.html` (the
+questions sheet for Ana Pérez in `portal-test`: the factory's mini project renamed, with its four questions) and
+`$T/portal-demo.html` (the phase-12 approval sheet, «Pantallas de la biblioteca», with no expected reviewer, so the name
+comes from the portal member: four key screens, each shown inside the sheet from the fixture prototype the sheet
+carries). Its dates are fixed, so re-running it writes the same pieces; it prints the two paths, one per line, in that
+order, and exits 1 if a piece did not come out. The rest of what it writes in `$T` is for the factory's own evals and
+can be ignored. Re-emit the pieces whenever a template changes in the factory. The factory retired the flow review
+piece in its 1.46.0 and no longer emits one, but the portal still lists and opens the ones already published: without
+`--flow`, the checks use `tests/fixtures/legacy-flow.html`, the last flow piece the factory emitted (1.45.0), frozen
+here. `--flow <file>` still replaces it. The harness takes `submitTimeoutMs` and `quotaChars` options so the timeout
+and the storage quota can be lowered for a check. `tests/harness.html` can also be opened by hand in any browser to
+try a piece file.
 
 **The project page and the owner's part.** With `--questions`, the checks cover home «Tus proyectos» and a
 project's page (its own items, the note about what the owner sees, a person who owns one project and is asked things in another,
@@ -551,8 +551,9 @@ node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/h
 ```
 
 **The portal's frame.** With `--factory`, the same twelve screens (`sign-in-email`, `sign-in-code`, `home-projects`,
-`project-page`, `home-empty`, `project-owner`, `project-received` and the five «Decisiones» screens) also go through the factory's
-`design-system/assets/geometria.mjs`, the frame measure the factory's pieces are held to, at 320, 672, 1056 and
+`project-page`, `home-empty`, `project-owner`, `project-received` and the five «Decisiones» screens) also go through
+`tests/fixtures/geometria.mjs`, the frame measure the factory's pieces were held to: the factory retired it after its
+1.47.0, and this is its last version, frozen here (its header says where it comes from). At 320, 672, 1056 and
 1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
 parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the twelve screens (MAR-02), and
 every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
@@ -580,4 +581,4 @@ portal at the width a person sees them.
 | `js/piece-frame.js` | Mounts a piece in the sandboxed iframe and speaks the bridge protocol |
 | `js/host.js` | Message validation and the draft save queue |
 | `js/auth-errors.js`, `js/i18n.js`, `js/dom.js`, `js/supabase-client.js` | Helpers |
-| `tests/` | Unit tests, browser checks (with the screen snapshots), the bridge harness and SQL checks |
+| `tests/` | Unit tests, browser checks (with the screen snapshots), the bridge harness and SQL checks; `tests/fixtures/` keeps what the factory retired and the checks still need, frozen: the last flow piece (`legacy-flow.html`) and the geometry measure (`geometria.mjs`) |
