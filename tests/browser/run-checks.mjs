@@ -58,6 +58,16 @@ cpSync(join(root, "brand"), join(screensDir, "brand"), { recursive: true });
 // Screen name -> visual manual pattern, filled as the snapshots are taken.
 const screens = new Map();
 
+// The brand's body font, read from the generated brand/ninben.css (the first family of --font-sans), so the checks follow
+// the brand when sync-brand changes it. It must also be one of the brand's own @font-face families (a file in brand/fonts).
+const BRAND_SANS = (() => {
+  const css = readFileSync(join(root, "brand", "ninben.css"), "utf8");
+  const family = (css.match(/--font-sans:\s*["']([^"']+)["']/) || [])[1];
+  const faces = [...css.matchAll(/@font-face\s*{[^}]*font-family:\s*["']([^"']+)["'][^}]*url\(\s*["']?fonts\//g)].map((m) => m[1]);
+  if (!family || !faces.includes(family)) throw new Error(`brand/ninben.css: --font-sans (${family}) is not one of its @font-face families (${faces.join(", ")})`);
+  return family;
+})();
+
 function loadPlaywright() {
   const dir = process.env.PLAYWRIGHT_CORE_DIR || join(os.homedir(), ".cache", "fabrica-software", "playwright-core@1.63.0");
   return createRequire(join(dir, "noop.js"))("playwright-core");
@@ -134,7 +144,7 @@ async function portalChecks(browser, base) {
     check(`login ${width}px: no console errors`, errors.length === 0, errors.join(" | "));
     check(`login ${width}px: no horizontal scroll`, info.scrollWidth <= info.innerWidth, `${info.scrollWidth} <= ${info.innerWidth}`);
     if (width === 360) {
-      const brand = await page.evaluate(async () => {
+      const brand = await page.evaluate(async (sans) => {
         await document.fonts.ready;
         const mark = document.querySelector("[data-rol=marca-producto]");
         return {
@@ -142,13 +152,14 @@ async function portalChecks(browser, base) {
           name: mark && mark.textContent,
           stroke: mark && mark.querySelector("svg") && getComputedStyle(mark.querySelector("svg")).stroke,
           signal: getComputedStyle(document.documentElement).getPropertyValue("--signal").trim(),
-          inter: [...document.fonts].some((f) => f.family.replace(/"/g, "") === "Inter" && f.status === "loaded"),
-          body: getComputedStyle(document.body).fontFamily.split(",")[0].replace(/"/g, ""),
+          sansLoaded: [...document.fonts].some((f) => f.family.replace(/"/g, "") === sans && f.status === "loaded"),
+          body: getComputedStyle(document.body).fontFamily.split(",")[0].replace(/"/g, "").trim(),
         };
-      });
+      }, BRAND_SANS);
       check("brand: the masthead shows the ninben logo and name", brand.logo && brand.name === "ninben", JSON.stringify(brand));
       check("brand: the logo stroke is the signal colour", brand.stroke === "rgb(65, 55, 255)" && brand.signal === "#4137FF", `${brand.stroke} · ${brand.signal}`);
-      check("brand: Inter loads from brand/fonts and is the body font", brand.inter && brand.body === "Inter");
+      check(`brand: the brand's font (${BRAND_SANS}, from brand/ninben.css) loads from brand/fonts and is the body font`, brand.sansLoaded && brand.body === BRAND_SANS,
+        JSON.stringify({ sans: BRAND_SANS, loaded: brand.sansLoaded, body: brand.body }));
       // Signed out the brand has nowhere to go: it is the mark without a link (nothing to tap, nothing lost on the code step).
       const bare = await page.evaluate(() => {
         const mark = document.querySelector("[data-rol=marca-producto]"), frame = document.querySelector(".frame");
