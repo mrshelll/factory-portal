@@ -579,7 +579,7 @@ test("document.fonts.ready measures once: a font swap that changed no DOM, held 
   const F = fontsReady();
   const L = layout({ height: 1000, innerHeight: 462 });
   const { win, of } = runBridge({}, { ...L.env, document: { ...L.env.document, fonts: F.fonts } });
-  // The portal gives the iframe its 1000 px and, in that frame, Inter arrives and the text grows 40 px (no DOM change).
+  // The portal gives the iframe its 1000 px and, in that frame, the brand's font arrives and the text grows 40 px (no DOM change).
   win.innerHeight = 1000; win.dispatch("resize");
   L.root.height = 1040; L.resized();
   await tick();
