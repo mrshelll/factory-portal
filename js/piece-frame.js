@@ -5,8 +5,9 @@ import { injectBridge } from "./bridge.js";
 import { parseBridgeMessage } from "./host.js";
 
 // No allow-same-origin: the piece runs in an opaque origin and cannot reach the portal's storage.
-// allow-popups (+ escape-sandbox) lets a piece open a link with target="_blank" (the demo sheet
-// opens the prototype in a new tab) as a normal, unsandboxed page.
+// allow-popups (+ escape-sandbox) lets a piece open a link with target="_blank" as a normal,
+// unsandboxed page. No piece the factory emits today has one (the key-screens sheet shows the
+// prototype inside itself); it stays so a piece that links out keeps working.
 export const SANDBOX = "allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox";
 
 export function randomNonce() {

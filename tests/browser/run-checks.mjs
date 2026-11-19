@@ -1199,7 +1199,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       return { h1: textBox(document.querySelector("h1"))?.x ?? null, title: textBox(document.querySelector("[data-rol=vacio] h2")),
         message: textBox(document.querySelector("[data-rol=vacio] .row-main > p")), messageText: document.querySelector("[data-rol=vacio] .row-main > p")?.textContent ?? null,
         notice: notice ? { box: box(notice), text: hint ? hint.textContent : null, textBox: textBox(hint), className: notice.className, inMain: Boolean(notice.parentElement && notice.parentElement.matches(".row-main")),
-          afterMessage: Boolean(notice.previousElementSibling && notice.previousElementSibling.matches("p")), stripe: getComputedStyle(notice).borderInlineStartWidth,
+          afterMessage: Boolean(notice.previousElementSibling && notice.previousElementSibling.matches("p")), stripe: getComputedStyle(notice).borderInlineStartWidth, edgeEnd: getComputedStyle(notice).borderInlineEndWidth,
           accent: getComputedStyle(notice).borderInlineStartColor, muted: (() => { const el = document.createElement("span"); el.style.color = "var(--muted)"; body.append(el);
             const c = getComputedStyle(el).color; el.remove(); return c; })() } : null,
         action: box(action), actionText: action ? action.textContent : null, actionPrimary: Boolean(action && action.matches(".button.button--primary")),
@@ -1229,11 +1229,12 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       JSON.stringify(g));
     check(`home-empty ${width}px: its title and its message start on the title's edge, not centred`,
       g.h1 !== null && g.title && near(g.title.x, g.h1) && g.message && near(g.message.x, g.h1), JSON.stringify(g));
-    // aviso-de-seccion: what asks the person to check their email is the base's section notice (information: the grey stripe,
-    // never the signal), in the row under the message and on the same edge; the message says only that nothing is here yet.
+    // aviso-de-seccion: what asks the person to check their email is the base's section notice (information: since the
+    // factory's 1.48.0 a 1 px border all around and no coloured stripe on one side, never the signal), in the row under
+    // the message and on the same edge; the message says only that nothing is here yet.
     check(`home-empty ${width}px: «${EMPTY.hint}» is the base's information notice, in the row under the message, on the title's edge`,
       g.notice && g.notice.text === EMPTY.hint && g.notice.className === "notice" && g.notice.inMain && g.notice.afterMessage &&
-      parseFloat(g.notice.stripe) > 1 && g.notice.accent === g.notice.muted && near(g.notice.box.x, g.h1) &&
+      g.notice.stripe === "1px" && g.notice.edgeEnd === "1px" && near(g.notice.box.x, g.h1) &&
       g.messageText === EMPTY.body(USER.email) && !g.messageText.includes(EMPTY.hint), JSON.stringify({ notice: g.notice, message: g.messageText }));
     check(`home-empty ${width}px: its main action and the notice's «Entrar con otro correo» are 44 px targets (FUN-18)`,
       g.action && g.action.h >= 44 && g.other && g.other.box.h >= 44, JSON.stringify({ action: g.action, other: g.other }));
@@ -1304,26 +1305,33 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       const flowReading = [...document.querySelectorAll("main .view .heading > p")].find(shown);
       const stepReading = [...document.querySelectorAll("main .step-intro > p")].find(shown);
       const home = document.getElementById("homeBtn");
+      // A side column beside the text goes right after it, one column gap of its layout away (the factory's 1.48.0: the
+      // topics sit next to the text, with no hole between them); one stacked under the text is a block like any other.
+      const follows = (el) => { const prev = el.previousElementSibling;
+        if (!prev || el.getBoundingClientRect().left < prev.getBoundingClientRect().right - 1) return null;
+        return prev.getBoundingClientRect().right + (parseFloat(getComputedStyle(el.parentElement).columnGap) || 0); };
       return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right,
-          side: el.matches(".layout > aside") })),
+          side: el.matches(".layout > aside"), follows: el.matches(".layout > aside") ? follows(el) : null })),
         home: home && shown(home) ? home.getBoundingClientRect().left : null, flowReading: flowReading ? flowReading.getBoundingClientRect().width : null,
         stepReading: stepReading ? stepReading.getBoundingClientRect().width : null,
         reading: reading ? reading.getBoundingClientRect().width : null };
     }).catch(() => null);
     if (!inner) return null;
-    const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset, right: b.right + offset }));
+    const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset, right: b.right + offset, follows: b.follows === null ? null : b.follows + offset }));
     return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, stepReading: inner.stepReading, reading: inner.reading };
   };
-  // Every top-level block on the brand's edge (±1 px), and a side column ending on the frame's right edge; the
-  // detail names the ones that are not. With no brand on screen or no piece measured, this one check fails.
+  // Every top-level block on the brand's edge (±1 px), and a side column beside the text right after it (one column
+  // gap away) and inside the frame; the detail names the ones that are not. With no brand on screen or no piece
+  // measured, this one check fails.
   const onEdge = (tag, what, content, brand) => {
     if (!brand || !content) {
       check(`${tag}: ${what}: every top-level block starts on the brand's left edge`, false, JSON.stringify({ brand: Boolean(brand), content: Boolean(content) }));
       return;
     }
-    const off = content.blocks.filter((b) => (b.side ? Math.abs(b.right - brand.frameRight) > 1 : Math.abs(b.left - brand.left) > 1));
+    const off = content.blocks.filter((b) => (b.side && b.follows !== null ? Math.abs(b.left - b.follows) > 1 || b.right > brand.frameRight + 1
+      : Math.abs(b.left - brand.left) > 1));
     const sides = content.blocks.filter((b) => b.side).length;
-    check(`${tag}: ${what}: every top-level block starts on the brand's left edge${sides ? " and the side column ends on the frame's right edge" : ""}`,
+    check(`${tag}: ${what}: every top-level block starts on the brand's left edge${sides ? " and the side column goes right after the text, inside the frame" : ""}`,
       content.blocks.some((b) => !b.side) && off.length === 0,
       JSON.stringify({ brand: brand.left, frameRight: brand.frameRight, blocks: content.blocks.length, sides, off: off.slice(0, 4) }));
   };
