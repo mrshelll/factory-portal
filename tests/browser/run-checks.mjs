@@ -21,9 +21,8 @@
 // project's page with the owner's part (with --flow and --demo too), a project's page with a received piece, and the
 // «Decisiones» screens (decisionsScreens: a person's section, its error states, a project with the section only, the owner's
 // summary and one point as the owner reads it) are saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
-// brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
-// design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and
-// 1440 px, light and dark, and every run is one check. The JSON of each run is in <out>/screens/.
+// brand/, so they look exactly as in the app. Each one goes through axe (screenAxeChecks) at 320, 768 and 1440 px, light
+// and dark, and every run is one check (the factory retired the visual manual's verifier these used to go through).
 // With --factory, the portal's own frame is also measured with tests/fixtures/geometria.mjs, a frozen copy of the
 // factory's geometry measure, which the factory retired after its 1.47.0 (see portalGeometryChecks): every screen at
 // 320, 672, 1056 and 1440, light and dark, and the piece screen's iframe against the factory's piece-host.mjs.
@@ -31,7 +30,6 @@
 // With --questions, the piece screen on a phone too (phoneFrameChecks, MAR-14), at 320 x 640: in Chromium, and in
 // WebKit when playwright-core has its build installed (otherwise a NOTE line says it did not run).
 
-import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -4981,6 +4979,25 @@ function listColumnChecks(name, width, scheme, rows) {
         (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
   }
 }
+// Every screen snapshot through axe (the factory retired its visual manual's verifier, verifica-pantalla.mjs, in its
+// db243003): each snapshot taken in this run at the three review widths, 320, 768 and 1440, light and dark; one check per
+// run, naming the violated rules. With --questions and --demo all twelve PORTAL_SCREENS must have been captured.
+async function screenAxeChecks(browser) {
+  if (!existsSync(AXE)) { check("axe: axe-core found for the screen snapshots", false, AXE); return; }
+  if (args.questions && args.demo) check(`axe: the ${PORTAL_SCREENS.length} screens were captured`, PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
+  const server = await serveDir(screensDir);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const [name, pattern] of screens) for (const width of [320, 768, 1440]) for (const scheme of ["light", "dark"]) {
+      const page = await browser.newPage({ viewport: { width, height: width < 672 ? 640 : 900 }, colorScheme: scheme });
+      await page.goto(`${origin}/${name}.html`, { waitUntil: "networkidle" });
+      await page.evaluate(() => document.fonts.ready);
+      const violations = await axeViolations(page);
+      await page.close();
+      check(`axe: ${name} (${pattern}) ${width}px ${scheme}: no violations`, Array.isArray(violations) && violations.length === 0, (violations || ["axe did not run"]).join(", "));
+    }
+  } finally { server.close(); }
+}
 async function portalGeometryChecks(browser, base, html, factory) {
   // The geometry measure is the frozen copy in tests/fixtures (the factory retired its own); piece-host.mjs is still the factory's.
   const { MEDIR_GEOMETRIA, evaluaAncho, evaluaConjunto, revisaMedia } = await import(pathToFileURL(join(root, "tests", "fixtures", "geometria.mjs")).href);
@@ -5100,30 +5117,11 @@ try {
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await closureChecks(browser, base, read(args.questions));
   if (args.questions && args.factory) await portalGeometryChecks(browser, base, read(args.questions), args.factory);
+  await screenAxeChecks(browser);
 } finally {
   await browser.close();
   server.close();
 }
-// Every snapshot through the factory's verifier, at the three review widths, light and dark.
-if (args.factory) {
-  const verifier = join(resolve(args.factory), "design-system", "assets", "verifica-pantalla.mjs");
-  if (!existsSync(verifier)) check("manual: verifica-pantalla.mjs found", false, verifier);
-  else {
-    check(`manual: the ${PORTAL_SCREENS.length} screens were captured`, PORTAL_SCREENS.every((n) => screens.has(n)), [...screens.keys()].join(", "));
-    for (const [name, pattern] of screens) {
-      for (const width of [320, 768, 1440]) {
-        for (const scheme of ["light", "dark"]) {
-          const out = join(screensDir, `${name}-${width}-${scheme}.json`);
-          const run = spawnSync(process.execPath, [verifier, "--html", join(screensDir, `${name}.html`), "--patron", pattern,
-            "--ancho", String(width), "--color-scheme", scheme, "--salida", out], { encoding: "utf8" });
-          const failing = `${run.stdout}${run.stderr}`.split("\n").filter((line) => line.startsWith("✗") || line.startsWith("verifica-pantalla: ") && run.status !== 0);
-          check(`manual: ${name} (${pattern}) ${width}px ${scheme}: verifica-pantalla rc=${run.status}`, run.status === 0, failing.join(" | "));
-        }
-      }
-    }
-  }
-}
-
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} checks passed · screenshots in ${outDir}`);
 process.exit(failed ? 1 : 0);

@@ -531,7 +531,7 @@ anyway). With `--questions` and `--demo` (and the flow piece, the frozen one unl
 kinds of piece opened read only, a send kept without its storage (no link), an old piece, and that the owner's
 screens save, send and ask nothing and never read a draft.
 
-**Visual manual.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
+**Screen snapshots and axe.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
 `sign-in-code.html` (pattern `formulario`) and `home-empty.html` (pattern `lista`); with `--questions`, also
 `home-projects.html` and `project-page.html` (`lista`) and `project-received.html` (`lista`, a project with closed
 pieces); with `--questions` and `--demo`, also `project-owner.html` (`lista`, an owned project with the
@@ -540,15 +540,13 @@ owner's part). With `--questions`, also the «Decisiones» screens, all `lista` 
 `project-decisions-errors.html` (its error states), `project-decisions-only.html` (a project with the section and no
 pieces), `project-owner-decisions.html` (the owner's page with the section's counts and proposals) and
 `owner-decision.html` (one point as the owner reads it). That is twelve snapshots, and all twelve are measured. Each one is the rendered DOM without scripts,
-next to a copy of `css/` and `brand/`, so it looks exactly as in the app. With `--factory`, every screen goes through the factory's
-`design-system/assets/verifica-pantalla.mjs` (the visual manual's checks and axe) at 320, 768 and
-1440 px, in light and dark, and each run is one check (its JSON is saved next to the screen). To
-re-run one by hand:
-
-```sh
-node <factory>/design-system/assets/verifica-pantalla.mjs --html <out>/screens/home-projects.html \
-  --patron lista --ancho 768 --color-scheme dark
-```
+next to a copy of `css/` and `brand/`, so it looks exactly as in the app. Every snapshot taken goes through axe
+(`screenAxeChecks`, with the axe-core of the software factory cache) at 320, 768 and 1440 px, in light and dark, and
+each run is one check that names the violated rules; with `--questions` and `--demo`, all twelve must have been
+captured. (They used to go through the factory's `verifica-pantalla.mjs`, the visual manual's checks and axe; the
+factory retired that verifier with its manual, so only axe remains.) To look at one by hand, serve `<out>/screens/`
+(for example `node -e 'import("./tests/browser/static-server.mjs").then(async (m) => { const s = await m.serveDir(process.argv[1]); console.log(s.address().port); })' <out>/screens`)
+and open `<screen>.html` in a browser.
 
 **The portal's frame.** With `--factory`, the same twelve screens (`sign-in-email`, `sign-in-code`, `home-projects`,
 `project-page`, `home-empty`, `project-owner`, `project-received` and the five «Decisiones» screens) also go through
