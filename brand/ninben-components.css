@@ -30,9 +30,8 @@
   --target-min: 48px;
   --mark: 4px; /* the accent stripe of a notice */
 
-  /* The frame contract every design system of the factory exposes (design-md-spec, adaptador-claude-design;
-     MAR-08, MAR-09, MAR-11, FUN-05, FUN-37): the geometry measure reads these names. They only point at the
-     tokens above, which stay the source of truth. */
+  /* The frame names the pieces and the portal share (design-system/evals/brand checks them). They only point at
+     the tokens above, which stay the source of truth. */
   --marco-pagina: calc(var(--frame-page) + 2 * var(--margin-page));
   --marco-margen-sm: var(--space-4);
   --marco-margen-pagina: var(--margin-page);
