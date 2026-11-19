@@ -9,7 +9,8 @@
 // PLAYWRIGHT_CORE_DIR, or from the software factory cache (~/.cache/fabrica-software/playwright-core@1.63.0).
 // Chrome is taken from CHROME_PATH or the default macOS / Linux locations.
 //
-// With --demo, the demo sheet also sends through the app (error, then success: one row), and a replaced
+// With --demo, each key screen of the demo sheet (the prototype in a sandboxed blob: iframe inside the piece) loads and
+// shows its own screen (demoChecks), the sheet also sends through the app (error, then success: one row), and a replaced
 // version opened from an old email shows its fixed notice with a link to the newer one and still sends.
 //
 // With --questions, the piece closure too (closureChecks): a received piece and a replaced version that was sent, in
@@ -23,9 +24,9 @@
 // brand/, so they look exactly as in the app. With --factory, each one goes through the factory's
 // design-system/assets/verifica-pantalla.mjs (the visual manual's checks and axe) at 320, 768 and
 // 1440 px, light and dark, and every run is one check. The JSON of each run is in <out>/screens/.
-// With --factory, the portal's own frame is also measured with the factory's geometria.mjs (see
-// portalGeometryChecks): every screen at 320, 672, 1056 and 1440, light and dark, and the piece screen's
-// iframe against the factory's piece-host.mjs.
+// With --factory, the portal's own frame is also measured with tests/fixtures/geometria.mjs, a frozen copy of the
+// factory's geometry measure, which the factory retired after its 1.47.0 (see portalGeometryChecks): every screen at
+// 320, 672, 1056 and 1440, light and dark, and the piece screen's iframe against the factory's piece-host.mjs.
 //
 // With --questions, the piece screen on a phone too (phoneFrameChecks, MAR-14), at 320 x 640: in Chromium, and in
 // WebKit when playwright-core has its build installed (otherwise a NOTE line says it did not run).
@@ -447,33 +448,91 @@ async function flowChecks(browser, base, html) {
   await context.close();
 }
 
-// (5) The demo sheet opens the prototype with target="_blank": the sandbox lets it open a new tab,
-// and that tab is a normal page (it escaped the sandbox).
+// (5) The demo sheet («Pantallas de <título>», the factory's phase 12) shows each key screen as the prototype itself: the
+// piece decodes the prototype it carries once into a blob: URL and gives every screen an iframe with
+// sandbox="allow-scripts" and src = <blob URL>#<screen id>, inside the piece, which is itself a sandboxed srcdoc iframe.
+// That nesting is the risky path (Safari is checked by hand), so here, in Chromium, each screen's iframe must really load
+// the prototype and show its own screen: the prototype marks its screens with data-pantalla and shows the one in the hash.
+// What the piece should show comes from the piece file, read here: the key screens of its «datos» and the prototype it
+// carries (its title and its data-pantalla ids).
+function demoPieceParts(html) {
+  const datos = html.match(/<script[^>]*id="datos"[^>]*>([\s\S]*?)<\/script>/);
+  const proto = html.match(/<script[^>]*id="prototipo"[^>]*>([\s\S]*?)<\/script>/);
+  if (!datos || !proto) return null;
+  let screens;
+  try { screens = JSON.parse(datos[1]).flujos.map((f) => f.id); } catch { return null; } // a broken sheet fails its check, not the run
+  const prototype = Buffer.from(proto[1].replace(/\s+/g, ""), "base64").toString("utf8");
+  return {
+    screens,
+    title: (prototype.match(/<title>([\s\S]*?)<\/title>/) || [])[1]?.trim() || null,
+    marked: [...prototype.matchAll(/data-pantalla="([^"]+)"/g)].map((m) => m[1]),
+  };
+}
 async function demoChecks(browser, base, html) {
   const { context, page, errors } = await harnessContext(browser, base);
-  await context.route("https://example.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>prototype</title><p>prototype</p>" }));
+  const consoleErrors = [];
+  page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+  const parts = demoPieceParts(html);
+  check("demo: the piece carries its key screens and a prototype that marks each one with data-pantalla", parts && parts.screens.length > 0 &&
+    parts.title && parts.screens.every((id) => parts.marked.includes(id)), JSON.stringify(parts));
+  const expected = parts ? parts.screens : [];
   await page.evaluate((h) => window.harness.mount(h, "demo_review", {}), html);
   const ready = await waitFor(async () => (await events(page, "ready"))[0]);
   check("demo: bridge ready with persistence", ready && ready.persistence, JSON.stringify(ready));
-  const link = await waitFor(async () => {
-    const f = pieceFrame(page);
-    return f && (await f.$("a[target=_blank]"));
-  }, 5000);
-  const href = link ? await link.getAttribute("href") : null;
-  const [popup] = await Promise.all([
-    context.waitForEvent("page", { timeout: 5000 }).catch(() => null),
-    link ? link.click() : Promise.resolve(),
-  ]);
-  if (popup) await popup.waitForLoadState("load").catch(() => {});
-  const popupInfo = popup ? await popup.evaluate(() => {
-    let storage = false;
-    try { localStorage.setItem("probe", "1"); storage = localStorage.getItem("probe") === "1"; } catch { storage = false; }
-    return { url: location.href, storage, opener: window.opener === null };
-  }).catch((e) => ({ error: String(e) })) : null;
-  check("demo: a target=_blank link opens a new tab", popup && popupInfo && popupInfo.url === href, popupInfo ? JSON.stringify(popupInfo) : "no new tab");
-  check("demo: the new tab is not sandboxed and has no opener", popupInfo && popupInfo.storage && popupInfo.opener, JSON.stringify(popupInfo));
+  const piece = pieceFrame(page);
+  // The piece's own markup: one iframe per key screen, in its item, sandboxed to scripts only, at <the same blob URL>#<id>.
+  const items = piece && await waitFor(async () => {
+    const list = await piece.evaluate(() => [...document.querySelectorAll("[data-item]")].map((li) => {
+      const frames = li.querySelectorAll("iframe"), fr = frames[0], r = fr && fr.getBoundingClientRect();
+      return { id: li.getAttribute("data-item"), frames: frames.length, sandbox: fr && fr.getAttribute("sandbox"), src: fr && fr.getAttribute("src"),
+        title: fr && fr.getAttribute("title"), w: r && Math.round(r.width), h: r && Math.round(r.height) };
+    }));
+    return list.length ? list : null;
+  }, 8000);
+  const blobBases = new Set((items || []).map((it) => (it.src || "").split("#")[0]));
+  check("demo: the sheet has one item per key screen, in order, each with one iframe", items && expected.length > 0 && items.length === expected.length &&
+    items.every((it, i) => it.id === expected[i] && it.frames === 1), JSON.stringify(items && items.map((it) => [it.id, it.frames])));
+  check("demo: each screen's iframe is sandboxed to scripts only (no same origin, no popups)", items && items.every((it) => it.sandbox === "allow-scripts"),
+    JSON.stringify(items && items.map((it) => it.sandbox)));
+  check("demo: every iframe opens the same blob: URL (the prototype decoded once) at its own screen's hash", items && blobBases.size === 1 &&
+    [...blobBases][0].startsWith("blob:") && items.every((it) => it.src === `${[...blobBases][0]}#${it.id}`), JSON.stringify(items && items.map((it) => it.src)));
+  check("demo: each screen's iframe has a box on the sheet and a name", items && items.every((it) => it.w > 0 && it.h > 0 && it.title),
+    JSON.stringify(items && items.map((it) => ({ id: it.id, w: it.w, h: it.h, title: it.title }))));
+  // Inside each iframe: the prototype's document, with an opaque origin (the sandbox holds), showing exactly the screen of
+  // its hash, laid out and with text a person can read. The frames load on their own; wait until each shows a screen.
+  const inside = async (frame) => frame.evaluate(() => {
+    const shown = [...document.querySelectorAll("[data-pantalla]")].filter((el) => {
+      const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+      return cs.display !== "none" && cs.visibility !== "hidden" && r.width > 0 && r.height > 0;
+    });
+    let parentReadable = true;
+    try { void parent.document.body; } catch { parentReadable = false; }
+    return { url: location.href, hash: location.hash.slice(1), title: document.title, origin: self.origin, parentReadable,
+      shown: shown.map((el) => el.getAttribute("data-pantalla")),
+      text: shown.length === 1 ? shown[0].innerText.replace(/\s+/g, " ").trim().length : 0,
+      size: shown.length === 1 ? [Math.round(shown[0].getBoundingClientRect().width), Math.round(shown[0].getBoundingClientRect().height)] : null };
+  }).catch((e) => ({ error: String(e).split("\n")[0] }));
+  const screensInside = piece && await waitFor(async () => {
+    const children = page.frames().filter((f) => f.parentFrame() === piece);
+    if (children.length !== expected.length) return null;
+    const all = await Promise.all(children.map(inside));
+    return all.every((r) => r.shown && r.shown.length === 1) ? all : null;
+  }, 10000);
+  const byHash = new Map((screensInside || []).map((r) => [r.hash, r]));
+  const loaded = Boolean(screensInside) && expected.length > 0 && screensInside.length === expected.length; // none expected proves nothing
+  const detail = JSON.stringify(screensInside ? screensInside.map(({ url, title, ...r }) => ({ ...r, blob: url.startsWith("blob:"), title }))
+    : page.frames().filter((f) => f.parentFrame() === piece).map((f) => f.url()));
+  check("demo: each screen's iframe loaded the prototype from the blob: URL", loaded &&
+    screensInside.every((r) => r.url.startsWith("blob:") && r.title === parts.title), detail);
+  check("demo: each iframe shows exactly the screen of its hash, and every key screen is shown once", loaded &&
+    expected.every((id) => byHash.get(id) && byHash.get(id).shown.length === 1 && byHash.get(id).shown[0] === id), detail);
+  check("demo: each shown screen has a laid-out box and visible text", loaded && screensInside.every((r) => r.size && r.size[0] > 0 && r.size[1] > 0 && r.text > 0), detail);
+  check("demo: each screen runs sandboxed: opaque origin, and it cannot read the piece", loaded && screensInside.every((r) => r.origin === "null" && !r.parentReadable), detail);
+  // The first key screen as the person sees it in the sheet (the element scrolled into view), for a look by eye.
+  if (piece && items && items.length) await piece.locator("[data-item] iframe").first().screenshot({ path: join(outDir, "harness-demo-screen-360.png") }).catch(() => {});
   check("demo: the piece stays open in the portal", await page.evaluate(() => Boolean(document.querySelector("iframe.piece-frame"))));
   check("demo: no page errors in harness", errors.length === 0, errors.join(" | "));
+  check("demo: no console errors (a blocked blob: or a failed screen would log one)", consoleErrors.length === 0, consoleErrors.join(" | "));
   await context.close();
 }
 
@@ -2167,10 +2226,10 @@ async function replacedAppChecks(browser, base, html, flowHtml, demoHtml) {
     await page.screenshot({ path: join(outDir, "piece-replaced-360.png") });
     const axe = await axeViolations(page);
     if (axe) check(`${tag}: axe on the piece screen with the notice has no violations`, axe.length === 0, axe.join(", "));
-    // The approve control of the first flow, by its role and name; a sheet without it fails here, it does not pass.
-    const approve = frame.getByRole("button", { name: "Aprobar este flujo", exact: true }).first();
+    // The approve control of the first key screen, by its role and name; a sheet without it fails here, it does not pass.
+    const approve = frame.getByRole("button", { name: "Aprobar esta pantalla", exact: true }).first();
     const hasApprove = (await approve.count()) > 0;
-    check(`${tag}: the sheet has an «Aprobar este flujo» control to change`, hasApprove);
+    check(`${tag}: the sheet has an «Aprobar esta pantalla» control to change`, hasApprove);
     if (hasApprove) await approve.click();
     const saved = await waitFor(async () => { const t = await page.textContent(".piece-status"); return backend.drafts.length && t && !t.includes("…") ? t : null; }, 5000);
     check(`${tag}: a saved draft reads «Guardado aquí, sin enviar», never just «Guardado»`, saved === "Guardado aquí, sin enviar", String(saved));
@@ -3676,14 +3735,15 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
   }
 }
 
-// ---- the portal's own frame, measured with the factory's geometry ----------------------------------------
+// ---- the portal's own frame, measured with the factory's frozen geometry ---------------------------------
 // The visual manual's frame rules (marco.md: one frame, one page margin on both sides from 672 px and the frame not
 // cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
-// FUN-43; and the rest that geometria.mjs measures on the factory's pieces), on every portal screen at the factory's
+// FUN-43; and the rest that geometria.mjs measured on the factory's pieces), on every portal screen at the factory's
 // verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
 // - the screen snapshots of PORTAL_SCREENS (sign-in email and code steps, home with the projects and empty, a project's page, an owned
 //   project's page with the owner's part, a project's page with a received piece, and the «Decisiones» screens) through
-//   the factory's design-system/assets/geometria.mjs: MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between them all
+//   tests/fixtures/geometria.mjs, the factory's measure frozen when the factory retired it (after its 1.47.0; see the file's
+//   header): MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between them all
 //   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
 // - the piece screen and the owner's read-only piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
 //   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
@@ -4911,9 +4971,9 @@ function listColumnChecks(name, width, scheme, rows) {
   }
 }
 async function portalGeometryChecks(browser, base, html, factory) {
-  const assets = join(resolve(factory), "design-system", "assets");
-  const { MEDIR_GEOMETRIA, evaluaAncho, evaluaConjunto, revisaMedia } = await import(pathToFileURL(join(assets, "geometria.mjs")).href);
-  const { widthInPortal } = await import(pathToFileURL(join(assets, "piece-host.mjs")).href);
+  // The geometry measure is the frozen copy in tests/fixtures (the factory retired its own); piece-host.mjs is still the factory's.
+  const { MEDIR_GEOMETRIA, evaluaAncho, evaluaConjunto, revisaMedia } = await import(pathToFileURL(join(root, "tests", "fixtures", "geometria.mjs")).href);
+  const { widthInPortal } = await import(pathToFileURL(join(resolve(factory), "design-system", "assets", "piece-host.mjs")).href);
   const passes = (r) => r.ok || Boolean(r.exceptuada);
   const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
   const names = PORTAL_SCREENS;
