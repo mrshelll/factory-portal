@@ -79,6 +79,12 @@ main { padding-block: var(--space-6) var(--space-7); }
 /* Its margin and the column's gap make the 8 px it always had under the notice. */
 .empty .empty-actions { display: grid; justify-items: start; gap: var(--space-4); max-width: var(--measure-form); margin-top: var(--space-1); }
 .empty .empty-actions .button--primary { width: 100%; }
+/* From 672 px the row is a flex row (below) and its column would take its text's width, so the notice and «Actualizar»
+   followed the font: the column takes the row's width, up to the reading measure, whatever the font. Below 672 the row is a
+   flex column and its column already takes the row's width. */
+@media (min-width: 672px) {
+  .empty .row-main { flex: 1 1 auto; }
+}
 
 /* A project's page: the way back above the title (the manual's «contexto» zone), and the line that says what the
    project's owner sees, first in the body and at the reading measure, one block's gap above the lists. */
