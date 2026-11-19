@@ -59,3 +59,15 @@ test("the subject names the product, has no code, no alarm and is fifty characte
   assert.ok(subject.length <= 50);
   assert.doesNotMatch(subject, /\{\{|\d|!|[A-ZÁÉÍÓÚ]{3,}/);
 });
+
+test("its colours are the brand's light ones (brand/ninben.css), so the email follows the brand", () => {
+  const css = readFileSync(new URL("../../brand/ninben.css", import.meta.url), "utf8");
+  const root = css.slice(css.indexOf(":root"), css.indexOf("}", css.indexOf(":root"))); // the light tokens, before any dark block
+  const tokens = Object.fromEntries([...root.matchAll(/--(bg|sheet|ink|muted|line):\s*(#[0-9A-Fa-f]{6})/g)].map(([, k, v]) => [k, v.toUpperCase()]));
+  assert.deepEqual(Object.keys(tokens).sort(), ["bg", "ink", "line", "muted", "sheet"]);
+  const used = [...body.matchAll(/(?:^|[;\s"])(?:color|background-color):\s*(#[0-9A-Fa-f]{3,8})/g)].map((m) => m[1].toUpperCase());
+  assert.ok(used.length > 0);
+  for (const hex of used) assert.ok(Object.values(tokens).includes(hex), `${hex} is not one of the brand's light tokens ${JSON.stringify(tokens)}`);
+  assert.match(body, new RegExp(`background-color:\\s*${tokens.bg}`, "i"));
+  assert.match(body, new RegExp(`(^|[;\\s"])color:\\s*${tokens.ink}`, "i"));
+});

@@ -314,7 +314,12 @@ stays on the row's right, and below 672 px the rows keep their phone layout.
 The email with the one-time code is `supabase/templates/otp-code.html` (HTML only: Supabase Auth's mailer sends no plain-text
 part) and its subject is `supabase/templates/otp-code.subject.txt`. The rules are COR-10 to COR-13 of the factory's visual
 manual (`patrones/correo-aviso.md`): the code first, large and as real text; how long it lasts; what to do if it was not asked
-for; no links, no images. `tests/unit/otp-template.test.mjs` checks what is mechanical.
+for; no links, no images. `tests/unit/otp-template.test.mjs` checks what is mechanical, and that its colours are the brand's
+light `--bg` and `--ink` in `brand/ninben.css`, so a brand change that the template has not followed fails `npm test`.
+
+The panel keeps its own copy: whenever `otp-code.html` changes, paste it again (step 5 below). It changed with the brand's
+cool neutrals (background `#F7F6EF` → `#EDF1F4`, text `#111111` → `#0F1720`); until it is pasted again, the email still
+goes out in the old cream.
 
 Steps in the Supabase panel (the owner does them; the app password is typed in the panel, never in this repository):
 
