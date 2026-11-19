@@ -264,7 +264,7 @@ with scope `local`, supabase-js removes the local session even when the network 
 
 ## Brand
 
-The portal wears the ninben brand: its colours (light and dark), the 4 px radius, Inter and JetBrains
+The portal wears the ninben brand: its colours (light and dark), the 4 px radius, IBM Plex Sans and JetBrains
 Mono, the logo in the masthead, and the components it shares with the factory's pieces. The single
 source lives in the software factory repo, in `design-system/assets/brand/` (`ninben.css`,
 `ninben-components.css`, `logo.svg`, `fonts/`). `brand/` here is a generated copy; never edit it by
