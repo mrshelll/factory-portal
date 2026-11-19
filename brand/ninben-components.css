@@ -8,6 +8,7 @@
 :root {
   --text-small: 14px;
   --text-body: 16px;
+  --text-section: 20px; /* a section's title under the page title: one step between the title and the body */
   --text-title: 24px;
 
   --space-1: 4px;
@@ -28,7 +29,7 @@
 
   --radius-pill: 999px;
   --target-min: 48px;
-  --mark: 4px; /* the accent stripe of a notice */
+  --mark: 4px; /* an accent stripe (the portal's quoted basis); notices no longer carry one */
 
   /* The frame names the pieces and the portal share (design-system/evals/brand checks them). They only point at
      the tokens above, which stay the source of truth. */
@@ -94,20 +95,30 @@ html[data-factory-host="portal"] .bar { display: none; }
 
 /* ---- notices ---------------------------------------------------------------------------- */
 
-/* A notice is a sheet with a stripe: grey for information, ink for a warning, the error colour for an
-   error. Never the signal, which means «you can touch this». */
+/* A notice is a sheet with a 1 px border, tinted by its tone: the sheet itself for information (grey border), ink for a
+   warning, the error colour for an error, ok for something that went well. No coloured stripe on one side. Never the
+   signal, which means «you can touch this». Text on every tint stays AA in both schemes: ink from 11.7:1, muted and the
+   signal of a link from 4.7:1. Where color-mix() is missing, the sheet with the grey border. */
 .notice {
   --notice-accent: var(--muted);
+  --notice-tint: 0%;
+  --notice-edge: 40%;
   display: grid;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-inline-start: var(--mark) solid var(--notice-accent);
   border-radius: var(--radius);
   background: var(--sheet);
 }
-.notice--warning { --notice-accent: var(--ink); }
-.notice--error { --notice-accent: var(--error); }
+@supports (background: color-mix(in srgb, red 10%, white)) {
+  .notice {
+    border-color: color-mix(in srgb, var(--notice-accent) var(--notice-edge), var(--sheet));
+    background: color-mix(in srgb, var(--notice-accent) var(--notice-tint), var(--sheet));
+  }
+}
+.notice--warning { --notice-accent: var(--ink); --notice-tint: 6%; --notice-edge: 55%; }
+.notice--error { --notice-accent: var(--error); --notice-tint: 10%; --notice-edge: 55%; }
+.notice--ok { --notice-accent: var(--ok); --notice-tint: 10%; --notice-edge: 55%; }
 .notice p { max-width: var(--measure-text); }
 .notice-actions { display: flex; flex-wrap: wrap; column-gap: var(--space-5); }
 
@@ -191,8 +202,12 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 :where(.piece) p, :where(.piece) h1, :where(.piece) h2, :where(.piece) h3, :where(.piece) ul, :where(.piece) dl,
 :where(.piece) dd { margin: 0; }
 :where(.piece) h1 { font-size: var(--text-title); line-height: 1.25; font-weight: 600; letter-spacing: -0.02em; }
-:where(.piece) h1:focus { outline: none; } /* the title takes the focus on each new view; it is not a control */
 :where(.piece) h2, :where(.piece) h3 { font-size: var(--text-body); line-height: 1.4; font-weight: 600; }
+/* A heading takes the focus on each new view or jump (tabindex="-1"); it is not a control. After a mouse or touch it shows
+   no ring; after the keyboard it shows the same ring as every control (the base's :focus-visible), so a person who sees
+   and uses the keyboard knows where the focus went. */
+:where(.piece) :is(h1, h2, h3)[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
+:where(.piece) :is(h1, h2, h3)[tabindex="-1"]:focus-visible { border-radius: var(--radius); }
 :where(.piece) main p, :where(.piece) main dd, :where(.piece) legend { max-width: var(--measure-text); } /* about 80 characters a line (FUN-12) */
 /* No word left alone on a last line: running text wraps «pretty» and headings «balance» (where a browser ignores
    text-wrap, the text wraps as before). */
