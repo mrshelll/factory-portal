@@ -461,10 +461,25 @@ test("rehearsal never posts drafts, dirty nor save-failed, and still answers flu
   assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:flushed"]);
 });
 
-test("rehearsal never posts submit", async () => {
+test("rehearsal posts only the payload-free signal, never factory:submit", async () => {
   const { win, of } = runBridge({ host: { rehearsal: true } });
   assert.deepEqual(await plain(win.factorySubmit(questions())), { ok: false, error: "rejected" });
+  assert.deepEqual(await plain(win.factorySubmit(questions())), { ok: false, error: "rejected" });
   assert.equal(of("factory:submit").length, 0);
+  const signals = of("factory:rehearsal-submit");
+  assert.equal(signals.length, 2, "one per press");
+  for (const signal of signals) assert.deepEqual(Object.keys(signal).sort(), ["nonce", "type"]);
+});
+
+test("a bridge not in rehearsal never posts factory:rehearsal-submit", async () => {
+  for (const host of [{}, { observer: true, closed: "received" }, { closed: "received" }]) {
+    const { win, of, fromParent } = runBridge({ host });
+    const sent = win.factorySubmit(questions());
+    const submit = of("factory:submit")[0];
+    if (submit) fromParent({ type: "factory:submit-result", requestId: submit.requestId, ok: true, nonce: "n-1" });
+    await plain(sent);
+    assert.equal(of("factory:rehearsal-submit").length, 0, JSON.stringify(host));
+  }
 });
 
 // ---- size and scrolling: the portal sizes the iframe to the piece and scrolls its own page --------------

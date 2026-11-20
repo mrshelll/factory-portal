@@ -171,18 +171,17 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .owner-piece .row-item > .status { grid-area: state; }
 /* Below 672 px the name line gives its parts to the entry's grid: the name beside the state, the links on their own last
    line, in a row that wraps. There each link is a box 44 px high (FUN-18) with no padding over a neighbour, so a wrapped
-   link never overlaps the other one nor the date line above them. */
-.owner-piece .owner-name { display: contents; }
-.owner-piece .owner-name > .row-title { grid-area: name; }
-.owner-piece .owner-links { grid-area: links; display: flex; flex-wrap: wrap; column-gap: var(--space-4); }
-.owner-piece .owner-links .owner-open { display: inline-flex; align-items: center; min-height: 44px; padding-block: 0; margin-block: 0; }
+   link never overlaps the other one nor the date line above them. From 672 px the links sit next to the name (below). */
+@media (max-width: 671.98px) {
+  .owner-piece .owner-name { display: contents; }
+  .owner-piece .owner-name > .row-title { grid-area: name; }
+  .owner-piece .owner-links { grid-area: links; display: flex; flex-wrap: wrap; column-gap: var(--space-4); }
+  .owner-piece .owner-links .owner-open { display: inline-flex; align-items: center; min-height: 44px; padding-block: 0; margin-block: 0; }
+}
 @media (min-width: 672px) {
   .owner-piece .row-item { display: flex; }
   .owner-piece .row-item > .row-main { display: grid; }
   .owner-piece .row-meta { grid-area: auto; }
-  .owner-piece .owner-name { display: flex; }
-  .owner-piece .owner-links { display: contents; }
-  .owner-piece .owner-links .owner-open { display: inline-block; min-height: 0; padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); }
 }
 /* Next to the name (from 672 px), and «Ver respuestas» everywhere, the link is a 44 px target like every other link of the
    portal (FUN-18): its padding grows what can be touched, and the same negative margin keeps its line, and so the entry, at
@@ -190,6 +189,7 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
    line on its whole box. Its focus ring goes around its words (the base's ring on its text), not around the padded box, so
    it never crosses the date line. */
 .owner-name { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); }
+.owner-links { display: contents; }
 .owner-open { position: relative; display: inline-block; padding-block: var(--space-3); margin-block: calc(-1 * var(--space-3)); font-size: var(--text-small); }
 .owner-open:focus-visible { outline: none; }
 .owner-open:focus-visible > span { outline: 2px solid var(--signal); outline-offset: 2px; }

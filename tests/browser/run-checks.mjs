@@ -3206,6 +3206,8 @@ const OWNER = {
   receivedBy: (name) => `Lo que recibió ${name}`,
   receivedByNoName: "Lo que recibió esta persona",
   receivedNotice: "Así la recibió. Lo que hagas aquí no se guarda ni se envía.",
+  // A send pressed there: the piece shows its own error, and the portal says it is expected (once per visit).
+  receivedSendOff: "En esta vista no se envía nada, así que el error que aparece al enviar es esperado.",
   empty: "Todavía no compartiste nada en este proyecto.",
   requestText: "Quiero cambiar el orden de las pantallas",
 };
@@ -3301,6 +3303,7 @@ function ownerViewBackend(html, flowHtml, demoHtml, storage) {
     // Not started, and in progress by someone whose name owner_piece does not give: nothing sent, only what they received.
     ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: pedro, status: "pending", response: null }),
     ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: { id: sofia.id, name: null }, status: "in_progress", response: null }),
+    ownerPieceEntry({ pieceId: OWNED.demo, kind: "demo_review", html: demoHtml, person: { id: sofia.id, name: null }, status: "received", response: null }),
   ]) backend.ownerPieces[`${entry.piece.id}|${entry.member.id}`] = entry;
   return backend;
 }
@@ -3681,20 +3684,31 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     }
 
     // owner-received: the piece as the person received it, in rehearsal: Luis's questions (from the page's link), his flow
-    // review and demo sheet (by address), Pedro's questions («Por empezar»), and Sofía's, whose name owner_piece does not give.
-    // Not closed, no observer, their name, no storage; the owner may try it, and nothing is saved, sent nor read from a draft.
+    // review and demo sheet (by address), Pedro's questions («Por empezar»), Marta's replaced demo version, and Sofía's
+    // questions and demo, whose name owner_piece does not give. Not closed, no observer, their name, no storage; the owner may
+    // try it, and nothing is saved, sent nor read from a draft. With a name, the questions and the demo are sent with the
+    // piece's own button: the piece shows its error, and the portal adds, once, a notice that says it is expected, in view.
     const nameless = { id: sofia.id, name: null };
+    // Each case in a page of its own: after the page's viewport changes above, Chrome can send a tap in this long-lived page to
+    // the piece's frame as it was drawn before (the piece never gets it), which a person's fresh page never does.
+    const sendOffOf = (page) => page.evaluate((text) => {
+      const list = [...document.querySelectorAll("[data-rol=avisos] .notice")].filter((n) => n.querySelector("p")?.textContent === text);
+      const r = list[0] ? list[0].getBoundingClientRect() : null;
+      const live = [...document.querySelectorAll("[data-rol=cuerpo] [role=status]")].map((x) => x.textContent);
+      return { count: list.length, warning: Boolean(list[0] && /notice--warning/.test(list[0].className)), buttons: list[0] ? list[0].querySelectorAll("button").length : null,
+        inView: Boolean(r) && r.top >= -1 && r.bottom <= window.innerHeight + 1, box: r && { top: Math.round(r.top), bottom: Math.round(r.bottom) }, vh: window.innerHeight,
+        scrollY: Math.round(window.scrollY), live: live.includes(text) };
+    }, OWNER.receivedSendOff);
     for (const [kind, pieceId, person, what] of [["questions", OWNED.questions, luis, "questions"], ["flow_review", OWNED.flow, luis, "flow_review"],
       ["demo_review", OWNED.demo, luis, "demo_review"], ["questions", OWNED.questions, pedro, "questions, «Por empezar»"],
-      ["questions", OWNED.questions, nameless, "questions, a person without a name"]]) {
+      ["demo_review", OWNED.demoOld, marta, "demo_review, a replaced version"],
+      ["questions", OWNED.questions, nameless, "questions, a person without a name"], ["demo_review", OWNED.demo, nameless, "demo_review, a person without a name"]]) {
       const tag = `owner-received (${what})`;
       const before = backend.requests.length;
-      const errorsBefore = errors.length;
+      const { context, page, errors } = await openMocked(browser, base, backend, what === "questions" ? `#/project/${IDS.ownedProject}` : rhref(pieceId, person));
       if (what === "questions") {
-        await goTo(page, `#/project/${IDS.ownedProject}`, () => ownerPart(page));
+        await waitFor(() => ownerPart(page), 10000);
         await page.click(`a[href="${rhref(pieceId, person)}"]`).catch(() => {});
-      } else {
-        await page.evaluate((h) => { location.hash = h; }, rhref(pieceId, person));
       }
       const frame = await ownerFrame(page);
       const host = frame ? await hostOf(frame) : null;
@@ -3715,17 +3729,39 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       const tried = frame && await (kind === "questions" ? frame.evaluate(() => { responder("q-001", "si"); return Object.keys(ST.respuestas).length; })
         : kind === "flow_review" ? frame.evaluate(() => { const st = fs(IDS[0]); st.veredicto = "ok"; st.estado = "ok"; save(); return 1; })
           : frame.click("#chg-0", { timeout: 3000 }).then(() => frame.fill("#c-0", "Otro orden", { timeout: 3000 })).then(() => 1)).catch((e) => String(e));
-      const result = frame && await frame.evaluate(() => factorySubmit({ formato: "respuestas-fabrica/1", respuestas: [] })).catch(() => null);
+      const pressed = Boolean(person.name) && (kind === "questions" || kind === "demo_review");
+      if (pressed) {
+        // The piece's own send button, as the owner presses it; then again, as «Reintentar».
+        const press = (again) => (kind === "questions" ? sendQuestions(frame)
+          : steadyClick(again ? frame.getByRole("button", { name: "Reintentar", exact: true }) : sendButton(frame))).catch(() => {});
+        if (frame) await press(false);
+        await waitFor(async () => (await sendOffOf(page)).count > 0, 5000);
+        await sleep(1500); // the piece has painted its error and asked to scroll to it
+        const first = await sendOffOf(page);
+        const pieceText = frame ? await frame.evaluate(() => document.body.innerText).catch(() => "") : "";
+        check(`${tag}: its send button is refused inside the piece, which shows its own error`, tried === 1 && /No se pudo enviar|No se pudieron enviar/.test(pieceText),
+          JSON.stringify({ tried, error: (pieceText.match(/No se pudo[^\n]*/) || [null])[0] }));
+        check(`${tag}: the portal says, once, that the piece's error is expected: a warning that stays, in view, also in the live region`, first.count === 1 &&
+          first.warning && first.buttons === 0 && first.inView && first.live, JSON.stringify(first));
+        if (kind === "demo_review" && pieceId === OWNED.demo) await page.screenshot({ path: join(outDir, "owner-received-send-off-360.png") });
+        if (frame) await press(true);
+        await sleep(1500);
+        const second = await sendOffOf(page);
+        check(`${tag}: a second press adds no second notice, and the notice is in view again`, second.count === 1 && second.inView && second.live, JSON.stringify(second));
+      } else {
+        const result = frame && await frame.evaluate(() => factorySubmit({ formato: "respuestas-fabrica/1", respuestas: [] })).catch(() => null);
+        check(`${tag}: what the owner tries stays in the piece, and its send is refused`, tried === 1 && result && result.ok === false && result.error === "rejected",
+          JSON.stringify({ tried, result }));
+      }
       await sleep(2000); // longer than the draft debounce: anything the piece would post has been posted
       const calls = backend.requests.slice(before);
-      check(`${tag}: what the owner tries stays in the piece, and its send is refused`, tried === 1 && result && result.ok === false && result.error === "rejected",
-        JSON.stringify({ tried, result }));
       check(`${tag}: no save_draft, submit_response, request_change nor mark_piece_opened, and no draft read, during the visit`, frame &&
         writesIn(calls).length === 0 && draftReadsIn(calls).length === 0, JSON.stringify(calls.filter((r) => r.includes("rpc/") || r.includes("piece_drafts"))));
       check(`${tag}: the screen reads the piece through owner_piece, for that person`, backend.ownerCalls.some((c) => c.rpc === "owner_piece" &&
         c.p_piece_id === pieceId && c.p_member_id === person.id), JSON.stringify(backend.ownerCalls.filter((c) => c.rpc === "owner_piece")));
-      check(`${tag}: no page errors`, errors.length === errorsBefore, errors.slice(errorsBefore).join(" | "));
+      check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
       if (what === "questions") await page.screenshot({ path: join(outDir, "owner-received-360.png"), fullPage: true });
+      await context.close();
     }
     // owner-received-unavailable: the received address of someone with no assignment on that piece is not available.
     {

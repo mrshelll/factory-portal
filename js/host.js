@@ -60,6 +60,7 @@ export function parseBridgeMessage(data, kind, nonce) {
       if (typeof data.persistence !== "boolean") return no("shape");
       return { ok: true, message: { type: data.type, persistence: data.persistence } };
     case "factory:flushed":
+    case "factory:rehearsal-submit": // a send pressed in rehearsal: a bare signal, nothing of the piece's
       return { ok: true, message: { type: data.type } };
     case "factory:save-failed":
       if (!SAVE_FAILED_REASONS.includes(data.reason)) return no("shape");

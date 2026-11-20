@@ -53,7 +53,9 @@
 //    inside the portal without a flash. `rehearsal` is true when the project owner opens the piece as
 //    the person received it (independent of `closed`): it behaves like `closed` and `observer`
 //    together, so the piece posts no draft, dirty nor save-failed (writes stay in memory) and
-//    factorySubmit resolves { ok: false, error: "rejected" } without posting. Nothing leaves the iframe.
+//    factorySubmit resolves { ok: false, error: "rejected" } without posting factory:submit. It posts
+//    only `{ type: "factory:rehearsal-submit" }`, with no payload, so the portal can say the piece's
+//    error is expected: what the piece holds never leaves the iframe.
 //
 // 4. Size and scrolling: the portal sizes the iframe to the piece's height and its own page scrolls,
 //    so the piece never scrolls inside. Right after factory:ready and on every change (ResizeObserver
@@ -246,7 +248,8 @@ function bridgeRuntime(cfg) {
   }
 
   function factorySubmit(payload) {
-    if (cfg.observer || cfg.rehearsal) return Promise.resolve({ ok: false, error: "rejected" }); // the owner never sends for anyone, nor in a rehearsal
+    if (cfg.rehearsal) { post({ type: "factory:rehearsal-submit" }); return Promise.resolve({ ok: false, error: "rejected" }); } // only the signal, never the payload
+    if (cfg.observer) return Promise.resolve({ ok: false, error: "rejected" }); // the owner never sends for anyone
     if (inflight) return inflight.promise;
     var json;
     try { json = JSON.stringify(payload); } catch (e) { json = undefined; }

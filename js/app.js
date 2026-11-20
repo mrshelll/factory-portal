@@ -1,5 +1,5 @@
-// Portal entry point: session, hash router and the screens (sign in, home with the projects, a project's page, piece, and
-// the owner's read-only view of what a person sent).
+// Portal entry point: session, hash router and the screens (sign in, home with the projects, a project's page, piece, the
+// owner's read-only view of what a person sent, and the owner's rehearsal of what a person received).
 
 import { supabase } from "./supabase-client.js";
 import { EMAIL_OTP_LENGTH } from "../config.js";
@@ -1595,7 +1595,11 @@ async function showPiece(pieceId, viewId) {
 // that forges it) is answered rejected, and the server refuses it too. Without such a send there is nothing to open.
 // mode "received" opens the same piece as the person received it, whatever they did with it: their name, no storage (never
 // their draft nor their send), in rehearsal (not closed, no observer), under a fixed notice; the owner may try it, and
-// nothing they do is saved, sent nor marked opened. Any assignment there opens it.
+// nothing they do is saved, sent nor marked opened. Any assignment there opens it. The piece answers its own send rejected
+// and shows its error (as if the connection failed), and the bridge only signals the press (factory:rehearsal-submit): on
+// the first one a second notice says that error is expected, once per visit, also through the live region; and since the
+// piece scrolls to its error, the notice is brought back into view after every scroll or height the piece asks for within
+// PENDING_SCROLL_MS of a press (the piece's answer to it).
 async function showOwnerPiece({ projectId, pieceId, memberId }, viewId, mode = "sent") {
   const receivedMode = mode === "received";
   state.view = receivedMode ? "owner-received" : "owner-piece";
@@ -1639,14 +1643,31 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId, mode = "
     layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
   }
   const follow = followPiece(() => (frame ? frame.iframe : null));
+  let sendOff = null; // the received view's notice about the piece's send error, once shown
+  let lastSendAt = 0;
+  const showSendOff = () => {
+    if (sendOff && sendOff.isConnected && Date.now() - lastSendAt <= PENDING_SCROLL_MS) sendOff.scrollIntoView({ block: "nearest" });
+  };
   frame = mountPiece({
     container: layout.main, html: piece.html, kind: piece.kind, storage: receivedMode ? {} : response.storage, title: pieceTitle,
-    onHeight: follow.onHeight, onScroll: follow.onScroll,
+    onHeight: (height) => { follow.onHeight(height); showSendOff(); },
+    onScroll: (request) => { follow.onScroll(request); showSendOff(); },
     // reviewerName exactly as loadPiece gives it to the person: a piece keys what it stores by it.
     host: receivedMode
       ? { reviewerName: member.display_name, rehearsal: true }
       : { reviewerName: member.display_name, closed: "received", sentAt: response.submitted_at, observer: true },
     onSubmit: ({ requestId }) => { if (frame) frame.respond(requestId, { ok: false, error: "rejected" }); },
+    // In rehearsal the piece answers its own send rejected and only signals it was pressed.
+    onRehearsalSubmit: () => {
+      if (!receivedMode) return;
+      if (!sendOff) {
+        sendOff = noticeElement({ tone: "warning", text: t("ownerReceivedSendOff"), dismissible: false });
+        layout.notices.append(sendOff);
+        layout.live.textContent = t("ownerReceivedSendOff");
+      }
+      lastSendAt = Date.now();
+      showSendOff();
+    },
     onNavigatedAway: () => {
       frame = null;
       showNotice(layout.notices, { tone: "warning", text: t("pieceNavigated"), dismissible: false, actions: [{ label: t("reopen"), onClick: route }] });

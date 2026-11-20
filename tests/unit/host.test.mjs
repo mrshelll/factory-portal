@@ -39,6 +39,14 @@ test("parseBridgeMessage validates ready and flushed", () => {
   assert.equal(parseBridgeMessage({ nonce: N, type: "factory:flushed" }, "questions", N).ok, true);
 });
 
+test("parseBridgeMessage accepts the rehearsal's bare send signal, with the nonce only", () => {
+  assert.deepEqual(parseBridgeMessage({ nonce: N, type: "factory:rehearsal-submit" }, "questions", N), { ok: true, message: { type: "factory:rehearsal-submit" } });
+  assert.deepEqual(parseBridgeMessage({ nonce: N, type: "factory:rehearsal-submit", payload: { a: 1 } }, "demo_review", N),
+    { ok: true, message: { type: "factory:rehearsal-submit" } }, "anything else in it is dropped, never passed on");
+  assert.equal(parseBridgeMessage({ type: "factory:rehearsal-submit" }, "questions", N).ok, false, "needs the nonce");
+  assert.equal(parseBridgeMessage({ nonce: "other", type: "factory:rehearsal-submit" }, "questions", N).ok, false);
+});
+
 test("parseBridgeMessage rejects the retired factory:submit-error with type", () => {
   const parsed = parseBridgeMessage({ nonce: N, type: "factory:submit-error", requestId: "r", reason: "empty" }, "questions", N);
   assert.deepEqual(parsed, { ok: false, reason: "type" });

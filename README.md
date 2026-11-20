@@ -122,7 +122,9 @@ Every entry, whatever its state, also carries «Ver lo que recibió» (after «V
 the same piece as the person received it: under their name, with no storage (never their draft nor their send), in the
 bridge's rehearsal mode, with «Lo que recibió <name>» in the title band and a fixed notice «Así la recibió. Lo que hagas
 aquí no se guarda ni se envía.». The owner may try it; nothing is saved, sent nor marked opened, and a send from inside
-is answered rejected.
+is answered rejected. The piece then shows its own send error, as if the connection failed, so on the first press the
+portal adds a second notice, once per visit and also in the screen's live region, saying that error is expected, and
+brings it into view after the piece has scrolled to its error.
 
 **What the owner never sees: drafts.** Not `piece_drafts`, not a response with `partial = true`, not the
 storage of a change request. A person whose only responses are partial, or whose send predates the stored
@@ -204,8 +206,10 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
 - **Rehearsal.** `factoryHost.rehearsal` is `true` only when the portal passes `host.rehearsal === true`
   (what the owner's «Ver lo que recibió» does), whatever `closed` says; anything else is `false`. The
   piece runs as it does for the person, with the storage shim in place, but writes stay in memory:
-  nothing leaves the iframe (no `factory:draft`, `factory:dirty` nor `factory:save-failed`;
-  `factory:flush` still answers) and `factorySubmit` resolves `{ ok: false, error: "rejected" }` without posting.
+  nothing the piece holds leaves the iframe (no `factory:draft`, `factory:dirty` nor `factory:save-failed`;
+  `factory:flush` still answers) and `factorySubmit` resolves `{ ok: false, error: "rejected" }` without posting
+  `factory:submit`. It posts only `{ type: "factory:rehearsal-submit" }` (with the nonce, no payload), so the portal
+  knows a send was pressed; a bridge not in rehearsal never posts it.
 - **Size and scrolling.** The portal sizes the iframe to the piece's height and its own page scrolls,
   so the piece never scrolls inside. Right after `factory:ready`, and on every change after it
   (a `ResizeObserver` on the piece's `<html>`), and once on the window's `load` and once on
@@ -546,7 +550,8 @@ project's page (its own items, the note about what the owner sees, a person who 
 the owner who also has a piece assigned in their own project, and `mark_piece_opened` failing: the piece opens
 anyway). With `--questions` and `--demo` (and the flow piece, the frozen one unless `--flow` is given), the owner's part: every state and date, the three
 kinds of piece opened read only, the three kinds opened as received (rehearsal: not seeded, nothing saved nor sent, also
-for a person who has not started and one without a name), a send kept without its storage (no «Ver lo que envió»), an old
+for a person who has not started, a replaced version and people without a name; the questions' and the demo's own send
+buttons pressed twice, with the portal's notice shown once and in view), a send kept without its storage (no «Ver lo que envió»), an old
 piece, and that the owner's screens save, send and ask nothing and never read a draft.
 
 **Screen snapshots and axe.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
