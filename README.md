@@ -105,7 +105,8 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
 ### The owner's part
 
 Routes: `#/` (home), `#/project/<id>`, `#/piece/<id>`, `#/project/<p>/piece/<x>/person/<m>` (the owner
-reading one person's send) and `#/project/<p>/decisions/<key>` (the owner reading how each person answered one
+reading one person's send), `#/project/<p>/piece/<x>/person/<m>/received` (the owner opening the piece as that person
+received it) and `#/project/<p>/decisions/<key>` (the owner reading how each person answered one
 point of «Decisiones»). The routes are pure functions in `js/project.js`.
 
 The owner of a project (the member with `role = 'owner'`, which the factory sets after a publish through `factory_set_owner`) sees,
@@ -113,9 +114,15 @@ besides their own items, the section «Avance de lo que compartiste»: per piece
 assigned, with their state («Por empezar», «La abrió», «En curso», «Enviada», «Recibida» or «Reemplazada») and a
 date that says what it is («Recibida el …», «Envió el …», «La abrió el …», «Último cambio el …», «Compartida el …»). A
 change request («pidió un cambio el …») and a send after the close («la reenvió el …») are said by their date, never their
-text. Below 672 px each entry is two lines: the name with the state on its right, then the date line. Names are plain text; a send the owner can read carries the link «Ver lo que
+text. Below 672 px each entry is three lines: the name with the state on its right, the date line, then its links. Names are plain text; a send the owner can read carries the link «Ver lo que
 envió» next to the name, which opens the same piece, closed and read only, with «Lo que envió <name> el <date>» in the title band. The owner never
 responds, saves or sends for anyone: that screen posts nothing.
+
+Every entry, whatever its state, also carries «Ver lo que recibió» (after «Ver lo que envió» when there is one). It opens
+the same piece as the person received it: under their name, with no storage (never their draft nor their send), in the
+bridge's rehearsal mode, with «Lo que recibió <name>» in the title band and a fixed notice «Así la recibió. Lo que hagas
+aquí no se guarda ni se envía.». The owner may try it; nothing is saved, sent nor marked opened, and a send from inside
+is answered rejected.
 
 **What the owner never sees: drafts.** Not `piece_drafts`, not a response with `partial = true`, not the
 storage of a change request. A person whose only responses are partial, or whose send predates the stored
@@ -538,8 +545,9 @@ try a piece file.
 project's page (its own items, the note about what the owner sees, a person who owns one project and is asked things in another,
 the owner who also has a piece assigned in their own project, and `mark_piece_opened` failing: the piece opens
 anyway). With `--questions` and `--demo` (and the flow piece, the frozen one unless `--flow` is given), the owner's part: every state and date, the three
-kinds of piece opened read only, a send kept without its storage (no link), an old piece, and that the owner's
-screens save, send and ask nothing and never read a draft.
+kinds of piece opened read only, the three kinds opened as received (rehearsal: not seeded, nothing saved nor sent, also
+for a person who has not started and one without a name), a send kept without its storage (no «Ver lo que envió»), an old
+piece, and that the owner's screens save, send and ask nothing and never read a draft.
 
 **Screen snapshots and axe.** Each run saves screens to `<out>/screens/`: `sign-in-email.html`,
 `sign-in-code.html` (pattern `formulario`) and `home-empty.html` (pattern `lista`); with `--questions`, also

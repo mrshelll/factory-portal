@@ -17,7 +17,7 @@ export function randomNonce() {
 }
 
 // host: { reviewerName, closed, observer, rehearsal, sentAt } for globalThis.factoryHost inside the piece (closed: "received" |
-// "replaced" | null; sentAt: an ISO string or null; observer: true only with closed, when the project owner reads; with closed set the piece posts no draft nor dirty; rehearsal: true, independent of closed, when the owner tries the piece as the person received it: no draft, dirty nor submit leave it). onSubmit({ requestId, payload })
+// "replaced" | null; sentAt: an ISO string or null; observer: true only with closed, when the project owner reads; with closed set the piece posts no draft nor dirty; rehearsal: true, independent of closed, when the owner tries the piece as the person received it: no draft, dirty, save-failed nor submit leave it). onSubmit({ requestId, payload })
 // must end with respond(requestId, { ok: true } | { ok: false, error }). onNavigatedAway: the iframe
 // loaded a second document (the piece navigated or reloaded); the frame is already destroyed when it
 // is called. onSaveFailed(reason): the piece tried to keep a change that does not fit ("too-large");

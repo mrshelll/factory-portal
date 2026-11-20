@@ -1868,6 +1868,22 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         await screen.context.close();
       }
     } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
+    // The owner's received screen keeps «← Volver» too, with its line «Lo que recibió …» under a title of TITLE_MAX characters
+    // (the fixed notice goes under the band).
+    try {
+      for (const [what, person] of [[`a title of ${TITLE_MAX} characters`, savedName], [`a title of ${TITLE_MAX} characters and a person of ${LONG_NAME.length}`, LONG_NAME]]) {
+        OWNED_TITLES[OWNED.questions] = TITLE_AT_MAX;
+        PEOPLE.luis.name = person;
+        const b = ownerViewBackend(html, null, null, {});
+        const tag = `phone ${engineName}: owner's received piece with ${what}`;
+        const screen = await phoneScreen(tag, b, ownerReceived(IDS.ownedProject, OWNED.questions, PEOPLE.luis), "h1.piece-title, .piece-status", `Volver a ${PROJECT.owned}`,
+          () => document.querySelector("h1.piece-title") && document.querySelector(".piece-status")?.textContent.startsWith("Lo que recibió"));
+        const line = await screen.page.evaluate(() => document.querySelector(".piece-status")?.textContent);
+        check(`${tag}: the title is whole (${TITLE_AT_MAX.length} characters, never cut) and the line says whose it is`, screen.at.h1Text === TITLE_AT_MAX &&
+          line === OWNER.receivedBy(person), JSON.stringify({ at: screen.at, line }));
+        await screen.context.close();
+      }
+    } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
     // One point of «Decisiones» as the owner reads it keeps «← Volver» too: it goes back to the project, not home (the
     // brand's destination). Then its band reads as every list's: «← Volver» on its own row, the h1 (the point's title), and the
     // counts under it as the list's data line, at the h1's x. The h1 takes the largest step of the type scale with which a
@@ -3184,6 +3200,12 @@ const OWNER = {
   sharedOn: (date) => `Compartida el ${date}`,
   // A readable send carries this link next to the person's name; the name itself is never a link.
   open: "Ver lo que envió",
+  // Every entry carries this one, after «Ver lo que envió» when there is one: the piece as the person received it, in rehearsal.
+  received: "Ver lo que recibió",
+  receivedLabel: (name, piece) => `Ver lo que recibió ${name} en ${piece}`,
+  receivedBy: (name) => `Lo que recibió ${name}`,
+  receivedByNoName: "Lo que recibió esta persona",
+  receivedNotice: "Así la recibió. Lo que hagas aquí no se guarda ni se envía.",
   empty: "Todavía no compartiste nada en este proyecto.",
   requestText: "Quiero cambiar el orden de las pantallas",
 };
@@ -3205,6 +3227,7 @@ const OWNED_TITLES = { [OWNED.questions]: "Preguntas para el equipo", [OWNED.flo
 const AT = { assigned: "2026-10-15T15:00:00.000Z", opened: "2026-10-16T15:00:00.000Z", changed: "2026-10-17T15:00:00.000Z",
   sent: "2026-10-19T15:00:00.000Z", received: "2026-10-20T15:00:00.000Z", requested: "2026-10-22T15:00:00.000Z", late: "2026-10-23T15:00:00.000Z" };
 const ownerHref = (projectId, pieceId, person) => `#/project/${projectId}/piece/${pieceId}/person/${person.id}`;
+const ownerReceived = (projectId, pieceId, person) => `${ownerHref(projectId, pieceId, person)}/received`;
 // An assignment as owner_project gives it: sent_at is the newest send that is not partial, readable whether it kept its storage.
 const ownerAssignment = (person, status, { opened = null, sent = null, readable = false, updated = AT.changed } = {}) => ({
   member_id: person.id, status, assigned_at: AT.assigned, updated_at: updated, first_opened_at: opened, sent_at: sent, readable });
@@ -3265,7 +3288,7 @@ parent.postMessage({ type: "factory:submit", requestId: "forged-1", payload: { f
 // Ana owns «Biblioteca del barrio» (owner_project and owner_piece answer for it) and is asked things in «Portal de prueba».
 function ownerViewBackend(html, flowHtml, demoHtml, storage) {
   const backend = ownerBackend(html);
-  const { luis, marta } = PEOPLE;
+  const { luis, marta, pedro, sofia } = PEOPLE;
   const response = (s) => ({ id: randomUUID(), submitted_at: AT.sent, storage: s });
   for (const entry of [
     ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: luis, status: "received", response: response(storage) }),
@@ -3275,6 +3298,9 @@ function ownerViewBackend(html, flowHtml, demoHtml, storage) {
     ownerPieceEntry({ pieceId: OWNED.flow, kind: "flow_review", html: flowHtml, person: marta, status: "submitted", response: null }),
     ownerPieceEntry({ pieceId: OWNED.demoOld, kind: "demo_review", html: demoHtml, person: marta, status: "replaced", response: null }),
     ownerPieceEntry({ pieceId: OWNED.old, kind: "questions", html: OLD_PIECE, person: luis, status: "received", response: response({ vieja: "1" }) }),
+    // Not started, and in progress by someone whose name owner_piece does not give: nothing sent, only what they received.
+    ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: pedro, status: "pending", response: null }),
+    ownerPieceEntry({ pieceId: OWNED.questions, kind: "questions", html, person: { id: sofia.id, name: null }, status: "in_progress", response: null }),
   ]) backend.ownerPieces[`${entry.piece.id}|${entry.member.id}`] = entry;
   return backend;
 }
@@ -3292,8 +3318,11 @@ const ownerPart = (page, title = OWNER.section) => page.evaluate((heading) => {
           const status = li.querySelector(".status");
           return { name: li.querySelector(".row-title")?.textContent || null, meta: li.querySelector(".row-meta")?.textContent || "",
             state: status ? status.textContent : null, dot: status ? status.className : null, hasDot: Boolean(status && status.querySelector(".status-dot")),
-            href: li.querySelector("a")?.getAttribute("href") || null, links: li.querySelectorAll("a").length,
-            linkText: li.querySelector("a")?.textContent || null, nameInLink: Boolean(li.querySelector("a .row-title, a.row-title")) };
+            // href: «Ver lo que envió»'s; received: «Ver lo que recibió»'s (its address ends in /received), with its name.
+            href: li.querySelector('a:not([href$="/received"])')?.getAttribute("href") || null,
+            received: li.querySelector('a[href$="/received"]')?.getAttribute("href") || null,
+            receivedLabel: li.querySelector('a[href$="/received"]')?.getAttribute("aria-label") || null, links: li.querySelectorAll("a").length,
+            linkTexts: [...li.querySelectorAll("a")].map((a) => a.textContent), nameInLink: Boolean(li.querySelector("a .row-title, a.row-title")) };
         }),
       };
     }),
@@ -3339,8 +3368,8 @@ const portalDots = (page) => page.evaluate(() => {
     // «En curso»: the ink ring, hollow (no fill at all), its border the ink.
     rings: dots.filter((d) => d.word === "En curso").map((d) => d.border === ink && d.style === "solid" && d.width > 0 && clear(d)) };
 });
-// Each entry of the owner's part as laid out: its name line (name and link), its state word, its date line, the link's box,
-// the line heights and the row's content height (without its padding).
+// Each entry of the owner's part as laid out: its name line (name and links; from 672 px), the name, its state word, its date
+// line, its links line and each link's box, the line heights and the row's content height (without its padding).
 const ownerEntries = (page) => page.evaluate(() => [...document.querySelectorAll("[data-rol=cuerpo] .owner-piece li.row")].map((li) => {
   const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
     return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height),
@@ -3348,12 +3377,12 @@ const ownerEntries = (page) => page.evaluate(() => [...document.querySelectorAll
   const item = li.querySelector(".row-item"), cs = getComputedStyle(item);
   const lineHeight = (el) => { const c = getComputedStyle(el); return parseFloat(c.lineHeight) || parseFloat(c.fontSize) * 1.5; };
   const name = li.querySelector(".row-title"), meta = li.querySelector(".row-meta");
-  return { name: name?.textContent || null, line: box(li.querySelector(".owner-name")), state: box(li.querySelector(".status")), meta: box(meta),
-    metaText: meta?.textContent || "",
-    link: box(li.querySelector("a.owner-open")), lh: Math.round(lineHeight(name)), metaLh: meta ? Math.round(lineHeight(meta)) : 0,
+  return { name: name?.textContent || null, line: box(li.querySelector(".owner-name")), title: box(name), state: box(li.querySelector(".status")), meta: box(meta),
+    metaText: meta?.textContent || "", linksLine: box(li.querySelector(".owner-links")),
+    links: [...li.querySelectorAll("a.owner-open")].map(box), lh: Math.round(lineHeight(name)), metaLh: meta ? Math.round(lineHeight(meta)) : 0,
     gap: Math.round(parseFloat(cs.rowGap) || 0), content: Math.round(item.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) };
 }));
-// What a tap hits on each «Ver lo que envió»: brought into view, its box sampled every pixel row at its left edge, its centre
+// What a tap hits on each «Ver lo que envió» and «Ver lo que recibió»: brought into view, its box sampled every pixel row at its left edge, its centre
 // and its right edge with elementFromPoint; a miss is any sample that is not the link nor inside it.
 const ownerLinkHits = (page) => page.evaluate(async () => {
   const out = [];
@@ -3373,11 +3402,13 @@ const ownerLinkHits = (page) => page.evaluate(async () => {
   }
   return out;
 });
-// The first «Ver lo que envió» focused as the keyboard focuses it: whether a ring shows (on the link or its text) and how far
-// down it reaches, against the top of the date text under it.
-const ownerLinkRing = async (page) => {
-  await page.evaluate(() => { const a = document.querySelector("[data-rol=cuerpo] .owner-piece a.owner-open"); a.scrollIntoView({ block: "center" });
-    const prev = [...document.querySelectorAll("a, button")]; const i = prev.indexOf(a); (prev[i - 1] || document.body).focus(); });
+// The first link that matches `selector` («Ver lo que envió», or «Ver lo que recibió» next to it or alone) focused as the
+// keyboard focuses it: whether a ring shows (on the link or its text) and how far up and down it reaches, against the date
+// text (under the link from 672 px, above it below 672).
+const ownerLinkRing = async (page, selector) => {
+  const found = await page.evaluate((sel) => { const a = document.querySelector(sel); if (!a) return false; a.scrollIntoView({ block: "center" });
+    const prev = [...document.querySelectorAll("a, button")]; const i = prev.indexOf(a); (prev[i - 1] || document.body).focus(); return true; }, selector);
+  if (!found) return null;
   await page.keyboard.press("Tab");
   return page.evaluate(() => {
     const a = document.activeElement;
@@ -3389,11 +3420,12 @@ const ownerLinkRing = async (page) => {
     const meta = a.closest("li").querySelector(".row-meta");
     const rg = document.createRange(); rg.selectNodeContents(meta);
     const metaRects = [...rg.getClientRects()].filter((x) => x.width > 0);
-    const metaTop = Math.min(...metaRects.map((x) => x.top));
+    const metaTop = Math.min(...metaRects.map((x) => x.top)), metaBottom = Math.max(...metaRects.map((x) => x.bottom));
     const round = (v) => Math.round(v * 10) / 10;
-    const ring = { visible: rings.length > 0, rings, bottom: rings.length ? round(Math.max(...rings.map((x) => x.bottom))) : null, metaTop: round(metaTop),
+    const ring = { visible: rings.length > 0, rings, top: rings.length ? round(Math.min(...rings.map((x) => x.top))) : null,
+      bottom: rings.length ? round(Math.max(...rings.map((x) => x.bottom))) : null, metaTop: round(metaTop), metaBottom: round(metaBottom),
       // The ring's box (the outline around its element) against every rect of the date text: it never crosses any of them,
-      // whether the date line is under the link (below 1056) or beside it (the columns from 1056).
+      // whether the date line is above the links (below 672), under them (672 to 1056) or beside them (the columns from 1056).
       crosses: rings.some((x) => metaRects.some((m) => x.left < m.right && x.right > m.left && x.top < m.bottom && x.bottom > m.top)) };
     a.blur();
     return ring;
@@ -3408,7 +3440,9 @@ const ownerBand = (page) => page.evaluate(() => {
     pinned: document.querySelector("[data-rol=aviso-fijo]")?.innerText || "", form: Boolean(document.getElementById("change-request-text")),
     requestButton: [...document.querySelectorAll("button")].some((b) => b.textContent === "Pedir un cambio"),
     iframes: document.querySelectorAll("iframe").length,
-    notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => n.querySelector("p")?.textContent) };
+    notices: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => n.querySelector("p")?.textContent),
+    noticeButtons: document.querySelectorAll("[data-rol=avisos] .notice button").length,
+    noticeTone: [...document.querySelectorAll("[data-rol=avisos] .notice")].map((n) => n.className).join() };
 });
 // The piece the owner reads, once it shows its heading (or, for the old piece, once its script ran). The piece heads its
 // read view itself («Respuestas», «Revisión»); the portal's band says whose send it is.
@@ -3416,7 +3450,7 @@ async function ownerFrame(page, ready = () => typeof factoryHost === "object" &&
   [...document.querySelectorAll("h1")].some((h) => h.getBoundingClientRect().height > 0 && h.textContent.trim())) {
   return waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(ready).catch(() => false)) ? f : null; }, 10000);
 }
-const hostOf = (frame) => frame.evaluate(() => ({ observer: factoryHost.observer, closed: factoryHost.closed, reviewerName: factoryHost.reviewerName,
+const hostOf = (frame) => frame.evaluate(() => ({ observer: factoryHost.observer, closed: factoryHost.closed, rehearsal: factoryHost.rehearsal, reviewerName: factoryHost.reviewerName,
   sentAt: factoryHost.sentAt, h1: [...document.querySelectorAll("h1")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => h.textContent.trim()),
   repeats: document.body.innerText.includes("Lo que envió") }));
 // The writes the owner must never make, and the draft reads.
@@ -3455,22 +3489,24 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const d = Object.fromEntries(await Promise.all(Object.entries(AT).map(async ([k, v]) => [k, await formatIn(page, v)])));
     const S = OWNER.states;
     const href = (pieceId, person) => ownerHref(IDS.ownedProject, pieceId, person);
+    const rhref = (pieceId, person) => ownerReceived(IDS.ownedProject, pieceId, person);
     const expected = [
       { title: OWNED_TITLES[OWNED.questions], kind: "Preguntas", people: [
-        { name: luis.name, state: S.received, meta: OWNER.receivedOn(d.received), href: href(OWNED.questions, luis) },
-        { name: marta.name, state: S.opened, meta: OWNER.openedOn(d.opened), href: null },
-        { name: pedro.name, state: S.pending, meta: OWNER.sharedOn(d.assigned), href: null },
-        { name: sofia.name, state: S.in_progress, meta: OWNER.changedOn(d.changed), href: null }] },
+        { name: luis.name, state: S.received, meta: OWNER.receivedOn(d.received), href: href(OWNED.questions, luis), received: rhref(OWNED.questions, luis) },
+        { name: marta.name, state: S.opened, meta: OWNER.openedOn(d.opened), href: null, received: rhref(OWNED.questions, marta) },
+        { name: pedro.name, state: S.pending, meta: OWNER.sharedOn(d.assigned), href: null, received: rhref(OWNED.questions, pedro) },
+        { name: sofia.name, state: S.in_progress, meta: OWNER.changedOn(d.changed), href: null, received: rhref(OWNED.questions, sofia) }] },
       { title: OWNED_TITLES[OWNED.flow], kind: "Revisión de recorridos", people: [
-        { name: luis.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: href(OWNED.flow, luis) },
-        { name: marta.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: null }] },
+        { name: luis.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: href(OWNED.flow, luis), received: rhref(OWNED.flow, luis) },
+        { name: marta.name, state: S.submitted, meta: OWNER.sentOn(d.sent), href: null, received: rhref(OWNED.flow, marta) }] },
       { title: OWNED_TITLES[OWNED.demo], kind: "Revisión de la demo", people: [
-        { name: luis.name, state: S.received, meta: `${OWNER.receivedOn(d.received)} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis) },
-        { name: sofia.name, state: S.received, meta: `${OWNER.receivedOn(d.received)} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia) }] },
+        { name: luis.name, state: S.received, meta: `${OWNER.receivedOn(d.received)} · ${OWNER.askedChange(d.requested)}`, href: href(OWNED.demo, luis), received: rhref(OWNED.demo, luis) },
+        { name: sofia.name, state: S.received, meta: `${OWNER.receivedOn(d.received)} · ${OWNER.lateSend(d.late)}`, href: href(OWNED.demo, sofia), received: rhref(OWNED.demo, sofia) }] },
       { title: OWNED_TITLES[OWNED.demoOld], kind: "Revisión de la demo", people: [
-        { name: marta.name, state: S.replaced, meta: OWNER.sharedOn(d.assigned), href: null }] },
+        { name: marta.name, state: S.replaced, meta: OWNER.sharedOn(d.assigned), href: null, received: rhref(OWNED.demoOld, marta) }] },
     ];
-    const got = part && part.pieces.map((p) => ({ title: p.title, kind: p.kind, people: p.people.map(({ name, state, meta, href: h }) => ({ name, state, meta, href: h })) }));
+    const got = part && part.pieces.map((p) => ({ title: p.title, kind: p.kind, people: p.people.map(({ name, state, meta, href: h, received, receivedLabel }) =>
+      ({ name, state, meta, href: h, received, receivedLabel })) }));
     check(`owner-project: the owned project's page has «${OWNER.section}», and no «${PROJECT.askedOfYou}» when nothing was asked of the owner`,
       part && view.h1 === PROJECT.owned && view.sections.includes(OWNER.section) && !view.sections.includes(PROJECT.askedOfYou), JSON.stringify(view));
     check("owner-project: each piece with its title and kind, newest first", got && JSON.stringify(got.map(({ title, kind }) => ({ title, kind }))) ===
@@ -3493,6 +3529,10 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     check("owner-project: a readable send links to what the person sent; one that is not readable does not",
       got && JSON.stringify(got.map((p) => p.people.map((x) => x.href))) === JSON.stringify(expected.map((p) => p.people.map((x) => x.href))),
       JSON.stringify(got && got.map((p) => p.people.map((x) => x.href))));
+    check(`owner-project: every entry, whatever its state, links to what the person received («${OWNER.received}»), named after the person and the piece`,
+      got && JSON.stringify(got.map((p) => p.people.map((x) => x.received))) === JSON.stringify(expected.map((p) => p.people.map((x) => x.received))) &&
+      got.every((p, i) => p.people.every((x) => x.receivedLabel === OWNER.receivedLabel(x.name, expected[i].title))),
+      JSON.stringify(got && got.map((p) => p.people.map((x) => [x.received, x.receivedLabel]))));
     check("owner-project: a change request and a send after the close are said by their date, never by their text",
       part && !part.text.includes(OWNER.requestText) && !(await page.evaluate((t) => document.body.innerText.includes(t), OWNER.requestText)), part && part.text);
     const marta2 = got && [got[1].people[1], got[3].people[0]];
@@ -3520,16 +3560,17 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
       weights.names.every((n) => mass(weights.h3) > mass(n) && weights.h3.size > n.size && weights.h3.weight > n.weight && n.weight <= 400) &&
       weights.place.headingFirst && weights.place.leadNext && weights.place.piecesAfter,
       JSON.stringify(weights && { h2: weights.h2, h3: weights.h3, place: weights.place, names: weights.names.map((n) => [n.text, n.size, n.weight]) }));
-    // color-con-un-significado: the link colour means «you can open this». No name is in it; a readable send carries its own
-    // link «Ver lo que envió» next to the name, in the link colour, and an entry with nothing to open has no link at all.
+    // color-con-un-significado: the link colour means «you can open this». No name is in it; every entry carries its own
+    // link «Ver lo que recibió» next to the name, and a readable send «Ver lo que envió» before it, both in the link colour.
     const readable = people.filter((p) => p.href);
-    check(`owner-project: every name is in the text colour, never the link's; a readable send carries «${OWNER.open}» next to the name, in the link colour`,
+    check(`owner-project: every name is in the text colour, never the link's; every entry carries «${OWNER.received}», a readable send «${OWNER.open}» before it, in the link colour`,
       weights && weights.ink !== weights.signal && weights.names.length === 9 && weights.names.every((n) => n.color === weights.ink) &&
-      readable.length === 4 && readable.every((p) => p.links === 1 && p.linkText === OWNER.open && !p.nameInLink) &&
-      people.filter((p) => !p.href).every((p) => p.links === 0) &&
-      weights.links.length === 4 && weights.links.every((l) => l.text === OWNER.open && l.color === weights.signal),
+      readable.length === 4 && readable.every((p) => p.links === 2 && JSON.stringify(p.linkTexts) === JSON.stringify([OWNER.open, OWNER.received])) &&
+      people.filter((p) => !p.href).every((p) => p.links === 1 && JSON.stringify(p.linkTexts) === JSON.stringify([OWNER.received])) &&
+      people.every((p) => !p.nameInLink) &&
+      weights.links.length === 13 && weights.links.every((l) => [OWNER.open, OWNER.received].includes(l.text) && l.color === weights.signal),
       JSON.stringify(weights && { ink: weights.ink, signal: weights.signal, names: weights.names.map((n) => [n.text, n.color]), links: weights.links.map((l) => [l.text, l.color]),
-        entries: people.map((p) => [p.name, p.links, p.linkText, p.nameInLink]) }));
+        entries: people.map((p) => [p.name, p.links, p.linkTexts, p.nameInLink]) }));
     const dots = await ownerDots(page);
     const marks = Object.values(S).map((word) => dots[word]);
     check("owner-project: each state has its own dot (no two states drawn alike), in the base's dot family", marks.every(Boolean) &&
@@ -3551,10 +3592,11 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     await snapshot(page, "project-owner", "lista");
     const ownerAxe = await axeViolations(page);
     if (ownerAxe) check("owner-project: axe has no violations", ownerAxe.length === 0, ownerAxe.join(", "));
-    // densidad (project-owner at 320): each entry is two lines: the name, with its «Ver lo que envió» and the state word on
-    // the right as a list row carries it, and the date line under them. Only an entry with two events (received or sent,
-    // then a change asked or a send after the close) may run its date line onto a third line (controller's ruling). The link
-    // stays a 44 px target (FUN-18) by its own padding, which does not grow the line nor the row.
+    // densidad (project-owner at 320): each entry is three lines: the name with the state word on the right as a list row
+    // carries it, the date line under them, then the links line («Ver lo que envió» when readable, then «Ver lo que
+    // recibió»; controller's ruling, 2026-11-20). Only an entry with two events (received or sent, then a change asked or a
+    // send after the close) may run its date line onto one more line. Each link is a box 44 px high (FUN-18), apart from the
+    // other link and from the date line.
     await page.setViewportSize({ width: 320, height: 640 });
     const entries = await ownerEntries(page);
     const oneLine = (box, lh) => box && box.h <= lh + 1;
@@ -3563,27 +3605,37 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
     const twoEvents = (text) => { const parts = text.split(" · ");
       return parts.length === 2 && [OWNER.receivedOn, OWNER.sentOn].some((fn) => parts[0].startsWith(prefix(fn))) &&
         [OWNER.askedChange, OWNER.lateSend].some((fn) => parts[1].startsWith(prefix(fn))); };
-    check("owner-project 320px: each entry is two lines, the name with the state word on its right, then the date line", entries.length === 9 &&
-      entries.every((e) => oneLine(e.line, e.lh) && (oneLine(e.meta, e.metaLh) || twoEvents(e.metaText)) && e.state.x >= e.line.der && e.state.mid > e.line.top && e.state.mid < e.line.bottom &&
-        e.meta.top >= e.line.bottom - 1 && e.content <= e.line.h + e.gap + e.meta.h + 1),
-      JSON.stringify(entries.map((e) => ({ name: e.name, line: e.line && e.line.h, meta: e.meta && e.meta.h, metaText: e.metaText, lh: e.lh, state: e.state, content: e.content }))));
-    check("owner-project 320px: «Ver lo que envió» is a 44 px target without growing its line", entries.filter((e) => e.link).length === 4 &&
-      entries.filter((e) => e.link).every((e) => e.link.h >= 44 && e.link.w >= 44 && oneLine(e.line, e.lh)),
-      JSON.stringify(entries.filter((e) => e.link).map((e) => ({ name: e.name, link: e.link, line: e.line.h }))));
+    check("owner-project 320px: each entry is three lines, the name with the state word on its right, then the date line, then the links", entries.length === 9 &&
+      entries.every((e) => e.title && e.state && e.meta && e.linksLine && oneLine(e.title, e.lh) && (oneLine(e.meta, e.metaLh) || twoEvents(e.metaText)) &&
+        e.state.x >= e.title.der && e.state.mid > e.title.top && e.state.mid < e.title.bottom &&
+        e.meta.top >= Math.max(e.title.bottom, e.state.bottom) - 1 && e.linksLine.top >= e.meta.bottom - 1 &&
+        e.content <= Math.max(e.title.h, e.state.h) + e.gap + e.meta.h + e.gap + e.linksLine.h + 1),
+      JSON.stringify(entries.map((e) => ({ name: e.name, title: e.title, state: e.state, meta: e.meta, metaText: e.metaText, links: e.linksLine, lh: e.lh, gap: e.gap, content: e.content }))));
+    const apart = (a, b) => a.der <= b.x || b.der <= a.x || a.bottom <= b.top || b.bottom <= a.top;
+    check(`owner-project 320px: «${OWNER.open}» and «${OWNER.received}» are 44 px boxes on the entry's last line, overlapping neither each other nor the date line`,
+      entries.flatMap((e) => e.links).length === 13 && entries.every((e) => e.links.length >= 1 && e.meta && e.linksLine &&
+        e.links.every((l) => l.h >= 44 && l.w >= 44 && apart(l, e.meta) && l.top >= e.meta.bottom && l.top >= e.linksLine.top && l.bottom <= e.linksLine.bottom) &&
+        e.links.every((a, i) => e.links.slice(i + 1).every((b) => apart(a, b)))),
+      JSON.stringify(entries.map((e) => ({ name: e.name, links: e.links, meta: e.meta, linksLine: e.linksLine }))));
     check("owner-project 320px: no horizontal scroll", await noHorizontalScroll(page));
     await page.screenshot({ path: join(outDir, "project-owner-320.png"), fullPage: true });
     // FUN-18 as it is touched: down the link's whole box (every pixel row, at its left edge, its centre and its right edge),
-    // what the browser hits is the link, never the date line under it. And its focus ring stays off the date text.
-    for (const width of [320, 1440]) {
+    // what the browser hits is the link, never the date line nor the other link. And its focus ring stays off the date text:
+    // under it below 672, above it from 672 to 1056, never across it from 1056.
+    for (const width of [320, 768, 1440]) {
       await page.setViewportSize({ width, height: width < 672 ? 640 : 900 });
       const hits = await ownerLinkHits(page);
-      check(`owner-project ${width}px: «${OWNER.open}» answers a tap on its whole 44 px target, the date line under it never takes it (FUN-18)`,
-        hits.length === 4 && hits.every((x) => x.h >= 44 && x.samples >= 3 * x.h && x.misses.length === 0),
+      check(`owner-project ${width}px: «${OWNER.open}» and «${OWNER.received}» answer a tap on their whole 44 px target, neither the date line nor the other link takes it (FUN-18)`,
+        hits.length === 13 && hits.every((x) => x.h >= 44 && x.samples >= 3 * x.h && x.misses.length === 0),
         JSON.stringify(hits.map((x) => ({ name: x.name, h: x.h, samples: x.samples, misses: x.misses.slice(0, 6) }))));
-      const ring = await ownerLinkRing(page);
-      check(`owner-project ${width}px: «${OWNER.open}»'s focus ring stays off the date line`, ring && ring.visible && ring.crosses === false &&
-        (width >= 1056 || ring.bottom <= ring.metaTop),
-        JSON.stringify(ring));
+      const links = "[data-rol=cuerpo] .owner-piece a.owner-open";
+      for (const [what, selector] of [[OWNER.open, `${links}:not([href$="/received"])`], [`${OWNER.received} next to «${OWNER.open}»`, `${links} + a.owner-open[href$="/received"]`],
+        [`${OWNER.received} alone`, `[data-rol=cuerpo] .owner-piece li:not(:has(a.owner-open + a.owner-open)) a.owner-open`]]) {
+        const ring = await ownerLinkRing(page, selector);
+        check(`owner-project ${width}px: «${what}»'s focus ring stays off the date line`, ring && ring.visible && ring.crosses === false &&
+          (width >= 1056 || (width >= 672 ? ring.bottom <= ring.metaTop : ring.top >= ring.metaBottom)),
+          JSON.stringify(ring));
+      }
     }
     await page.setViewportSize({ width: 360, height: 800 });
 
@@ -3626,6 +3678,63 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
           writesIn(backend.requests.slice(before)).length === 0, JSON.stringify(result));
         await page.screenshot({ path: join(outDir, "owner-piece-360.png"), fullPage: true });
       }
+    }
+
+    // owner-received: the piece as the person received it, in rehearsal: Luis's questions (from the page's link), his flow
+    // review and demo sheet (by address), Pedro's questions («Por empezar»), and Sofía's, whose name owner_piece does not give.
+    // Not closed, no observer, their name, no storage; the owner may try it, and nothing is saved, sent nor read from a draft.
+    const nameless = { id: sofia.id, name: null };
+    for (const [kind, pieceId, person, what] of [["questions", OWNED.questions, luis, "questions"], ["flow_review", OWNED.flow, luis, "flow_review"],
+      ["demo_review", OWNED.demo, luis, "demo_review"], ["questions", OWNED.questions, pedro, "questions, «Por empezar»"],
+      ["questions", OWNED.questions, nameless, "questions, a person without a name"]]) {
+      const tag = `owner-received (${what})`;
+      const before = backend.requests.length;
+      const errorsBefore = errors.length;
+      if (what === "questions") {
+        await goTo(page, `#/project/${IDS.ownedProject}`, () => ownerPart(page));
+        await page.click(`a[href="${rhref(pieceId, person)}"]`).catch(() => {});
+      } else {
+        await page.evaluate((h) => { location.hash = h; }, rhref(pieceId, person));
+      }
+      const frame = await ownerFrame(page);
+      const host = frame ? await hostOf(frame) : null;
+      check(`${tag}: the piece opens in rehearsal, not closed and without observer, under the person's name and with no send date`, host &&
+        host.rehearsal === true && host.closed === null && host.observer === false && host.reviewerName === person.name && host.sentAt === null, JSON.stringify(host));
+      if (kind === "questions") {
+        const seeded = frame && await frame.evaluate(() => Object.keys(ST.respuestas || {}).length).catch(() => null);
+        check(`${tag}: it is not seeded with anything the person did (no send, no draft)`, seeded === 0, String(seeded));
+      }
+      const band = await ownerBand(page);
+      const status = person.name ? OWNER.receivedBy(person.name) : OWNER.receivedByNoName;
+      check(`${tag}: the title band is the piece's title and «${status}», back to the project`, band.title === OWNED_TITLES[pieceId] &&
+        band.status === status && band.back && band.back.href === `#/project/${IDS.ownedProject}` && band.back.text.includes(PROJECT.owned), JSON.stringify(band));
+      check(`${tag}: one fixed notice says nothing done here is saved or sent; no closed panel, no change request, one piece`, band.notices.length === 1 &&
+        band.notices[0] === OWNER.receivedNotice && band.noticeButtons === 0 && /notice--info/.test(band.noticeTone) && band.pinned === "" &&
+        !band.requestButton && !band.form && band.iframes === 1, JSON.stringify(band));
+      // The owner tries it as the person would: answers, picks or writes something, then sends from inside.
+      const tried = frame && await (kind === "questions" ? frame.evaluate(() => { responder("q-001", "si"); return Object.keys(ST.respuestas).length; })
+        : kind === "flow_review" ? frame.evaluate(() => { const st = fs(IDS[0]); st.veredicto = "ok"; st.estado = "ok"; save(); return 1; })
+          : frame.click("#chg-0", { timeout: 3000 }).then(() => frame.fill("#c-0", "Otro orden", { timeout: 3000 })).then(() => 1)).catch((e) => String(e));
+      const result = frame && await frame.evaluate(() => factorySubmit({ formato: "respuestas-fabrica/1", respuestas: [] })).catch(() => null);
+      await sleep(2000); // longer than the draft debounce: anything the piece would post has been posted
+      const calls = backend.requests.slice(before);
+      check(`${tag}: what the owner tries stays in the piece, and its send is refused`, tried === 1 && result && result.ok === false && result.error === "rejected",
+        JSON.stringify({ tried, result }));
+      check(`${tag}: no save_draft, submit_response, request_change nor mark_piece_opened, and no draft read, during the visit`, frame &&
+        writesIn(calls).length === 0 && draftReadsIn(calls).length === 0, JSON.stringify(calls.filter((r) => r.includes("rpc/") || r.includes("piece_drafts"))));
+      check(`${tag}: the screen reads the piece through owner_piece, for that person`, backend.ownerCalls.some((c) => c.rpc === "owner_piece" &&
+        c.p_piece_id === pieceId && c.p_member_id === person.id), JSON.stringify(backend.ownerCalls.filter((c) => c.rpc === "owner_piece")));
+      check(`${tag}: no page errors`, errors.length === errorsBefore, errors.slice(errorsBefore).join(" | "));
+      if (what === "questions") await page.screenshot({ path: join(outDir, "owner-received-360.png"), fullPage: true });
+    }
+    // owner-received-unavailable: the received address of someone with no assignment on that piece is not available.
+    {
+      const before = backend.requests.length;
+      const band = await goTo(page, rhref(OWNED.flow, pedro), async () => { const b = await ownerBand(page); return b.title === "No está disponible" ? b : null; });
+      check("owner-received-unavailable: the received address of a person with no assignment there says it is not available, with no piece", band &&
+        band.iframes === 0 && band.notices.length === 1, JSON.stringify(band));
+      check("owner-received-unavailable: nothing read from the drafts nor written", draftReadsIn(backend.requests.slice(before)).length === 0 &&
+        writesIn(backend.requests.slice(before)).length === 0, JSON.stringify(backend.requests.slice(before)));
     }
 
     // owner-no-readable-send: opened by its address, a send without a readable storage is not available, and nothing is mounted.

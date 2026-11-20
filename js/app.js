@@ -8,7 +8,7 @@ import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
 import { loadProjects, loadProjectItems, loadOwnerProject, loadOwnerPiece, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired,
   loadDecisionProjects, loadMyDecisions, answerDecision, proposeDecision, markDecisionsOpened, loadOwnerDecisions } from "./api.js";
-import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref, ownerDecisionHref } from "./project.js";
+import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref, ownerReceivedHref, ownerDecisionHref } from "./project.js";
 import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
@@ -160,6 +160,7 @@ async function route() {
   if (target.name === "piece") return showPiece(target.pieceId, viewId);
   if (target.name === "project") return showProject(target.projectId, viewId);
   if (target.name === "owner-piece") return showOwnerPiece(target, viewId);
+  if (target.name === "owner-received") return showOwnerPiece(target, viewId, "received");
   if (target.name === "owner-decision") return showOwnerDecision(target, viewId);
   // Anything else is home.
   if (location.hash && location.hash !== "#/") history.replaceState(null, "", `${location.pathname}${location.search}#/`);
@@ -604,8 +605,9 @@ async function showHome(viewId) {
 // (personRows: by name, owners after) with the state the owner reads, its date said for what it is (sent, opened, last
 // changed or shared) and, said by their date and never by their text, the person's change requests and sends after the
 // close. The name is plain text; a send that kept its storage carries its own link next to it, «Ver lo que envió», that
-// opens what the person sent, read only (showOwnerPiece), so the link colour only ever means a link. When nobody was
-// assigned anything yet, the section says so.
+// opens what the person sent, read only (showOwnerPiece), and every entry carries «Ver lo que recibió», that opens the
+// piece as the person received it, in rehearsal; so the link colour only ever means a link. When nobody was assigned
+// anything yet, the section says so.
 const OWNER_STATUS_KEYS = { pending: "ownerStatusPending", opened: "ownerStatusOpened", in_progress: "ownerStatusInProgress",
   submitted: "ownerStatusSubmitted", received: "ownerStatusReceived", replaced: "ownerStatusReplaced" };
 // The base's status dots (COM-13), one mark per state and the same as in the person's list: «Por empezar» hollow grey,
@@ -634,13 +636,17 @@ function ownerEntry(projectId, piece, row, member, requests) {
     if (at) meta.push(t(request.late === true ? "ownerLateSend" : "ownerAskedChange", { date: at }));
   }
   const status = OWNER_STATUS_KEYS[row.status] ? row.status : "pending";
+  const pieceTitle = piece.title || t("untitled");
   const open = row.readable
     ? h("a", { class: "owner-open", href: ownerPieceHref(projectId, piece.id, row.memberId),
-      "aria-label": t("ownerOpenLabel", { name, piece: piece.title || t("untitled") }) }, h("span", {}, t("ownerOpen")))
+      "aria-label": t("ownerOpenLabel", { name, piece: pieceTitle }) }, h("span", {}, t("ownerOpen")))
     : null;
+  const received = h("a", { class: "owner-open", href: ownerReceivedHref(projectId, piece.id, row.memberId),
+    "aria-label": t("ownerReceivedLabel", { name, piece: pieceTitle }) }, h("span", {}, t("ownerReceived")));
   return h("li", { class: "row" }, h("div", { class: "row-item" },
     h("span", { class: "row-main" },
-      h("span", { class: "owner-name" }, h("span", { class: "row-title" }, name), open),
+      // The links in a box of their own: below 672 px they take the entry's last line (portal.css).
+      h("span", { class: "owner-name" }, h("span", { class: "row-title" }, name), h("span", { class: "owner-links" }, open, received)),
       meta.length ? h("span", { class: "row-meta" }, meta.join(" · ")) : null),
     h("span", { class: OWNER_STATUS_CLASSES[status] }, h("span", { class: "status-dot", "aria-hidden": "true" }), t(OWNER_STATUS_KEYS[status]))));
 }
@@ -1587,8 +1593,12 @@ async function showPiece(pieceId, viewId) {
 // that kept its storage (owner_piece). The owner never answers, saves or sends for anyone: no draft saver, no draft or
 // dirty handler, no closed panel nor change request, no «la abrió»; a send the piece posts anyway (an old piece, or one
 // that forges it) is answered rejected, and the server refuses it too. Without such a send there is nothing to open.
-async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
-  state.view = "owner-piece";
+// mode "received" opens the same piece as the person received it, whatever they did with it: their name, no storage (never
+// their draft nor their send), in rehearsal (not closed, no observer), under a fixed notice; the owner may try it, and
+// nothing they do is saved, sent nor marked opened. Any assignment there opens it.
+async function showOwnerPiece({ projectId, pieceId, memberId }, viewId, mode = "sent") {
+  const receivedMode = mode === "received";
+  state.view = receivedMode ? "owner-received" : "owner-piece";
   let frame = null;
   state.cleanup = () => { if (frame) { frame.destroy(); frame = null; } };
   setTitle(t("opening"));
@@ -1606,7 +1616,7 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
     return;
   }
   if (viewId !== state.viewId) return;
-  if (!context || !context.response) {
+  if (!context || (!receivedMode && !context.response)) {
     layout.title.textContent = t("pieceNotFoundTitle");
     setTitle(t("pieceNotFoundTitle"));
     showNotice(layout.notices, { tone: "info", text: t("pieceNotFound"), dismissible: false });
@@ -1621,14 +1631,21 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId) {
   layout = pieceLayout(pieceTitle, projectName
     ? { href: projectHref(projectId), text: projectName, label: t("backTo", { name: projectName }) }
     : homeBack());
-  const date = formatDate(state.lang, response.submitted_at);
-  layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
+  if (receivedMode) {
+    layout.status.textContent = member.display_name ? t("ownerReceivedBy", { name: member.display_name }) : t("ownerReceivedByNoName");
+    showNotice(layout.notices, { tone: "info", text: t("ownerReceivedNotice"), dismissible: false });
+  } else {
+    const date = formatDate(state.lang, response.submitted_at);
+    layout.status.textContent = member.display_name ? t("ownerSentBy", { name: member.display_name, date }) : t("ownerSentByNoName", { date });
+  }
   const follow = followPiece(() => (frame ? frame.iframe : null));
   frame = mountPiece({
-    container: layout.main, html: piece.html, kind: piece.kind, storage: response.storage, title: pieceTitle,
+    container: layout.main, html: piece.html, kind: piece.kind, storage: receivedMode ? {} : response.storage, title: pieceTitle,
     onHeight: follow.onHeight, onScroll: follow.onScroll,
     // reviewerName exactly as loadPiece gives it to the person: a piece keys what it stores by it.
-    host: { reviewerName: member.display_name, closed: "received", sentAt: response.submitted_at, observer: true },
+    host: receivedMode
+      ? { reviewerName: member.display_name, rehearsal: true }
+      : { reviewerName: member.display_name, closed: "received", sentAt: response.submitted_at, observer: true },
     onSubmit: ({ requestId }) => { if (frame) frame.respond(requestId, { ok: false, error: "rejected" }); },
     onNavigatedAway: () => {
       frame = null;

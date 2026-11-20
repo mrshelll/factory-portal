@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRoute, projectHref, ownerPieceHref, ownerDecisionHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE } from "../../js/project.js";
+import { parseRoute, projectHref, ownerPieceHref, ownerReceivedHref, ownerDecisionHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE } from "../../js/project.js";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -29,6 +29,14 @@ test("hrefs round trip through parseRoute", () => {
   assert.deepEqual(parseRoute(ownerPieceHref(A, B, C)), { name: "owner-piece", projectId: A, pieceId: B, memberId: C });
   assert.equal(ownerDecisionHref(A, "0123456789ab"), `#/project/${A}/decisions/0123456789ab`);
   assert.deepEqual(parseRoute(ownerDecisionHref(A, "0123456789ab")), { name: "owner-decision", projectId: A, key: "0123456789ab" });
+});
+
+test("owner-received route", () => {
+  assert.equal(ownerReceivedHref(A, B, C), `#/project/${A}/piece/${B}/person/${C}/received`);
+  assert.deepEqual(parseRoute(ownerReceivedHref(A, B, C)), { name: "owner-received", projectId: A, pieceId: B, memberId: C });
+  assert.deepEqual(parseRoute(`#/project/${A.toUpperCase()}/piece/${B}/person/${C}/received`), { name: "owner-received", projectId: A, pieceId: B, memberId: C });
+  assert.equal(parseRoute(`#/project/${A}/piece/${B}/person/${C}/received/x`).name, "home");
+  assert.equal(parseRoute(`#/project/${A}/piece/${B}/person/${C}`).name, "owner-piece", "the sent view keeps its route");
 });
 
 test("parseRoute: the owner's view of one decision point, key of 12 hex digits lowercased", () => {
