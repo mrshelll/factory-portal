@@ -37,7 +37,7 @@
 //    "session-expired", "rejected"). A second call while one is in flight returns the same
 //    promise. Downloads are not touched, so the piece's own "Download a copy" works as usual.
 //
-// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName, closed, observer, sentAt }`.
+// 3. Host: defines a frozen `globalThis.factoryHost = { persistence, reviewerName, closed, observer, rehearsal, sentAt }`.
 //    `persistence` is "server" when the localStorage shim took, "none" otherwise. `closed` is
 //    "received" or "replaced" when the piece is closed (read-only: the factory already collected it,
 //    or a newer version replaced it), null otherwise; `sentAt` is when the person sent it (an ISO
@@ -50,7 +50,10 @@
 //    factorySubmit resolves { ok: false, error: "rejected" } and posts nothing. The fields are
 //    sanitized in the parent before injection. It also sets `data-factory-host="portal"` on the
 //    piece's <html> before any of the piece is parsed, so the piece's CSS can drop its own brand bar
-//    inside the portal without a flash.
+//    inside the portal without a flash. `rehearsal` is true when the project owner opens the piece as
+//    the person received it (independent of `closed`): it behaves like `closed` and `observer`
+//    together, so the piece posts no draft, dirty nor save-failed (writes stay in memory) and
+//    factorySubmit resolves { ok: false, error: "rejected" } without posting. Nothing leaves the iframe.
 //
 // 4. Size and scrolling: the portal sizes the iframe to the piece's height and its own page scrolls,
 //    so the piece never scrolls inside. Right after factory:ready and on every change (ResizeObserver
@@ -92,6 +95,7 @@ function bridgeRuntime(cfg) {
   var debounceMs = cfg.debounceMs;
   var quota = cfg.quotaChars;
   var closed = cfg.closed; // "received" | "replaced" | null: a closed piece saves no drafts
+  var mute = !!(closed || cfg.rehearsal); // a closed or rehearsed piece posts no draft, dirty nor save-failed
 
   // The bridge runs first in <head>, before the piece's styles and body are parsed, so the piece's CSS
   // can hide what the portal already shows (its own brand bar) from the first paint.
@@ -184,7 +188,7 @@ function bridgeRuntime(cfg) {
   var opening = true;
   function onLocalChange() {
     refused = false;
-    if (opening || closed) return;
+    if (opening || mute) return;
     // Tell the parent right away (without the content) so it knows there is unsaved work
     // during the debounce, e.g. for its beforeunload warning.
     if (!dirty) post({ type: "factory:dirty" });
@@ -193,7 +197,7 @@ function bridgeRuntime(cfg) {
     timer = setTimeout(sendDraft, debounceMs);
   }
   var local = makeStorage(cfg.storage, onLocalChange, function () {
-    if (refused || closed) return;
+    if (refused || mute) return;
     refused = true;
     sendDraft(); // what fit before the refusal goes first
     post({ type: "factory:save-failed", reason: "too-large" });
@@ -204,7 +208,7 @@ function bridgeRuntime(cfg) {
 
   function sendDraft() {
     if (timer) { clearTimeout(timer); timer = null; }
-    if (!dirty || closed) return;
+    if (!dirty || mute) return;
     dirty = false;
     post({ type: "factory:draft", storage: local.snapshot() });
   }
@@ -242,7 +246,7 @@ function bridgeRuntime(cfg) {
   }
 
   function factorySubmit(payload) {
-    if (cfg.observer) return Promise.resolve({ ok: false, error: "rejected" }); // the owner never sends for anyone
+    if (cfg.observer || cfg.rehearsal) return Promise.resolve({ ok: false, error: "rejected" }); // the owner never sends for anyone, nor in a rehearsal
     if (inflight) return inflight.promise;
     var json;
     try { json = JSON.stringify(payload); } catch (e) { json = undefined; }
@@ -274,6 +278,7 @@ function bridgeRuntime(cfg) {
     reviewerName: cfg.reviewerName,
     closed: closed,
     observer: cfg.observer,
+    rehearsal: cfg.rehearsal,
     sentAt: cfg.sentAt,
   }));
 
@@ -556,6 +561,11 @@ function cleanObserver(host) {
   return cleanClosed(host) !== null && host.observer === true;
 }
 
+// True only for host.rehearsal === true, whatever `closed` says.
+function cleanRehearsal(host) {
+  return !!host && host.rehearsal === true;
+}
+
 // Any string Date.parse accepts (the portal passes the response's submitted_at); anything else is null.
 function cleanSentAt(host) {
   const value = host && typeof host.sentAt === "string" ? host.sentAt.trim() : "";
@@ -564,7 +574,7 @@ function cleanSentAt(host) {
 
 const positiveOr = (value, fallback) => (Number.isFinite(value) && value > 0 ? value : fallback);
 
-// host: { reviewerName, closed, observer, sentAt } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
+// host: { reviewerName, closed, observer, rehearsal, sentAt } for globalThis.factoryHost. submitTimeoutMs and quotaChars only change in tests.
 export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, submitTimeoutMs = SUBMIT_TIMEOUT_MS, quotaChars = STORAGE_QUOTA_CHARS }) {
   if (typeof nonce !== "string" || !nonce) throw new Error("buildBridgeScript needs a nonce");
   const cfg = {
@@ -580,6 +590,7 @@ export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, su
     reviewerName: cleanReviewerName(host),
     closed: cleanClosed(host),
     observer: cleanObserver(host),
+    rehearsal: cleanRehearsal(host),
     sentAt: cleanSentAt(host),
   };
   return `<script>(${bridgeRuntime.toString()})(${serializeForScript(cfg)});</script>`;

@@ -351,7 +351,7 @@ test("factoryHost carries closed and sentAt", () => {
   const open = runBridge().win.factoryHost;
   assert.equal(open.closed, null, "an open piece has closed null");
   assert.equal(open.sentAt, null);
-  assert.deepEqual(Object.keys(open).sort(), ["closed", "observer", "persistence", "reviewerName", "sentAt"]);
+  assert.deepEqual(Object.keys(open).sort(), ["closed", "observer", "persistence", "rehearsal", "reviewerName", "sentAt"]);
 });
 
 test("closed accepts only received or replaced", () => {
@@ -433,6 +433,36 @@ test("observer never posts drafts", async () => {
 
 test("observer never posts submit", async () => {
   const { win, of } = runBridge({ host: { closed: "received", observer: true } });
+  assert.deepEqual(await plain(win.factorySubmit(questions())), { ok: false, error: "rejected" });
+  assert.equal(of("factory:submit").length, 0);
+});
+
+// ---- rehearsal: the owner tries the piece as the person received it ----
+
+test("rehearsal is true only for true, and independent of closed", () => {
+  const read = (host) => runBridge({ host }).win.factoryHost.rehearsal;
+  assert.equal(read({ rehearsal: true }), true);
+  assert.equal(read({ rehearsal: true, closed: "received" }), true);
+  for (const rehearsal of [undefined, "true", 1, {}, ["x"], null, false]) assert.equal(read({ rehearsal }), false, String(JSON.stringify(rehearsal)));
+  assert.equal(runBridge().win.factoryHost.rehearsal, false);
+});
+
+test("rehearsal never posts drafts, dirty nor save-failed, and still answers flush", async () => {
+  const { win, posted, of, fromParent } = runBridge({ host: { rehearsal: true, reviewerName: "Jaime" }, quotaChars: 100 });
+  win.localStorage.setItem("k", "v");
+  assert.equal(win.localStorage.getItem("k"), "v", "writes work in memory");
+  assert.throws(() => win.localStorage.setItem("big", "x".repeat(200)), (e) => e.name === "QuotaExceededError");
+  win.dispatchPagehide();
+  fromParent({ type: "factory:flush", nonce: "n-1" });
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal(of("factory:draft").length, 0);
+  assert.equal(of("factory:dirty").length, 0);
+  assert.equal(of("factory:save-failed").length, 0);
+  assert.deepEqual(posted.map((p) => p.message.type), ["factory:ready", "factory:flushed"]);
+});
+
+test("rehearsal never posts submit", async () => {
+  const { win, of } = runBridge({ host: { rehearsal: true } });
   assert.deepEqual(await plain(win.factorySubmit(questions())), { ok: false, error: "rejected" });
   assert.equal(of("factory:submit").length, 0);
 });

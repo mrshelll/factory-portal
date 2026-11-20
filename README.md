@@ -194,6 +194,11 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   memory), but nothing leaves the iframe, so the server draft keeps the person's unsent changes.
   `factory:flush` still answers `factory:flushed`, and `factorySubmit` still sends (the server turns a
   send after the close into a late change request). Old pieces ignore both fields.
+- **Rehearsal.** `factoryHost.rehearsal` is `true` only when the portal passes `host.rehearsal === true`
+  (what the owner's «Ver lo que recibió» does), whatever `closed` says; anything else is `false`. The
+  piece runs as it does for the person, with the storage shim in place, but writes stay in memory:
+  nothing leaves the iframe (no `factory:draft`, `factory:dirty` nor `factory:save-failed`;
+  `factory:flush` still answers) and `factorySubmit` resolves `{ ok: false, error: "rejected" }` without posting.
 - **Size and scrolling.** The portal sizes the iframe to the piece's height and its own page scrolls,
   so the piece never scrolls inside. Right after `factory:ready`, and on every change after it
   (a `ResizeObserver` on the piece's `<html>`), and once on the window's `load` and once on
