@@ -227,7 +227,12 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   grows with its frame on every resize grows one step at most. A growth that changes no DOM (the
   brand's font arriving as the portal resizes the iframe) is what `load` and `fonts.ready` catch: each
   measures once, and if the guard holds that measure back, it is taken again once that frame is over,
-  also once, so neither can loop. The portal gives the iframe exactly
+  also once, so neither can loop. The guard stops the loop but not the growth already made: a piece
+  that sizes its boxes with `vh` still ends far taller than its content. The factory's demo sheet did,
+  until its fix of 2026-11-22 (each screen's frame was `80vh`; on a phone `min(60svh, 34rem)`), and its
+  screens showed an endless empty space under them. Its newer sheets give that frame a fixed height in
+  the portal (45rem; 25rem below 672 px); the bridge injects the same two rules, as a `<style>` right
+  after its script, for the sheets published before. The portal gives the iframe exactly
   that height and nothing else (no minimum of the screen's): the guard counts on it. The piece's scrolling becomes
   `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, in px from the piece's top:
   `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call

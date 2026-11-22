@@ -599,11 +599,19 @@ export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, su
   return `<script>(${bridgeRuntime.toString()})(${serializeForScript(cfg)});</script>`;
 }
 
+// The factory's demo sheet up to its fix of 2026-11-22 gave each screen's frame 80vh (on a phone, min(60svh, 34rem)). In
+// the portal the piece's window is the iframe, which the portal makes as tall as the piece, so each frame took 80 % of the
+// whole piece and the piece grew with every height the portal gave it: screens with an endless empty space under them.
+// The sheets the factory emits since then carry these same two rules; this keeps the ones published before right without
+// sending them again. It goes before the piece's own styles, so a newer sheet's equal rule wins.
+const SCREEN_FRAME_STYLE = '<style>html[data-factory-host="portal"] .screen-frame{--screen-height:45rem}'
+  + '@media (max-width:671.98px){html[data-factory-host="portal"] .screen-frame{--screen-height:25rem}}</style>';
+
 // Inserts the bridge as the first thing inside <head>. Without <head>, a <head> is created right
 // after <html> or the doctype; the doctype must stay first or the piece falls into quirks mode.
 export function injectBridge(html, config) {
   const source = typeof html === "string" ? html : "";
-  const script = buildBridgeScript(config);
+  const script = buildBridgeScript(config) + SCREEN_FRAME_STYLE;
   const head = /<head(?:\s[^>]*)?>/i.exec(source);
   if (head) {
     const at = head.index + head[0].length;

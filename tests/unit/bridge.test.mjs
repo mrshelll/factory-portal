@@ -30,6 +30,15 @@ test("injectBridge puts the bridge first inside <head>", () => {
   assert.ok(out.startsWith("<!doctype html>"), "doctype stays first");
 });
 
+test("injectBridge fixes the screen frame's height of demo sheets published before the factory did (vh in an iframe as tall as the piece)", () => {
+  const html = '<!doctype html><html><head><style>.screen-frame { --screen-height: 80vh; }</style></head><body></body></html>';
+  const out = injectBridge(html, config);
+  const style = out.indexOf("<style>html[data-factory-host=\"portal\"] .screen-frame{--screen-height:45rem}");
+  assert.ok(style > out.indexOf("</script>"), "after the bridge, which marks <html> as in the portal");
+  assert.ok(style < out.indexOf("<style>.screen-frame"), "before the piece's own styles: a newer piece's equal rule wins");
+  assert.ok(out.includes('@media (max-width:671.98px){html[data-factory-host="portal"] .screen-frame{--screen-height:25rem}}'), "and the phone's");
+});
+
 test("injectBridge handles <head> with attributes and does not confuse <header>", () => {
   const html = '<!DOCTYPE html><html><header>x</header><HEAD data-a="1"><title>t</title></HEAD><body></body></html>';
   const out = injectBridge(html, config);
