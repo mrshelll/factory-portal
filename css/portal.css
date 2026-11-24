@@ -12,6 +12,10 @@ p, h1, h2, ol, ul { margin: 0; }
 /* The parts of the page the browser draws take the brand too: a selection in the signal's tint, the caret in the signal. */
 ::selection { background: var(--soft); color: var(--ink); }
 input, textarea { caret-color: var(--signal); }
+/* Text wraps as in the pieces (brand/ninben-components.css): no word left alone on the last line of a paragraph, headings
+   in even lines. Where a browser ignores text-wrap, the text wraps as before. */
+p, li, dd, legend, label { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; }
 
 /* ---- masthead and page ------------------------------------------------------------------ */
 
