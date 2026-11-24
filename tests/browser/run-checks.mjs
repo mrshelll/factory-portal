@@ -23,16 +23,21 @@
 // summary and one point as the owner reads it) are saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. Each one goes through axe (screenAxeChecks) at 320, 768 and 1440 px, light
 // and dark, and every run is one check (the factory retired the visual manual's verifier these used to go through).
-// With --factory, the portal's own frame is also measured with tests/fixtures/geometria.mjs, a frozen copy of the
-// factory's geometry measure, which the factory retired after its 1.47.0 (see portalGeometryChecks): every screen at
-// 320, 672, 1056 and 1440, light and dark, and the piece screen's iframe against the factory's piece-host.mjs.
+// With --factory, the piece screen's iframe against the factory's piece-host.mjs (pieceWidthChecks): as wide as
+// widthInPortal says, at 320, 672, 1056, 1440 and 1600, light and dark.
+//
+// The portal no longer holds itself to the factory's retired visual manual (spec 2026-11-24, «Amendment»): no frame
+// geometry, shared edges, equal list columns nor phone band. What stays is accessibility and function: no sideways scroll,
+// 44 px targets, visible focus, axe (contrast included) light and dark, nothing cut, and every behaviour check.
 //
 // With --questions, the brand's shell on the signed-in screens (brandShellChecks): the masthead in --shell across the
 // window at 320 and 1440, light and dark; at 320 dark, home, a project's page and the piece screen without sideways scroll
-// or an axe colour-contrast violation.
+// or an axe colour-contrast violation. And the composition of the approved sketch (compositionChecks): the centred
+// reading column, the page title's display size, «Entraste como …» in the shell, the rows' chevrons and the «Decisiones»
+// panel.
 //
-// With --questions, the piece screen on a phone too (phoneFrameChecks, MAR-14), at 320 x 640: in Chromium, and in
-// WebKit when playwright-core has its build installed (otherwise a NOTE line says it did not run).
+// With --questions, the piece screen on a phone too (phoneFrameChecks), at 320 x 640: in Chromium, and in WebKit when
+// playwright-core has its build installed (otherwise a NOTE line says it did not run).
 
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -1059,6 +1064,136 @@ async function brandShellChecks(browser, base, html) {
   }
 }
 
+// The composition of the approved sketch (spec 2026-11-24, «Amendment»: .impeccable/mocks/decision/grounded-hilo.html and
+// grounded-hilo-movil.html). From 1056 px the signed-in screens' content is a centred reading column no wider than 60rem
+// while the shell stays across the window; the page title takes the portal's display size (--text-display: 32 px from
+// 672, 24 px below); «Entraste como …» is in the shell, beside «Salir» from 672 and on its own line under the brand below;
+// a row of «Lo que se te pidió» reads at a glance from 1056, title · state · date · chevron on one line, its chevron in
+// --signal on a stop row; and the «Decisiones» points sit inside one hairline panel (1 px --line, --radius, --sheet).
+async function compositionChecks(browser, base, html) {
+  const open = async (backend, hash, ready, { width, scheme = "light" }) => {
+    const context = await mockedContext(browser, { backend, width, height: width < 672 ? 640 : 900, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+    await page.waitForSelector(ready, { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => document.fonts.ready);
+    return { context, page };
+  };
+  const near = (a, b, tolerance = 1) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= tolerance;
+  const screens = [
+    ["home", () => newBackend(html), "", ".row-link"],
+    ["project page", () => threadBackend(html), `#/project/${IDS.project}`, '[aria-labelledby="asked-title"] .row-link'],
+    ["owner's project page", () => ownerBackend(html), `#/project/${IDS.ownedProject}`, ".owner-piece .row-item"],
+    ["owner's point of «Decisiones»", () => ownerDecisionsBackend(html), `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".owner-answer"],
+  ];
+
+  // The reading column and the shell, at 1056 and 1440.
+  for (const [what, backend, hash, ready] of screens) for (const width of [1056, 1440]) {
+    const tag = `composition ${what} ${width}px`;
+    const { context, page } = await open(backend(), hash, ready, { width });
+    const m = await page.evaluate(() => {
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), w: Math.round(r.width) }; };
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+      return { vw: document.documentElement.clientWidth, cap: Math.round(60 * rem), column: box(document.querySelector("main [data-rol=marco]")),
+        body: box(document.querySelector("[data-rol=cuerpo]")), shell: box(document.querySelector(".masthead")) };
+    });
+    check(`${tag}: the content is a centred column no wider than 60rem`, m.column && m.column.w <= m.cap + 1 && near(m.column.x, m.vw - m.column.der) &&
+      m.body && m.body.x >= m.column.x - 1 && m.body.der <= m.column.der + 1, JSON.stringify(m));
+    check(`${tag}: the shell stays wider than the column`, m.shell && m.column && m.shell.w > m.column.w, JSON.stringify(m));
+    await context.close();
+  }
+
+  // The page title: --text-display, 32 px from 672 and 24 px below, on every screen with a title band.
+  for (const [what, backend, hash, ready] of screens) for (const width of [320, 1440]) {
+    const { context, page } = await open(backend(), hash, ready, { width });
+    const t = await page.evaluate(() => {
+      const h1 = document.querySelector(".page-head h1");
+      return { token: getComputedStyle(document.documentElement).getPropertyValue("--text-display").trim(), size: h1 ? getComputedStyle(h1).fontSize : null };
+    });
+    const expected = width >= 672 ? "32px" : "24px";
+    check(`composition ${what} ${width}px: the page title is --text-display, ${expected}`, t.token === expected && t.size === expected, JSON.stringify(t));
+    await context.close();
+  }
+
+  // «Entraste como …» in the shell, never again in the title band.
+  for (const [what, backend, hash, ready] of screens.slice(0, 2)) for (const scheme of ["light", "dark"]) for (const width of [320, 672, 1440]) {
+    const tag = `composition ${what} ${width}px ${scheme}`;
+    const { context, page } = await open(backend(), hash, ready, { width, scheme });
+    const who = await page.evaluate((line) => {
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+      const head = document.querySelector(".masthead");
+      const found = head ? [...head.querySelectorAll("*")].filter((el) => el.children.length === 0 && el.textContent.trim() === line) : [];
+      const el = found[0] || null;
+      return { count: found.length, who: box(el), shell: box(head), brand: box(head && head.querySelector("[data-rol=marca-producto]")),
+        out: box(head && head.querySelector(".button--secondary")), colour: el ? getComputedStyle(el).color : null, bg: head ? getComputedStyle(head).backgroundColor : null,
+        inBand: [...document.querySelectorAll("main .page-meta")].some((p) => p.textContent.includes(line)),
+        scroll: document.documentElement.scrollWidth <= window.innerWidth };
+    }, `Entraste como ${USER.email}`);
+    const placed = who.who && who.shell && who.brand && who.out && who.who.top >= who.shell.top - 1 && who.who.bottom <= who.shell.bottom + 1 &&
+      (width >= 672 ? who.who.top < who.brand.bottom && who.who.bottom > who.brand.top && who.who.der <= who.out.x && who.who.x >= who.brand.der
+        : who.who.top >= Math.max(who.brand.bottom, who.out.bottom) - 1);
+    check(`${tag}: «Entraste como …» is in the shell, ${width >= 672 ? "beside «Salir» on the brand's line" : "on its own line under the brand"}, and not in the title band`,
+      who.count === 1 && placed && !who.inBand, JSON.stringify(who));
+    check(`${tag}: «Entraste como …» holds 4.5:1 on the shell, and nothing scrolls sideways`, who.colour && contrastRatio(who.colour, who.bg) >= 4.5 && who.scroll,
+      JSON.stringify({ colour: who.colour, bg: who.bg, ratio: who.colour && contrastRatio(who.colour, who.bg).toFixed(2), scroll: who.scroll }));
+    await context.close();
+  }
+
+  // The rows of «Lo que se te pidió»: a chevron at each row's end, in --signal only on a stop row; from 1056 title · state · date ·
+  // chevron on one line, in that order.
+  for (const scheme of ["light", "dark"]) for (const width of [320, 1056, 1440]) {
+    const tag = `composition rows ${width}px ${scheme}`;
+    const { context, page } = await open(threadBackend(html), `#/project/${IDS.project}`, '[aria-labelledby="asked-title"] .row-link', { width, scheme });
+    const rows = await page.evaluate(() => {
+      const probe = document.createElement("span"); probe.style.color = "var(--signal)"; document.body.append(probe);
+      const signal = getComputedStyle(probe).color; probe.remove();
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+      return [...document.querySelectorAll('[aria-labelledby="asked-title"] .row-link')].map((a) => {
+        const chev = a.querySelector(":scope > svg.row-chevron");
+        return { stop: a.classList.contains("row--stop"), signal, colour: chev ? getComputedStyle(chev).color : null, hidden: chev ? chev.getAttribute("aria-hidden") : null,
+          link: box(a), title: box(a.querySelector(".row-title")), state: box(a.querySelector(".status")), meta: box(a.querySelector(".row-meta")), chev: box(chev) };
+      });
+    });
+    const detail = JSON.stringify(rows.map((r) => [r.stop, r.colour, r.title, r.state, r.meta, r.chev]));
+    check(`${tag}: every row ends with a hidden chevron, in --signal on a stop row only`, rows.length === 4 && rows.some((r) => r.stop) &&
+      rows.every((r) => r.chev && r.hidden === "true" && (r.stop ? r.colour === r.signal : r.colour !== r.signal) && r.chev.der <= r.link.der + 1), detail);
+    if (width >= 1056) {
+      const line = (r) => [r.state, r.meta, r.chev].every((b) => b && b.top < r.title.bottom && b.bottom > r.title.top);
+      check(`${tag}: each row reads title · state · date · chevron on one line`, rows.length === 4 &&
+        rows.every((r) => r.title && line(r) && r.title.der <= r.state.x && r.state.der <= r.meta.x && r.meta.der <= r.chev.x), detail);
+    }
+    await context.close();
+  }
+
+  // «Decisiones»: the points inside one hairline panel.
+  for (const scheme of ["light", "dark"]) for (const width of [320, 1440]) {
+    const tag = `composition «Decisiones» ${width}px ${scheme}`;
+    const { context, page } = await open(decisionsBackend(html), `#/project/${IDS.project}`, ".decision", { width, scheme });
+    const panel = await page.evaluate(() => {
+      const points = [...document.querySelectorAll(".decision")];
+      if (!points.length) return null;
+      let el = points[0].parentElement;
+      while (el && !points.every((p) => el.contains(p))) el = el.parentElement;
+      const probe = document.createElement("div");
+      probe.style.cssText = "border:1px solid var(--line);border-radius:var(--radius);background:var(--sheet)";
+      document.body.append(probe);
+      const want = getComputedStyle(probe);
+      const expected = { border: want.borderTopColor, radius: want.borderTopLeftRadius, bg: want.backgroundColor };
+      const cs = getComputedStyle(el);
+      const out = { points: points.length, sides: ["Top", "Right", "Bottom", "Left"].map((s) => [cs[`border${s}Width`], cs[`border${s}Style`], cs[`border${s}Color`]]),
+        radius: cs.borderTopLeftRadius, bg: cs.backgroundColor, expected, inSection: Boolean(el.closest("section.decisions")) };
+      probe.remove();
+      return out;
+    });
+    check(`${tag}: the points sit inside one panel, 1 px --line on every side, --radius, --sheet`, panel && panel.points > 1 && panel.inSection &&
+      panel.sides.every(([w, s, c]) => w === "1px" && s === "solid" && c === panel.expected.border) && panel.radius === panel.expected.radius &&
+      panel.bg === panel.expected.bg, JSON.stringify(panel));
+    if (width === 320) check(`${tag}: no horizontal scroll`, await noHorizontalScroll(page));
+    await context.close();
+  }
+}
+
 async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   const backend = newBackend(html, flowHtml, demoHtml);
   const context = await mockedContext(browser, { backend });
@@ -1265,13 +1400,11 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: empty state 320px no horizontal scroll", await noHorizontalScroll(emptyPage));
   await emptyPage.screenshot({ path: join(outDir, "home-empty-320.png"), fullPage: true });
   await snapshot(emptyPage, "home-empty", "lista");
-  // anatomia-del-patron and accion (home-empty): the empty home is the list it replaces, with one row. The list's own top
-  // rule (the base's .rows), never a rule of the empty state's own; its title, message and notice on the title's edge as
-  // every other screen's body. «Entrar con otro correo» lives inside the notice that explains it, as the notice's own
-  // action (the base's link action in its .notice-actions); «Actualizar», the page's primary action, comes right after the
-  // notice, in the same column and at every width, as on sign-in the action goes under its field: as wide as the body up to
-  // the form measure like the sign-in buttons, on the same edge. Nothing of the row sits apart on its right. Both are 44 px
-  // targets at every width (FUN-18). The view does not reach FUN-43's 60 %: its exception is in GEOMETRY_EXCEPTIONS.
+  // The empty home is the list it replaces, with one row. The list's own top rule (the base's .rows), never a rule of the
+  // empty state's own. «Entrar con otro correo» lives inside the notice that explains it, as the notice's own action (the
+  // base's link action in its .notice-actions); «Actualizar», the page's primary action, comes right after the notice, in
+  // the same column and at every width, as on sign-in the action goes under its field. Nothing of the row sits apart on its
+  // right. Both are 44 px targets at every width.
   for (const width of [320, 768, 1440]) {
     await emptyPage.setViewportSize({ width, height: width < 672 ? 640 : 900 });
     const g = await emptyPage.evaluate(() => {
@@ -1323,51 +1456,41 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
       g.list && g.rows === 1 && g.listRule && g.afterNotice && g.groupOnly && Array.isArray(g.loose) && g.loose.length === 0 && g.asides === 0 &&
       Array.isArray(g.otherRules) && g.otherRules.length === 0,
       JSON.stringify(g));
-    check(`home-empty ${width}px: its title and its message start on the title's edge, not centred`,
-      g.h1 !== null && g.title && near(g.title.x, g.h1) && g.message && near(g.message.x, g.h1), JSON.stringify(g));
-    // aviso-de-seccion: what asks the person to check their email is the base's section notice (information: since the
-    // factory's 1.48.0 a 1 px border all around and no coloured stripe on one side, never the signal), in the row under
-    // the message and on the same edge; the message says only that nothing is here yet.
-    check(`home-empty ${width}px: «${EMPTY.hint}» is the base's information notice, in the row under the message, on the title's edge`,
+    // What asks the person to check their email is the base's section notice (information: a 1 px border all around and no
+    // coloured stripe on one side, never the signal), in the row under the message; the message says only that nothing is
+    // here yet.
+    check(`home-empty ${width}px: «${EMPTY.hint}» is the base's information notice, in the row under the message`,
       g.notice && g.notice.text === EMPTY.hint && g.notice.className === "notice" && g.notice.inMain && g.notice.afterMessage &&
-      g.notice.stripe === "1px" && g.notice.edgeEnd === "1px" && near(g.notice.box.x, g.h1) &&
+      g.notice.stripe === "1px" && g.notice.edgeEnd === "1px" &&
       g.messageText === EMPTY.body(USER.email) && !g.messageText.includes(EMPTY.hint), JSON.stringify({ notice: g.notice, message: g.messageText }));
     check(`home-empty ${width}px: its main action and the notice's «Entrar con otro correo» are 44 px targets (FUN-18)`,
       g.action && g.action.h >= 44 && g.other && g.other.box.h >= 44, JSON.stringify({ action: g.action, other: g.other }));
-    // accion (home-empty, judges round 5): «Actualizar» is the view's primary button, right under the notice, at most a gap
-    // of the scale's 16 px, on the title's edge, never on the row's right; «Entrar con otro correo» is the notice's own
-    // action, the base's link action inside it, on its text's edge.
-    check(`home-empty ${width}px: right under the notice, «Actualizar» is the primary button, as wide as the body up to the form measure as the sign-in buttons are`,
+    // «Actualizar» is the view's primary button, right under the notice; «Entrar con otro correo» is the notice's own action,
+    // the base's link action inside it, under its text.
+    check(`home-empty ${width}px: right under the notice, «Actualizar» is the primary button`,
       g.action && g.notice && g.actionText === "Actualizar" && g.actionPrimary && g.action.top >= g.notice.box.bottom &&
-      g.action.top - g.notice.box.bottom <= 16 && near(g.action.x, g.h1) && near(g.action.w, Math.min(g.body.w, g.measure)), JSON.stringify(g));
-    check(`home-empty ${width}px: «Entrar con otro correo» is the notice's own action, the base's link action, under its text on its edge`,
-      g.other && g.other.inNotice && g.other.link && g.notice && g.notice.textBox && near(g.other.box.x, g.notice.textBox.x) &&
+      g.action.top - g.notice.box.bottom <= 16, JSON.stringify(g));
+    check(`home-empty ${width}px: «Entrar con otro correo» is the notice's own action, the base's link action, under its text`,
+      g.other && g.other.inNotice && g.other.link && g.notice && g.notice.textBox &&
       g.other.box.top >= g.notice.textBox.bottom && g.other.box.bottom <= g.notice.box.bottom, JSON.stringify({ other: g.other, notice: g.notice }));
     if (width >= 672) await emptyPage.screenshot({ path: join(outDir, `home-empty-${width}.png`) });
   }
   await emptyContext.close();
 }
 
-// The piece screen has one frame: the portal's masthead with the brand on top, then «Volver» and the
-// title band in the same container and on the same left edge, and the piece's content on that edge too
-// (keeping its reading measure); the piece hides its own brand bar inside the portal (the bridge marks
-// its <html> before it is parsed), and shows it when opened on its own. Opening a piece says nothing
-// about saving until the person changes something. Checked at the review widths (320, 768, 1440, light
-// and dark; at 1440 the frame is at its cap) and at the verification widths 672 (where the margin changes)
-// and 1056 (where the pieces add their side column).
+// The piece screen: the portal's masthead with the brand on top, then «Volver» and the title band, and the piece's
+// content keeping its reading measure; the piece hides its own brand bar inside the portal (the bridge marks its <html>
+// before it is parsed), and shows it when opened on its own. Opening a piece says nothing about saving until the person
+// changes something. Checked at 320, 672, 768, 1056 and 1440, light and dark.
 async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   const layoutOf = (page) => page.evaluate(() => {
     const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; };
     const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, bottom: r.bottom }; };
     const marks = [...document.querySelectorAll("[data-rol=marca-producto]")].filter(visible);
-    const frame = document.querySelector("[data-rol=marco]");
     const back = document.querySelector(".back-link");
-    // The frame's right edge (its content box): where a piece's side column ends.
-    const frameRight = frame ? frame.getBoundingClientRect().right - parseFloat(getComputedStyle(frame).paddingRight) : null;
     return {
       marks: marks.length, name: marks[0] && marks[0].textContent, logo: Boolean(marks[0] && marks[0].querySelector("svg")),
-      brand: marks[0] ? { ...box(marks[0]), frameRight } : null, back: box(back), title: box(document.querySelector("h1.piece-title")),
-      sameFrame: Boolean(frame && marks[0] && back && frame.contains(marks[0]) && frame.contains(back)),
+      brand: box(marks[0]), back: box(back), title: box(document.querySelector("h1.piece-title")),
       scroll: document.documentElement.scrollWidth <= window.innerWidth,
     };
   });
@@ -1380,58 +1503,20 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       brand: shown(document.querySelector("header.bar .brand")), where: [...document.querySelectorAll("header.bar .where")].some(shown),
       homeButton: shown(home), ninben: document.body.innerText.includes("ninben") };
   });
-  // Where the piece's content starts, in the portal page's coordinates: every visible top-level block of the
-  // screen (the children of the piece's body and of its columns: main, #app, #view, .frame, .view, .layout, .main-col)
-  // must start on the brand's edge, but a side column (the .layout's <aside>, from 1056), which starts on its own
-  // column's edge (MAR-10) and ends on the frame's right edge (MAR-13); plus the «Ver todos los flujos» link and the width of three texts the person reads:
-  // the questions' (the first paragraph of the sheet's body, .flow > p), the sentence in the flows' title band
-  // (.heading > p: how many flows, steps and minutes, or what is left) and the text of a step (.step-intro > p).
-  // null when there is no piece to measure (it did not open, or its frame went away): the check that reads it fails, the
-  // run goes on.
+  // The width of three texts the person reads inside the piece: the questions' (the first paragraph of the sheet's body,
+  // .flow > p), the sentence in the flows' title band (.heading > p: how many flows, steps and minutes, or what is left) and
+  // the text of a step (.step-intro > p). null when there is no piece to measure (it did not open, or its frame went away):
+  // the check that reads it fails, the run goes on.
   const contentOf = async (page, frame) => {
     if (!frame) return null;
-    const offset = await page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f ? f.getBoundingClientRect().left + f.clientLeft : null; });
-    if (offset === null) return null;
-    const inner = await frame.evaluate(() => {
+    return frame.evaluate(() => {
       const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(el).visibility !== "hidden"; };
-      const containers = [...document.querySelectorAll("main, main #app, main #view, main .frame, main .view, main .layout, main .main-col")].filter(shown);
-      const blocks = [...new Set(containers.flatMap((c) => [...c.children]))].filter((el) => shown(el) && el.tagName !== "NOSCRIPT");
-      const name = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.classList.length ? "." + [...el.classList].join(".") : ""}`;
-      const reading = [...document.querySelectorAll("main .flow > p")].find(shown);
-      const flowReading = [...document.querySelectorAll("main .view .heading > p")].find(shown);
-      const stepReading = [...document.querySelectorAll("main .step-intro > p")].find(shown);
-      const home = document.getElementById("homeBtn");
-      // A side column beside the text goes right after it, one column gap of its layout away (the factory's 1.48.0: the
-      // topics sit next to the text, with no hole between them); one stacked under the text is a block like any other.
-      const follows = (el) => { const prev = el.previousElementSibling;
-        if (!prev || el.getBoundingClientRect().left < prev.getBoundingClientRect().right - 1) return null;
-        return prev.getBoundingClientRect().right + (parseFloat(getComputedStyle(el.parentElement).columnGap) || 0); };
-      return { blocks: blocks.map((el) => ({ name: name(el), left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right,
-          side: el.matches(".layout > aside"), follows: el.matches(".layout > aside") ? follows(el) : null })),
-        home: home && shown(home) ? home.getBoundingClientRect().left : null, flowReading: flowReading ? flowReading.getBoundingClientRect().width : null,
-        stepReading: stepReading ? stepReading.getBoundingClientRect().width : null,
-        reading: reading ? reading.getBoundingClientRect().width : null };
+      const width = (el) => (el ? el.getBoundingClientRect().width : null);
+      return { reading: width([...document.querySelectorAll("main .flow > p")].find(shown)),
+        flowReading: width([...document.querySelectorAll("main .view .heading > p")].find(shown)),
+        stepReading: width([...document.querySelectorAll("main .step-intro > p")].find(shown)) };
     }).catch(() => null);
-    if (!inner) return null;
-    const blocks = inner.blocks.map((b) => ({ ...b, left: b.left + offset, right: b.right + offset, follows: b.follows === null ? null : b.follows + offset }));
-    return { blocks, home: inner.home === null ? null : inner.home + offset, flowReading: inner.flowReading, stepReading: inner.stepReading, reading: inner.reading };
   };
-  // Every top-level block on the brand's edge (±1 px), and a side column beside the text right after it (one column
-  // gap away) and inside the frame; the detail names the ones that are not. With no brand on screen or no piece
-  // measured, this one check fails.
-  const onEdge = (tag, what, content, brand) => {
-    if (!brand || !content) {
-      check(`${tag}: ${what}: every top-level block starts on the brand's left edge`, false, JSON.stringify({ brand: Boolean(brand), content: Boolean(content) }));
-      return;
-    }
-    const off = content.blocks.filter((b) => (b.side && b.follows !== null ? Math.abs(b.left - b.follows) > 1 || b.right > brand.frameRight + 1
-      : Math.abs(b.left - brand.left) > 1));
-    const sides = content.blocks.filter((b) => b.side).length;
-    check(`${tag}: ${what}: every top-level block starts on the brand's left edge${sides ? " and the side column goes right after the text, inside the frame" : ""}`,
-      content.blocks.some((b) => !b.side) && off.length === 0,
-      JSON.stringify({ brand: brand.left, frameRight: brand.frameRight, blocks: content.blocks.length, sides, off: off.slice(0, 4) }));
-  };
-  const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
   // Opened and left alone: no «Guardando…» (nor any save line) and nothing sent to save_draft.
   const quietOpen = async (tag, page, backend) => {
     await sleep(2000); // longer than the draft debounce (800 ms) and a save
@@ -1464,13 +1549,10 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     check(`${tag}: one brand on screen, the portal's (logo and «ninben»)`, layout.marks === 1 && layout.name === "ninben" && layout.logo, JSON.stringify(layout));
     check(`${tag}: the brand is above «Volver», and «Volver» above the title`, layout.brand && layout.back && layout.title &&
       layout.brand.bottom <= layout.back.top && layout.back.bottom <= layout.title.top, JSON.stringify([layout.brand, layout.back, layout.title]));
-    check(`${tag}: brand, «Volver» and the title share the left edge, in the same container`, layout.sameFrame &&
-      near(layout.brand?.left, layout.back?.left) && near(layout.brand?.left, layout.title?.left), JSON.stringify([layout.brand?.left, layout.back?.left, layout.title?.left]));
     check(`${tag}: no horizontal scroll`, layout.scroll);
     const bar = frame ? await pieceBar(frame) : null;
     check(`${tag}: the piece's own brand bar is not shown inside the portal`, bar && bar.host === "portal" && !bar.bar && !bar.ninben, JSON.stringify(bar));
     const content = frame && await contentOf(page, frame);
-    onEdge(tag, "start", content, layout.brand);
     // A missing reading text fails: a null width is not a measure.
     check(`${tag}: the questions keep their reading measure (680 px at most)`, content && typeof content.reading === "number" && content.reading <= 680,
       JSON.stringify(content && content.reading));
@@ -1483,26 +1565,22 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
     const opened = backend.draft && JSON.parse(backend.draft[QUESTIONS_KEY]).abierta_en;
     check(`${tag}: the first change says «Guardado» and carries the opening time the piece wrote`, saved && opened, String(opened));
     if (frame) await frame.evaluate(() => showReview());
-    onEdge(tag, "review", await contentOf(page, frame), layout.brand);
     if (frame) await sendQuestions(frame);
     const sentShown = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(QUESTIONS_SENT)), 8000);
     check(`${tag}: the piece sends and shows its sent screen`, sentShown);
-    onEdge(tag, "sent", await contentOf(page, frame), layout.brand);
     check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
     await context.close();
   }
 
   // The flow review in the portal: no brand bar at the list of flows; inside a flow only «Ver todos los
-  // flujos» stays (without the logo or the «where»), on the brand's edge, and it goes back to the list.
+  // flujos» stays (without the logo or the «where»), and it goes back to the list.
   if (flowHtml) {
     for (const [width, scheme] of runs) {
       const tag = `flow in the portal ${width}px ${scheme}`;
       const { backend, context, page, frame, errors } = await openInApp(width, scheme, IDS.flow, () => typeof openFlow === "function");
-      const brand = (await layoutOf(page)).brand;
       const atList = frame && await pieceBar(frame);
       check(`${tag}: the list of flows shows no brand bar`, atList && atList.host === "portal" && !atList.bar && !atList.ninben, JSON.stringify(atList));
       const list = frame && await contentOf(page, frame);
-      onEdge(tag, "list of flows", list, brand);
       // A missing reading text fails: a null width is not a measure.
       check(`${tag}: the sentence of the flows' title band keeps its reading measure (680 px at most)`,
         list && typeof list.flowReading === "number" && list.flowReading <= 680, JSON.stringify(list && list.flowReading));
@@ -1519,15 +1597,12 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       // A missing step text fails too: a null width is not a measure.
       check(`${tag}: inside a flow, the text of the step keeps its reading measure (680 px at most)`,
         walk && typeof walk.stepReading === "number" && walk.stepReading <= 680, JSON.stringify(walk && walk.stepReading));
-      check(`${tag}: inside a flow, «Ver todos los flujos» starts on the brand's left edge`, walk && near(walk.home, brand?.left), JSON.stringify({ brand: brand?.left, home: walk && walk.home }));
-      onEdge(tag, "inside a flow", walk, brand);
       if (width === 320 && scheme === "light") await page.screenshot({ path: join(outDir, "piece-view-flow-320.png") });
       if (width === 1440) await page.screenshot({ path: join(outDir, `piece-view-flow-1440-${scheme}.png`) });
       if (frame) {
         // The screen with a note being written on the sketch.
         await frame.getByRole("button", { name: "Anotar una observación", exact: true }).click();
         await sleep(300);
-        onEdge(tag, "writing a note", await contentOf(page, frame), brand);
         if (width === 1440 && scheme === "light") await page.screenshot({ path: join(outDir, "piece-view-flow-note-1440.png") });
       }
       if (frame) await frame.click("#homeBtn");
@@ -1537,27 +1612,23 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       if (frame) await frame.evaluate(() => { usarRevisor("Ana Pérez"); for (const id of IDS) { const st = fs(id); st.veredicto = "ok"; st.estado = "ok"; } save(); home(); });
       const final = frame && await frame.evaluate(() => Boolean(document.querySelector('[data-view="summary"]')));
       check(`${tag}: the final screen opens`, final);
-      onEdge(tag, "final screen", frame && await contentOf(page, frame), brand);
       if (scheme === "light" && (width === 768 || width === 1440)) await page.screenshot({ path: join(outDir, `piece-view-flow-final-${width}.png`) });
       if (frame) await frame.evaluate(() => submitReview());
       const flowSent = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(FLOW_SENT)), 8000);
       check(`${tag}: the review is sent and the piece shows its sent screen`, flowSent);
-      onEdge(tag, "sent", frame && await contentOf(page, frame), brand);
       check(`${tag}: one brand on screen, the portal's`, (await layoutOf(page)).marks === 1);
       check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
     }
   }
 
-  // The demo sheet in the portal: no brand bar, its content on the brand's edge.
+  // The demo sheet in the portal: no brand bar, its opening text at the reading measure.
   if (demoHtml) {
     for (const [width, scheme] of runs) {
       const tag = `demo in the portal ${width}px ${scheme}`;
       const { backend, context, page, frame, errors } = await openInApp(width, scheme, IDS.demo, () => Boolean(document.querySelector("#app h1")));
-      const brand = (await layoutOf(page)).brand;
       const bar = frame && await pieceBar(frame);
       check(`${tag}: the sheet shows no brand bar`, bar && bar.host === "portal" && !bar.bar && !bar.ninben, JSON.stringify(bar));
-      onEdge(tag, "the sheet", frame && await contentOf(page, frame), brand);
       // The opening text of the sheet (what to do with the demo) keeps the reading measure; a missing text fails: a null
       // width is not a measure.
       const opening = frame && await frame.evaluate(() => {
@@ -1571,7 +1642,6 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
       if (frame) await sendButton(frame).click();
       const demoSent = frame && await waitFor(async () => (await frameText(frame)).split("\n").some(isLine(DEMO_SENT)), 8000);
       check(`${tag}: the sheet sends and shows its sent screen`, demoSent);
-      onEdge(tag, "sent", frame && await contentOf(page, frame), brand);
       check(`${tag}: no page errors`, errors.length === 0, errors.join(" | "));
       await context.close();
     }
@@ -1595,32 +1665,27 @@ async function pieceViewChecks(browser, base, html, flowHtml, demoHtml) {
   }
 }
 
-// ---- the piece screen on a phone (MAR-14) ------------------------------------------------------
+// ---- the piece screen on a phone -----------------------------------------------------------------
 //
 // Below 672 px the piece's content scrolls with the page: the portal sizes the iframe to the piece's height (the bridge's
 // factory:height) and scrolls its own page when the piece asks (factory:scroll). At 320 x 640, with a project of a long
-// name: at rest the title band ends at 160 px or less (with a title of TITLE_MAX characters too), «← Volver» is one line
-// named «Volver a <project>»; the iframe is as tall as the piece (no scrolling of its own) and the page is taller than the
+// name: the title is whole (a title of TITLE_MAX characters too), «← Volver» is one line named «Volver a <project>»;
+// the save line says what happened to the draft; the iframe is as tall as the piece (no scrolling of its own) and the page is taller than the
 // screen; one screen down nothing fixed or sticky is on top; «Siguiente» at the bottom of the sheet shows the new step's
 // title, a link of the flows' index its group, a focused field is inside the window, and an opened <details> grows the
 // iframe. A piece that grows again in the same rendering frame as its iframe's resize still ends with the right height,
 // and there the resize event comes before the ResizeObserver (the bridge's loop guard counts on it). Run in every engine
 // given (Chromium; WebKit when playwright-core has it installed).
 const PHONE = { width: 320, height: 640 };
-const PHONE_FRAME_MAX = 160; // a quarter of a 640 px screen (MAR-14)
 const LONG_PROJECT = "Biblioteca del barrio San Martín de Porres: préstamos, socios y avisos para los vecinos";
-// The longest piece title the factory's publisher lets through (its portal_publish.py pins the same number): what fits
-// in two lines of the piece's title at 320 px. Measured on this screen at 320 x 640 (Inter 600 16/20.8 px, 288 px wide):
-// normal Spanish running-text titles take a third line from 66 to 74 characters on, title-case ones from 65; 60 keeps
-// a margin for an unlucky break. The check's title is the earliest-breaking of those, at exactly TITLE_MAX characters.
+// The longest piece title the factory's publisher lets through (its portal_publish.py pins the same number). The check's
+// title is an early-breaking one at exactly TITLE_MAX characters: it must show whole.
 const TITLE_MAX = 60;
-// A project name of two lines of running text at 320 px (24 px type); PROJECT_TITLE_MAX is the longest that keeps two lines.
-// Figtree is narrower than the brand's earlier face: «Tienda virtual de artesanías» now fits one line, so the name grew.
+// A project name of two lines of running text at 320 px.
 const PROJECT_TWO_LINES = "Tienda virtual de artesanías del barrio";
 const TITLE_AT_MAX = "Demo de la tienda virtual de artesanías: catálogo y compras.";
 if (TITLE_AT_MAX.length !== TITLE_MAX) throw new Error(`TITLE_AT_MAX is ${TITLE_AT_MAX.length} characters, not ${TITLE_MAX}`);
-// The longest title of a «Decisiones» point the factory publishes (its decisions.py pins the same number): the pieces' TITLE_MAX,
-// because on a phone the owner's point takes the piece screen's title band (16 px, the same 288 px at 320), at exactly that.
+// The longest title of a «Decisiones» point the factory publishes (its decisions.py pins the same number): the pieces' TITLE_MAX.
 const DECISION_TITLE_MAX = TITLE_MAX;
 const DECISION_TITLE_AT_MAX = "Un viaje cuenta cuando quien conduce y quien viaja confirman";
 if (DECISION_TITLE_AT_MAX.length !== DECISION_TITLE_MAX) throw new Error(`DECISION_TITLE_AT_MAX is ${DECISION_TITLE_AT_MAX.length} characters, not ${DECISION_TITLE_MAX}`);
@@ -1706,37 +1771,21 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
   const pageHeight = (page) => page.evaluate(() => ({ scroll: document.documentElement.scrollHeight, vh: window.innerHeight }));
   const rest = async (tag, page, { name = LONG_PROJECT, title } = {}) => {
     const at = await restOf(page);
-    check(`${tag}: at rest the title band ends at ${PHONE_FRAME_MAX} px or less`, at.heading !== null && at.heading <= PHONE_FRAME_MAX &&
-      (!title || at.titleText === title), JSON.stringify(at));
+    if (title) check(`${tag}: the title is whole`, at.titleText === title, JSON.stringify(at));
     const named = await page.getByRole("link", { name: `Volver a ${name}`, exact: true }).count();
     check(`${tag}: «← Volver» is one line and its name is «Volver a ${name.length > 30 ? name.slice(0, 30) + "…" : name}»`,
       at.back && at.back.lines === 1 && at.back.text.replace(/\s+/g, " ") === "Volver" && at.back.arrow && at.back.label === `Volver a ${name}` && named === 1, JSON.stringify({ ...at.back, named }));
   };
-  // The line next to the title on a phone: in the row of «← Volver», on its right and ending on the bar's right edge (the
-  // title's box), above the title; the title's bottom and the whole band's, with the line showing. text: what it must say.
+  // The save line of the title band, when it shows and says text: its words. null otherwise.
   const lineOf = (page, text) => page.evaluate((text) => {
-    window.scrollTo(0, 0);
-    const s = document.querySelector(".piece-status"), t = document.querySelector("h1.piece-title"), back = document.querySelector(".back-link");
-    if (!s || s.hidden || !s.textContent.includes(text) || !t || !back) return null;
-    // The words' right edge, not the box's: the line is set to the row's end.
-    const range = document.createRange(); range.selectNodeContents(s);
-    const words = [...range.getClientRects()].filter((r) => r.width > 0);
-    const box = s.getBoundingClientRect(), title = t.getBoundingClientRect(), b = back.getBoundingClientRect();
-    const round = (r) => ({ top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) });
-    return { status: round(box), wordsRight: Math.round(Math.max(...words.map((r) => r.right))), lines: new Set(words.map((r) => Math.round(r.top))).size,
-      back: round(b), title: round(title), band: Math.round(Math.max(box.bottom, title.bottom, b.bottom)), text: s.textContent };
+    const s = document.querySelector(".piece-status");
+    return s && !s.hidden && s.textContent.includes(text) ? s.textContent : null;
   }, text);
-  const inBackRow = (m) => Boolean(m) && m.status.left >= m.back.right && Math.abs(m.wordsRight - m.title.right) <= 1 &&
-    m.status.top >= m.back.top - 2 && m.status.bottom <= m.title.top + 1 &&
-    Math.abs((m.status.top + m.status.bottom) / 2 - (m.back.top + m.back.bottom) / 2) <= 2;
-  // The first change makes the portal say «Guardado»: in the row of «← Volver», on its right, so it never takes a line of its
-  // own under the title, and the band (the title included) still ends at PHONE_FRAME_MAX px or less.
+  // The first change makes the portal say «Guardado» in the title band.
   const savedLine = async (tag, page, frame) => {
     if (frame) await frame.evaluate(() => responder("q-001", "si"));
     const saved = await waitFor(() => lineOf(page, "Guardado"), 5000);
-    check(`${tag}: «Guardado» goes in the row of «← Volver», on its right and set to the row's end, above the title`, inBackRow(saved), JSON.stringify(saved));
-    check(`${tag}: with «Guardado» showing, the h1 and the whole title band end at ${PHONE_FRAME_MAX} px or less`,
-      saved && saved.title.bottom <= PHONE_FRAME_MAX && saved.band <= PHONE_FRAME_MAX, JSON.stringify(saved));
+    check(`${tag}: after the first change the title band says «Guardado»`, saved !== null, JSON.stringify(saved));
     return saved;
   };
   const fitCheck = async (tag, what, page, frame) => {
@@ -1754,7 +1803,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     const tall = await pageHeight(page);
     check(`${tag}: the portal's page is taller than the screen`, tall.scroll > tall.vh, JSON.stringify(tall));
     const down = await stuckOf(page);
-    check(`${tag}: one screen down nothing fixed or sticky is on screen, and the masthead went up`, down.scrollY > PHONE_FRAME_MAX &&
+    check(`${tag}: one screen down nothing fixed or sticky is on screen, and the masthead went up`, down.scrollY > 0 &&
       down.stuck.length === 0 && down.masthead <= 0, JSON.stringify(down));
     // The first change: «Guardado» right below the title (its one line is full).
     await savedLine(tag, page, frame);
@@ -1802,29 +1851,24 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     await context.close();
   }
 
-  // A title of TITLE_MAX characters still ends the title band at 160 px or less.
+  // A title of TITLE_MAX characters: whole, and the save line still says what happened.
   {
     const tag = `phone ${engineName}: a title of ${TITLE_MAX} characters`;
     const { backend, context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = TITLE_AT_MAX; });
     await rest(tag, page, { title: TITLE_AT_MAX });
     await savedLine(tag, page, frame);
-    // The save fails (no connection): its line wraps inside the row of «← Volver», the h1 still ends at PHONE_FRAME_MAX px
-    // or less, and the live region still says it.
+    // The save fails (no connection): its line says so, and the live region too.
     backend.saveFails = true;
     if (frame) await frame.evaluate(() => responder("q-001", "no_se"));
     const failed = await waitFor(() => lineOf(page, "Sin guardar"), 8000);
-    check(`${tag}: a failed save says so in the row of «← Volver», on its right, above the title`, inBackRow(failed) && failed.text === SAVE_ERROR_ES,
-      JSON.stringify(failed));
-    check(`${tag}: with the failed save showing, the h1 ends at ${PHONE_FRAME_MAX} px or less`, failed && failed.title.bottom <= PHONE_FRAME_MAX, JSON.stringify(failed));
+    check(`${tag}: a failed save says so in the title band`, failed === SAVE_ERROR_ES, JSON.stringify(failed));
     const live = await page.textContent("#main > [role=status]");
     check(`${tag}: the live region announces the failed save`, live === SAVE_ERROR_ES, live);
-    // A change too long to keep: its line too goes in that row and the h1 still ends at PHONE_FRAME_MAX px or less.
+    // A change too long to keep: its line says so.
     const quota = await page.evaluate(async () => (await import("./js/bridge.js")).STORAGE_QUOTA_CHARS);
     if (frame) await frame.evaluate((n) => { responder("q-003", "cambio"); escribir("q-003", "texto", "x".repeat(n)); }, quota);
     const tooLarge = await waitFor(() => lineOf(page, TOO_LARGE_ES), 5000);
-    check(`${tag}: a change too long to save says so in the row of «← Volver», on its right, above the title`, inBackRow(tooLarge), JSON.stringify(tooLarge));
-    check(`${tag}: with «${TOO_LARGE_ES}» showing, the h1 ends at ${PHONE_FRAME_MAX} px or less`, tooLarge && tooLarge.title.bottom <= PHONE_FRAME_MAX,
-      JSON.stringify(tooLarge));
+    check(`${tag}: a change too long to save says so in the title band`, tooLarge !== null, JSON.stringify(tooLarge));
     await context.close();
   }
 
@@ -1869,7 +1913,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     await context.close();
   }
 
-  // A short title: «Guardado» still goes in the row of «← Volver» (one place for it, whatever the title).
+  // A short title: «Guardado» shows too.
   {
     const tag = `phone ${engineName}: a short title`;
     const { context, page, frame } = await openPhone(IDS.questions, () => typeof respondidas === "function", (b) => { b.pieces[0].title = "Preguntas del proyecto"; });
@@ -1877,11 +1921,10 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     await context.close();
   }
 
-  // The project's page and the owner's screens (MAR-14 too): «← Volver» in one line named after where it goes, and the
-  // title band short at rest, with nothing cut. The owner's piece screen has the longest title and its permanent line
-  // «Lo que envió … el …» under it.
+  // The project's page and the owner's screens: «← Volver» in one line named after where it goes, and the title whole,
+  // nothing cut. The owner's piece screen has the longest title and its permanent line «Lo que envió … el …» under it.
   {
-    const bandOf = (page, headSelector) => page.evaluate((sel) => {
+    const bandOf = (page) => page.evaluate(() => {
       window.scrollTo(0, 0);
       const bottom = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().bottom) : null; };
       const back = document.querySelector(".back-link");
@@ -1889,65 +1932,53 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       if (back) range.selectNodeContents(back);
       const rects = back ? [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0) : [];
       const h1 = document.querySelector("h1");
-      const style = h1 && getComputedStyle(h1);
-      // The band: what its elements reach (the owner's heading gives its box up to the grid, so the title and the line count).
-      const band = Math.max(...sel.split(",").map((one) => bottom(one.trim()) ?? 0));
-      return { h1: bottom("h1"), band, h1Text: h1 && h1.textContent, h1Lines: h1 && Math.round(h1.getBoundingClientRect().height / parseFloat(style.lineHeight)),
+      return { h1: bottom("h1"), h1Text: h1 && h1.textContent,
         back: back && { lines: rects.length && rects.every((r) => Math.abs(r.top - rects[0].top) < r.height / 2) ? 1 : rects.length,
           text: back.innerText.trim().replace(/\s+/g, " "), label: back.getAttribute("aria-label"), height: Math.round(back.getBoundingClientRect().height) } };
-    }, headSelector);
-    // noBack: the project's page has no «volver» on a phone (its destination is home, which the brand links to).
+    });
     // backText, brandLabel: the link's words and the brand's name in the screen's language (Spanish unless said).
-    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false, backText = "Volver", brandLabel = "ninben, ir a Tus proyectos" } = {}) => {
+    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { backText = "Volver", brandLabel = "ninben, ir a Tus proyectos" } = {}) => {
       const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO", frameScreen });
       const page = await context.newPage();
       await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
       await waitFor(() => page.evaluate(ready).catch(() => false), 10000);
       await sleep(200);
-      const at = await bandOf(page, headSelector);
-      check(`${tag}: at rest the h1 and the title band end at ${PHONE_FRAME_MAX} px or less`, at.h1 !== null && at.h1 <= PHONE_FRAME_MAX && at.band > 0 && at.band <= PHONE_FRAME_MAX, JSON.stringify(at));
-      if (noBack) {
-        const shown = await page.evaluate(() => [...document.querySelectorAll(".back-link")].filter((el) => el.getBoundingClientRect().height > 0).length);
-        check(`${tag}: there is no «volver» on a phone`, shown === 0, String(shown));
-      } else {
-        check(`${tag}: «${backText}» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
-          at.back.text === backText && at.back.label === label, JSON.stringify(at.back));
-      }
+      const at = await bandOf(page);
+      check(`${tag}: «${backText}» is one line, at least 44 px high, and its name is «${label}»`, at.back && at.back.lines === 1 && at.back.height >= 44 &&
+        at.back.text === backText && at.back.label === label, JSON.stringify(at.back));
       // The brand is the link home, on every screen: its name says where, it is a 44 px target, its words keep the brand's type.
       const brand = await page.evaluate(() => {
         const a = document.querySelector("[data-rol=marca-producto]");
         if (!a) return null;
         const box = a.getBoundingClientRect(), text = a.querySelector("span");
         return { tag: a.tagName.toLowerCase(), href: a.getAttribute("href"), label: a.getAttribute("aria-label"), height: Math.round(box.height),
-          edge: Math.round(box.left) - Math.round(document.querySelector("h1").getBoundingClientRect().left),
           words: text && text.textContent, weight: text && getComputedStyle(text).fontWeight, svg: Boolean(a.querySelector("svg")) };
       });
       check(`${tag}: the brand is a link home named «${brandLabel}», 44 px high, in the brand's type`, brand && brand.tag === "a" && brand.href === "#/" &&
-        brand.label === brandLabel && Math.abs(brand.edge) <= 1 && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
+        brand.label === brandLabel && brand.height >= 44 && brand.words === "ninben" && brand.weight === "600", JSON.stringify(brand));
       const fixed = await stuckOf(page);
       check(`${tag}: nothing fixed or sticky is on screen one screen down`, fixed.stuck.length === 0, JSON.stringify(fixed));
       return { context, page, at };
     };
     const projectReady = () => document.querySelector(".page-head h1")?.textContent.length > 0;
     // The project's page, the person's and the owner's, with a name that fits one line, two lines of running text, and two
-    // lines of wide letters: the h1 ends at 160 px or less and no «volver» shows.
+    // lines of wide letters: the name is whole, and «← Volver» goes home.
     const WIDE_NAME = "WWWWW WWWWW WWWWW";
     for (const [what, name] of [["a short name", null], ["a name of two lines", PROJECT_TWO_LINES], ["a name of two lines of wide letters", WIDE_NAME]]) {
       const person = ownerBackend(html);
       if (name) person.projects.find((p) => p.id === IDS.project).name = name;
       const personName = name || PROJECT.name;
-      let screen = await phoneScreen(`phone ${engineName}: project page, ${what}`, person, `#/project/${IDS.project}`, ".page-head", "", projectReady, { noBack: true });
+      let screen = await phoneScreen(`phone ${engineName}: project page, ${what}`, person, `#/project/${IDS.project}`, ".page-head", "Volver a tus proyectos", projectReady);
       check(`phone ${engineName}: project page, ${what}: the name is whole`, screen.at.h1Text === personName, JSON.stringify(screen.at));
-      if (name) check(`phone ${engineName}: project page, ${what}: it wraps to ${screen.at.h1Lines} lines (two)`, screen.at.h1Lines === 2, JSON.stringify(screen.at));
       await screen.context.close();
       const owner = ownerBackend(html);
       if (name) { owner.ownerView[IDS.ownedProject].project.name = name; owner.projects.find((p) => p.id === IDS.ownedProject).name = name; }
-      screen = await phoneScreen(`phone ${engineName}: owner's project page, ${what}`, owner, `#/project/${IDS.ownedProject}`, ".page-head", "", projectReady, { noBack: true });
+      screen = await phoneScreen(`phone ${engineName}: owner's project page, ${what}`, owner, `#/project/${IDS.ownedProject}`, ".page-head", "Volver a tus proyectos", projectReady);
       check(`phone ${engineName}: owner's project page, ${what}: the name is whole`, screen.at.h1Text === (name || PROJECT.owned), JSON.stringify(screen.at));
       await screen.context.close();
     }
     // The owner's piece screen keeps «← Volver» (it goes back to the project): a short title, a title of TITLE_MAX characters,
-    // and a send by a person of ~60 characters of name: the band, with its line «Lo que envió … el …», ends at 160 px or less.
+    // and a send by a person of ~60 characters of name: the title whole, with its line «Lo que envió … el …».
     const LONG_NAME = "María de los Ángeles Fernández de la Vega y Rodríguez Pérez";
     const savedTitle = OWNED_TITLES[OWNED.questions], savedName = PEOPLE.luis.name;
     try {
@@ -1984,10 +2015,9 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     } finally { OWNED_TITLES[OWNED.questions] = savedTitle; PEOPLE.luis.name = savedName; }
     // One point of «Decisiones» as the owner reads it keeps «← Volver» too: it goes back to the project, not home (the
     // brand's destination). Then its band reads as every list's: «← Volver» on its own row, the h1 (the point's title), and the
-    // counts under it as the list's data line, at the h1's x. The h1 takes the largest step of the type scale with which a
-    // title of DECISION_TITLE_MAX characters still ends at 160 px or less: the lists' 24 px does not (the check measures it),
-    // 16 px does. Cases: the fixture's title, one of DECISION_TITLE_MAX characters, the pieces' earliest-breaking title of
-    // that length, and that title in English with the five kinds of answer counted in two digits (the longest counts line).
+    // counts under it as the list's data line. Cases: the fixture's title, one of DECISION_TITLE_MAX characters, the pieces'
+    // earliest-breaking title of that length, and that title in English with the five kinds of answer counted in two digits
+    // (the longest counts line).
     const englishWorst = (b) => {
       const entry = b.decisions[IDS.ownedProject];
       for (const project of [b.ownerView[IDS.ownedProject].project, ...b.projects.filter((x) => x.id === IDS.ownedProject)]) project.language = "en";
@@ -2013,25 +2043,14 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
         () => document.querySelector(".page-head h1")?.textContent.length > 0 && document.querySelectorAll(".owner-answer").length > 0,
         english ? { backText: "Back", brandLabel: "ninben, go to Your projects" } : {});
       check(`${tag}: the title is whole (${title.length} characters, never cut)`, screen.at.h1Text === title, JSON.stringify(screen.at));
-      if (title.length === DECISION_TITLE_MAX) check(`${tag}: it wraps to ${screen.at.h1Lines} lines (two at most)`, screen.at.h1Lines <= 2, JSON.stringify(screen.at));
       const head = await screen.page.evaluate(() => {
         window.scrollTo(0, 0);
         const box = (s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) }; };
-        const h1 = document.querySelector(".page-head h1"), cs = getComputedStyle(h1);
-        // The lists' title size, tried on this h1: where it would end.
-        const size = cs.fontSize, lineHeight = cs.lineHeight;
-        h1.style.fontSize = getComputedStyle(document.documentElement).getPropertyValue("--text-title").trim();
-        h1.style.lineHeight = "1.25";
-        const atTitleSize = Math.round(h1.getBoundingClientRect().bottom);
-        h1.style.fontSize = ""; h1.style.lineHeight = "";
-        return { back: box("[data-rol=marco] .back-link"), h1: box(".page-head h1"), meta: box(".page-meta"), text: document.querySelector(".page-meta")?.textContent,
-          type: `${size} ${cs.fontWeight}`, lineHeight, atTitleSize };
+        return { back: box("[data-rol=marco] .back-link"), h1: box(".page-head h1"), meta: box(".page-meta"), text: document.querySelector(".page-meta")?.textContent };
       });
-      check(`${tag}: the h1 is in 16px 600, the largest step of the type scale that keeps a title of ${DECISION_TITLE_MAX} characters within ${PHONE_FRAME_MAX} px (at the lists' 24 px it would end at ${head.atTitleSize} px)`,
-        head.type === "16px 600" && (title.length !== DECISION_TITLE_MAX || head.atTitleSize > PHONE_FRAME_MAX), JSON.stringify(head));
       const counts = english ? "Works: 13 · I would change it: 12 · Does not work: 13 · Not sure: 12 · No answer: 13" : "Va: 1 · No va: 1 · Sin respuesta: 1";
-      check(`${tag}: «← Volver» on its own row, then the h1, then the counts under it as the list's data line, at the h1's x`, head.back && head.h1 && head.meta &&
-        head.back.bottom <= head.h1.top && head.h1.bottom <= head.meta.top && Math.abs(head.meta.left - head.h1.left) <= 1 && head.text === counts, JSON.stringify(head));
+      check(`${tag}: «← Volver» on its own row, then the h1, then the counts under it as the list's data line`, head.back && head.h1 && head.meta &&
+        head.back.bottom <= head.h1.top && head.h1.bottom <= head.meta.top && head.text === counts, JSON.stringify(head));
       // Where the counts wrap, they wrap between two counts, never inside one («Sin respuesta:» on a line and its number on the next).
       const split = await screen.page.evaluate(() => {
         const meta = document.querySelector(".page-meta");
@@ -3066,34 +3085,19 @@ async function projectPageChecks(browser, base, html) {
     const { context, page, errors } = await open(backend);
     await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
     const view = await page.evaluate(() => ({ h1: document.querySelector("h1")?.textContent, lang: document.documentElement.lang,
-      meta: [...document.querySelectorAll(".page-meta")].map((p) => p.textContent) }));
+      meta: [...document.querySelectorAll(".page-meta")].map((p) => p.textContent), who: document.querySelector(".masthead .masthead-who")?.textContent ?? null }));
     const rows = await projectRowsOf(page);
     const last = await formatIn(page, AT.sent);
-    check("home-projects: the title is «Tus proyectos», with how many projects and who is signed in", view.h1 === PROJECT.title && view.lang === "es" &&
-      view.meta[0] === "2 proyectos" && view.meta[1] === `Entraste como ${USER.email}`, JSON.stringify(view));
+    check("home-projects: the title is «Tus proyectos», with how many projects, and who is signed in says so in the shell", view.h1 === PROJECT.title && view.lang === "es" &&
+      view.meta.length === 1 && view.meta[0] === "2 proyectos" && view.who === `Entraste como ${USER.email}`, JSON.stringify(view));
     check("home-projects: one row per project, by name, each linking to #/project/…, and no piece on home", rows.length === 2 &&
       rows[0].href === `#/project/${IDS.ownedProject}` && rows[1].href === `#/project/${IDS.project}` && !(await page.$('a[href^="#/piece/"]')), JSON.stringify(rows));
-    check("home-projects: the person's project says what is left to answer, on the row's right like a list's state", rows[1] && rows[1].title === PROJECT.name &&
+    check("home-projects: the person's project says what is left to answer, as a list's state", rows[1] && rows[1].title === PROJECT.name &&
       rows[1].aside === "1 por responder" && !rows[1].meta, JSON.stringify(rows[1]));
     check("home-projects: an owned project says so on the right, and its people and the last response under its name", rows[0] &&
       rows[0].title === PROJECT.owned && rows[0].aside === "Eres responsable" &&
       rows[0].meta === `4 personas · última respuesta el ${last}`, JSON.stringify(rows[0]));
     check("home-projects: 360px no horizontal scroll", await noHorizontalScroll(page));
-    // Below 1056 a row keeps its label on the row's right edge, as the project lists carry the state; from 1056 the rows are
-    // columns (listColumnChecks, on every list screen).
-    await page.setViewportSize({ width: 672, height: 900 });
-    const wide = await page.$$eval(".rows .row-link", (els) => els.map((a) => {
-      const aside = a.querySelector(".row-aside");
-      return aside ? Math.abs(a.getBoundingClientRect().right - aside.getBoundingClientRect().right) : null;
-    }));
-    check("home-projects: at 672 every row carries its label on the right edge, as the project lists carry the state",
-      wide.length === 2 && wide.every((gap) => gap !== null && gap <= 1), JSON.stringify(wide));
-    // A list in which no row has a meta line (every project another person's) has two equal columns, title · state, at 1056 and up.
-    await page.setViewportSize({ width: 1056, height: 900 });
-    await page.evaluate(() => document.querySelectorAll(".rows .row-meta").forEach((el) => el.remove()));
-    listColumnChecks("home-projects (no meta line in any row)", 1056, "light", await listColumns(page));
-    await page.reload({ waitUntil: "networkidle" });
-    await page.setViewportSize({ width: 360, height: 780 });
     await page.screenshot({ path: join(outDir, "home-projects-360.png"), fullPage: true });
     await snapshot(page, "home-projects", "lista");
     const homeAxe = await axeViolations(page);
@@ -3995,19 +3999,6 @@ async function ownerViewChecks(browser, base, html, flowHtml, demoHtml) {
   }
 }
 
-// ---- the portal's own frame, measured with the factory's frozen geometry ---------------------------------
-// The visual manual's frame rules (marco.md: one frame, one page margin on both sides from 672 px and the frame not
-// cut before 1440, MAR-11; sections side by side in equal parts, MAR-12; the body not left half empty from 1056,
-// FUN-43; and the rest that geometria.mjs measured on the factory's pieces), on every portal screen at the factory's
-// verification widths 320, 672 and 1056 and its widest review width, 1440, light and dark:
-// - the screen snapshots of PORTAL_SCREENS (sign-in email and code steps, home with the projects and empty, a project's page, an owned
-//   project's page with the owner's part, a project's page with a received piece, and the «Decisiones» screens) through
-//   tests/fixtures/geometria.mjs, the factory's measure frozen when the factory retired it (after its 1.47.0; see the file's
-//   header): MEDIR_GEOMETRIA and evaluaAncho at each width, evaluaConjunto between them all
-//   (the same frame on every screen, MAR-02), and revisaMedia on the portal's CSS (cuts on the grid, MAR-08);
-// - the piece screen and the owner's read-only piece screen, whose body is the piece's iframe: its frame on the same edges as the other screens', and the
-//   iframe as wide as the factory's design-system/assets/piece-host.mjs says (widthInPortal), so the factory measures
-//   its pieces at the width the person sees them; also at 1600, past the frame's cap.
 // ---- the «Decisiones» section of a project's page ----------------------------------------------------------
 // A person in the section's list sees, after «Lo que se te pidió», the points the factory published for the project, each
 // with its mark (new, changed since their answer, already confirmed, or none) and «En qué se apoya» folded; answers one of
@@ -4139,41 +4130,6 @@ const liveText = (page) => page.evaluate(() => document.querySelector("[data-rol
 
 async function decisionsChecks(browser, base, html) {
   const sectionShown = (page) => waitFor(async () => { const s = await decisionsSection(page); return s && s.points.length ? s : null; }, 10000);
-
-  // decisions-columns: from 1056 px the section takes the page's column as the pieces' list does: each point is a row of the
-  // list's three equal columns, its title (and mark) · what was decided (the fold and when she answered under it) · its form,
-  // and «¿Falta algo?» the same, its title · its form; the forms start where the pieces' states do. Below 1056, one column.
-  for (const width of [768, 1056, 1440]) {
-    const backend = decisionsBackend(html);
-    const { context, page } = await openMocked(browser, base, backend, `#/project/${IDS.project}`, width);
-    await sectionShown(page);
-    const cols = await page.evaluate(() => {
-      const x = (el) => (el ? Math.round(el.getBoundingClientRect().left) : null);
-      const top = (el) => (el ? Math.round(el.getBoundingClientRect().top) : null);
-      const pieces = [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row .row-link")].map((row) => x(row.querySelector(".status, .row-aside")));
-      const points = [...document.querySelectorAll(".decision")].map((li) => ({ row: x(li), der: Math.round(li.getBoundingClientRect().right),
-        title: x(li.querySelector(".decision-title")), titleTop: top(li.querySelector(".decision-title")), decided: x(li.querySelector(".decision-decided")),
-        form: x(li.querySelector(".decision-answer")), formTop: top(li.querySelector(".decision-answer")) }));
-      const propose = document.querySelector(".decisions-propose");
-      return { pieces, points, propose: propose && { row: x(propose), title: x(propose.querySelector("h3")), titleTop: top(propose.querySelector("h3")),
-        form: x(propose.querySelector("form")), formTop: top(propose.querySelector("form")) } };
-    });
-    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 2;
-    let ok = cols.points.length === 4 && Boolean(cols.propose);
-    if (width >= 1056) {
-      const p0 = cols.points[0];
-      const step = p0 ? (p0.der - p0.row + 16) / 3 : 0;
-      ok = ok && cols.points.every((p) => near(p.title, p.row) && near(p.decided, p.row + step) && near(p.form, p.row + 2 * step) && near(p.formTop, p.titleTop)) &&
-        cols.pieces.length > 0 && cols.pieces.every((s) => near(s, p0.row + 2 * step)) &&
-        near(cols.propose.title, p0.row) && near(cols.propose.form, p0.row + 2 * step) && near(cols.propose.formTop, cols.propose.titleTop);
-    } else {
-      ok = ok && cols.points.every((p) => near(p.title, p.row) && near(p.decided, p.row) && near(p.form, p.row) && p.formTop > p.titleTop) &&
-        near(cols.propose.form, cols.propose.title);
-    }
-    check(`decisions-columns ${width}px: ${width >= 1056 ? "each point and «¿Falta algo?» are rows of the list's three columns, the forms where the pieces' states are"
-      : "each point is one column: its title, what was decided and its form one under another"}`, ok, JSON.stringify(cols));
-    await context.close();
-  }
 
   // decisions-progressive: on a phone a point she has not answered shows only its options; choosing one that asks for a comment
   // shows the comment and the send, the focus staying on her choice; «Va» shows the comment as optional and the send. A point answered on this version
@@ -4979,70 +4935,8 @@ async function ownerDecisionsChecks(browser, base, html) {
     await context.close();
   }
 
-  // owner-decisions-alignment: every person's row has one anatomy at every width. From 1056 px the row is a list row of three
-  // equal columns, as every list of the portal: the name, then the dates with the comment and the earlier answers under them,
-  // then the answer, each column on the same x down the list. Below, the name on the row's left with the answer on its right
-  // edge, and the dates, the comment and the earlier answers under them on the name's x.
-  for (const width of [320, 768, 1056, 1440]) {
-    const backend = ownerDecisionsBackend(html);
-    // With Tomás, who answered before the point changed: his row carries the earlier answers' fold.
-    const entry = backend.decisions[IDS.ownedProject];
-    entry.members.push({ id: PLAIN.tomas.id, display_name: PLAIN.tomas.name, role: "stakeholder", created_at: "2026-10-07T12:00:00.000Z" });
-    entry.audience.push(PLAIN.tomas.id);
-    entry.answers.push({ id: randomUUID(), member_id: PLAIN.tomas.id, key: OKEY.trips, version: "e10000000000", value: "yes", comment: null, created_at: OAT.before });
-    const { context, page } = await openMocked(browser, base, backend, detailHref(OKEY.trips), width);
-    await detailShown(page, OTITLE.trips);
-    const rows = await page.evaluate(() => [...document.querySelectorAll(".owner-answer")].map((el) => {
-      const text = (sel) => {
-        const node = el.querySelector(sel);
-        if (!node) return null;
-        const range = document.createRange(); range.selectNodeContents(node);
-        const rects = [...range.getClientRects()].filter((r) => r.width > 0);
-        return rects.length ? { x: Math.round(Math.min(...rects.map((r) => r.left))), der: Math.round(Math.max(...rects.map((r) => r.right))),
-          top: Math.round(Math.min(...rects.map((r) => r.top))), bottom: Math.round(Math.max(...rects.map((r) => r.bottom))) } : null;
-      };
-      const box = el.getBoundingClientRect();
-      return { row: { x: Math.round(box.left), der: Math.round(box.right) }, name: text(".row-title"), answer: text(".owner-answer-value"),
-        // The fold by its box: its words start after the chevron.
-        meta: text(":scope > .row-meta"), comment: text(":scope > .owner-answer-comment"),
-        history: el.querySelector(":scope > details > summary") ? { x: Math.round(el.querySelector(":scope > details > summary").getBoundingClientRect().left) } : null };
-    }));
-    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
-    const same = (xs) => xs.every((x) => near(x, xs[0]));
-    const under = rows.flatMap((r) => [r.meta, r.comment, r.history].filter(Boolean));
-    let ok = rows.length === 5 && rows.every((r) => r.name && r.answer) && same(rows.map((r) => r.name.x)) && same(under.map((x) => x.x));
-    if (width >= 1056) {
-      const step = (rows[0].row.der - rows[0].row.x + 16) / 3;
-      ok = ok && same(rows.map((r) => r.answer.x)) && rows.every((r) => near(r.name.x, r.row.x) && Math.abs(r.answer.x - r.row.x - 2 * step) <= 2 &&
-        [r.meta, r.comment, r.history].filter(Boolean).every((x) => Math.abs(x.x - r.row.x - step) <= 2) && r.answer.top >= r.name.top - 1 && r.answer.bottom <= r.name.bottom + 1);
-    } else {
-      ok = ok && same(rows.map((r) => r.answer.der)) && rows.every((r) => near(r.name.x, r.row.x) && near(r.answer.der, r.row.der) && r.answer.top >= r.name.top - 1 && r.answer.bottom <= r.name.bottom + 1 &&
-        under.every((x) => near(x.x, r.row.x)));
-    }
-    check(`owner-decisions-alignment ${width}px: every person's row has one anatomy: ${width >= 1056 ? "name · dates and comment · answer, in three equal columns aligned down the list"
-      : "the name on the left, the answer on the right edge, the dates and the comment under them on the name's x"}`, ok, JSON.stringify(rows));
-    await context.close();
-  }
-
-  // owner-decisions-proposals-aligned: «Lo que propusieron agregar» has one anatomy at every width: each proposal's author and
-  // date line on the row's start, and its text under it on the same x, down the list.
-  for (const width of [320, 1056, 1440]) {
-    const backend = ownerDecisionsBackend(html);
-    const { context, page } = await openMocked(browser, base, backend, `#/project/${IDS.ownedProject}`, width);
-    await waitFor(async () => { const s = await ownerDecisionsSummary(page); return s && s.proposals.length ? s : null; }, 10000);
-    const rows = await page.evaluate(() => [...document.querySelectorAll(".owner-proposal")].map((li) => {
-      const left = (el) => { if (!el) return null; const r = document.createRange(); r.selectNodeContents(el);
-        const xs = [...r.getClientRects()].filter((x) => x.width > 0).map((x) => x.left); return xs.length ? Math.round(Math.min(...xs)) : null; };
-      return { row: Math.round(li.getBoundingClientRect().left), by: left(li.querySelector(".row-meta")), text: left(li.querySelector(".owner-proposal-text")) };
-    }));
-    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
-    check(`owner-decisions-proposals-aligned ${width}px: every author line and every proposal start on the row's start, one x down the list`,
-      rows.length === 2 && rows.every((r) => near(r.by, r.row) && near(r.text, r.row) && near(r.by, rows[0].by)), JSON.stringify(rows));
-    await context.close();
-  }
-
   // owner-decisions-hierarchy: squinting, the point's title stands out: no other text of the screen (the section's heading,
-  // a name, an answer) has the h1's size and weight, at a phone's width (where the h1 is 16 px) and at a wide one. Links are
+  // a name, an answer) has the h1's size and weight, at a phone's width and at a wide one. Links are
   // apart: «← Volver» keeps the frame's link type on every screen, set off by the link colour.
   for (const width of [320, 1440]) {
     const backend = ownerDecisionsBackend(html);
@@ -5298,7 +5192,6 @@ async function threadChecks(browser, base, html) {
       JSON.stringify(rows.map((r) => [r.thread, r.trackW, r.title && r.title.x])));
     if (width === 320) {
       check(`${tag}: no horizontal scroll`, view.scroll);
-      check(`${tag}: a two-line project name and the thread: the title band ends at ${PHONE_FRAME_MAX} px or less`, view.band !== null && view.band <= PHONE_FRAME_MAX, String(view.band));
       check(`${tag}: every row's state shows, inside the screen, and a title of ${TITLE_MAX} characters is whole inside its row`, rows.length === 4 &&
         rows.every((r) => r.statusShown && r.status.w > 0 && r.status.x >= 0 && r.status.der <= view.vw && r.title.der <= r.link.der + 1) &&
         rows.some((r) => r.titleText === TITLE_AT_MAX), JSON.stringify(rows.map((r) => [r.state, r.status, r.title, r.link && r.link.der])));
@@ -5378,100 +5271,12 @@ async function threadChecks(browser, base, html) {
   }
 }
 
-const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
-// The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, an
+// The screens every run captures: the sign-in steps, home (the projects, and empty), a project's page, an
 // owned project's page with the owner's part (captured with --flow and --demo too), a project's page with a received
 // piece, a replaced version that was sent and a change request (the piece closure), and the «Decisiones» screens
 // (decisionsScreens).
 const PORTAL_SCREENS = ["sign-in-email", "sign-in-code", "home-projects", "project-page", "home-empty", "project-owner", "project-received",
   "project-decisions", "project-decisions-errors", "project-decisions-only", "project-owner-decisions", "owner-decision"];
-const GRID_CUTS = [320, 672, 1056, 1312, 1584];
-// A screen's exceptions, by rule code, each with its reason in the rule's own words.
-const GEOMETRY_EXCEPTIONS = {
-  // Controller's ruling (design judges, round 4): FUN-43 lets an empty view that is «un vacío centrado con un mensaje
-  // angosto» stay under 60 %; the ruling applies that intent to this empty view, which is start-aligned instead of centred.
-  "home-empty": { "FUN-43": "vista vacía (todavía no hay proyectos): un mensaje angosto con su aviso y su salida justo debajo, "
-    + "alineado al inicio como el resto del conjunto en vez de centrado; fallo del controlador que aplica la excepción del vacío "
-    + "centrado de FUN-43 a un vacío alineado al inicio" },
-};
-// densidad (the lists at 1056 and up, FUN-43 «el grupo tabular como tabla»): every list row of a screen as laid out, its
-// row box (the link or the entry, without its padding), and the text of its three parts: the title (a person's name with
-// its «Ver lo que envió» in the owner's part), the meta line (people, dates) and the state or the aside. Text boxes are the
-// text's own rects, never a padded box.
-// The «Decisiones» screens with rows of the list (the pieces' list, the owner's points): their other rows (a point to answer, a
-// proposal, a person's answers) are not row links nor entries, and listColumns leaves them out.
-const LIST_SCREENS = ["home-projects", "project-page", "project-owner", "project-received", "project-decisions", "project-owner-decisions"];
-const listColumns = (page) => page.evaluate(() => {
-  const textBox = (el) => {
-    if (!el) return null;
-    const rects = [];
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (!n.textContent.trim()) continue;
-      const r = document.createRange(); r.selectNodeContents(n);
-      rects.push(...[...r.getClientRects()].filter((x) => x.width > 0));
-    }
-    return rects.length ? { x: Math.round(Math.min(...rects.map((x) => x.left))), der: Math.round(Math.max(...rects.map((x) => x.right))),
-      top: Math.round(Math.min(...rects.map((x) => x.top))), bottom: Math.round(Math.max(...rects.map((x) => x.bottom))) } : null;
-  };
-  const boxOf = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
-  // The row's own box without its inline padding: a row of «Lo que se te pidió» keeps the thread's track (and below 1056 a
-  // step at its end, for the stop tint) inside its link, and its content starts after the track.
-  const contentOf = (el) => { const b = boxOf(el), cs = getComputedStyle(el);
-    return { ...b, x: Math.round(b.x + parseFloat(cs.paddingLeft)), der: Math.round(b.der - parseFloat(cs.paddingRight)) }; };
-  return [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row")].filter((li) => li.querySelector(":scope > .row-link, :scope > .row-item")).map((li) => {
-    const row = li.querySelector(":scope > .row-link, :scope > .row-item");
-    // lead: the thread's track, from the row's outer start to its content (0 on every other list).
-    const lead = row && li.querySelector(":scope > .thread") ? Math.round(parseFloat(getComputedStyle(row).paddingLeft)) : 0;
-    const main = row && row.querySelector(":scope > .row-main");
-    const state = row && row.querySelector(":scope > .row-aside, :scope > .status");
-    const title = main && main.firstElementChild;
-    return { text: title ? title.textContent : null, row: row ? contentOf(row) : null, lead, gap: row ? Math.round(parseFloat(getComputedStyle(row).columnGap) || 0) : null,
-      title: textBox(title),
-      meta: textBox(main && main.querySelector(":scope > .row-meta")), state: state ? boxOf(state) : null };
-  });
-});
-// From 1056 the rows are columns, title · meta · state, each column on the same x down every list of the screen, in that
-// order and on one line, so the eye crosses the row in short steps: the row's width is shared in three equal columns, so
-// the state starts two thirds into the row, not on its far edge. Below 1056 a row is as it was: at 672 the title on the row's left and the state on its right
-// edge, the meta under the title; at 320, everything stacked on the title's edge (the owner's entries keep their two lines,
-// checked in ownerViewChecks).
-function listColumnChecks(name, width, scheme, rows) {
-  const tag = `densidad: ${name} ${width}px ${scheme}`;
-  const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
-  const same = (xs) => xs.length > 0 && xs.every((x) => near(x, xs[0]));
-  const ok = rows.length > 0 && rows.every((r) => r.row && r.title && r.state);
-  const detail = JSON.stringify(rows.map((r) => [r.text, r.row && [r.row.x, r.row.der, r.lead], r.title && [r.title.x, r.title.der, r.title.top],
-    r.meta && [r.meta.x, r.meta.der, r.meta.top], r.state && [r.state.x, r.state.der, r.state.top]]));
-  if (width >= 1056) {
-    const metas = rows.filter((r) => r.meta);
-    // Where a row's columns start: its outer start, before the thread's track on «Lo que se te pidió» (the track comes out of
-    // the title's column there, so the meta and the state still fall on every other list's x).
-    const start = (r) => r.row.x - (r.lead || 0);
-    // The columns are decided by the list: with a meta line in any row the list has three columns and every state falls on the
-    // same x, a row without a meta line leaving that cell empty (a mixed list, like home with an owned project and another's);
-    // with none, two equal columns, title · state.
-    check(`${tag}: the rows are columns, title · meta · state, each column aligned down the list`, ok && same(rows.map((r) => r.title.x - (r.lead || 0))) &&
-      (!metas.length || same(metas.map((r) => r.meta.x))) && same(rows.map((r) => r.state.x)) &&
-      rows.every((r) => near(r.title.x, r.row.x) && (!r.meta || r.meta.x > r.title.der) && r.state.x > (r.meta ? r.meta.der : r.title.der) &&
-        r.state.top < r.title.bottom && (!r.meta || r.meta.top < r.title.bottom)), detail);
-    // Equal columns: three when any row has a meta line (from the title to the meta, from the meta to the state and from the state
-    // to the row's end, plus the gap, the same step: a third of the row and one gap), two when none has (the state half way in).
-    const parts = metas.length ? 3 : 2;
-    check(`${tag}: the row's width is shared in ${parts} equal columns, the state ${metas.length ? "two thirds" : "half way"} into the row, not on its far edge`, ok &&
-      rows.every((r) => { const step = (r.row.der - start(r) + r.gap) / parts;
-        return Math.abs(r.state.x - start(r) - step * (parts - 1)) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2 &&
-          (!r.meta || Math.abs(r.meta.x - start(r) - step) <= 2); }),
-      JSON.stringify({ parts, gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
-  } else if (width >= 672) {
-    check(`${tag}: as before the columns, the title on the row's left, the meta under it, the state on the row's right edge`, ok &&
-      rows.every((r) => near(r.title.x, r.row.x) && near(r.state.der, r.row.der) && (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
-  } else if (!["project-owner", "project-owner-decisions"].includes(name)) {
-    check(`${tag}: as before the columns, the title, the meta and the state one under another on the title's edge`, ok &&
-      rows.every((r) => near(r.title.x, r.row.x) && near(r.state.x, r.row.x) && r.state.top >= (r.meta || r.title).bottom - 1 &&
-        (!r.meta || (near(r.meta.x, r.row.x) && r.meta.top >= r.title.bottom - 1))), detail);
-  }
-}
 // Every screen snapshot through axe (the factory retired its visual manual's verifier, verifica-pantalla.mjs, in its
 // db243003): each snapshot taken in this run at the three review widths, 320, 768 and 1440, light and dark; one check per
 // run, naming the violated rules. With --questions and --demo all twelve PORTAL_SCREENS must have been captured.
@@ -5491,62 +5296,20 @@ async function screenAxeChecks(browser) {
     }
   } finally { server.close(); }
 }
-async function portalGeometryChecks(browser, base, html, factory) {
-  // The geometry measure is the frozen copy in tests/fixtures (the factory retired its own); piece-host.mjs is still the factory's.
-  const { MEDIR_GEOMETRIA, evaluaAncho, evaluaConjunto, revisaMedia } = await import(pathToFileURL(join(root, "tests", "fixtures", "geometria.mjs")).href);
+// With --factory, the piece screen's iframe (the person's, and the owner's read-only one) against the factory's
+// design-system/assets/piece-host.mjs: as wide as widthInPortal says at each width, over the frame's box with its margins,
+// so the factory measures its pieces at the width the person sees them.
+async function pieceWidthChecks(browser, base, html, factory) {
   const { widthInPortal } = await import(pathToFileURL(join(resolve(factory), "design-system", "assets", "piece-host.mjs")).href);
-  const passes = (r) => r.ok || Boolean(r.exceptuada);
-  const named = (r) => `${r.regla} (${r.codigos.join(", ")}): ${r.detalle}`;
-  const names = PORTAL_SCREENS;
-  check(`geometry: the ${names.length} screens were captured`, names.every((n) => screens.has(n)), [...screens.keys()].join(", "));
-  const server = await serveDir(screensDir);
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const frames = {}; // `${width}-${scheme}` -> the frame's content box on home, the projects (the other screens' reference)
-  try {
-    for (const scheme of ["light", "dark"]) {
-      const records = [], byScreen = new Map();
-      for (const name of names.filter((n) => screens.has(n))) for (const width of GEOMETRY_WIDTHS) {
-        const page = await browser.newPage({ viewport: { width, height: width < 672 ? 640 : 900 }, colorScheme: scheme });
-        await page.goto(`${origin}/${name}.html`, { waitUntil: "networkidle" });
-        await page.evaluate(() => document.fonts.ready);
-        const m = await page.evaluate(MEDIR_GEOMETRIA, {});
-        if (LIST_SCREENS.includes(name)) listColumnChecks(name, width, scheme, await listColumns(page));
-        await page.close();
-        records.push({ pantalla: name, recorrido: "portal", paso: 0, w: width, m });
-        if (name === "home-projects" && m.contenedor) frames[`${width}-${scheme}`] = m.contenedor;
-        byScreen.set(`${name}|${width}`, evaluaAncho(m, { patron: screens.get(name), angosto: false, admiteCompleto: false, marca: null,
-          excepciones: GEOMETRY_EXCEPTIONS[name] || {} }));
-      }
-      const between = evaluaConjunto(records, { grupoDe: () => "portal", modelos: { portal: "home-projects" }, patronDe: (n) => screens.get(n),
-        excepcionesDe: (n) => GEOMETRY_EXCEPTIONS[n] || {} });
-      for (const r of between) byScreen.get(`${r.pantalla}|${r.w}`).push(r);
-      for (const [key, rules] of byScreen) {
-        const [name, width] = key.split("|");
-        const failing = rules.filter((r) => !passes(r));
-        const excepted = rules.filter((r) => !r.ok && r.exceptuada).map((r) => `${r.regla} exceptuada: ${r.exceptuada}`);
-        check(`geometry: ${name} (${screens.get(name)}) ${width}px ${scheme}: the frame rules pass (${rules.length - failing.length}/${rules.length})`,
-          failing.length === 0, [...failing.map(named), ...excepted].join(" | "));
-      }
-    }
-  } finally { server.close(); }
-  const css = Object.fromEntries(["css/portal.css", "brand/ninben-components.css"].map((f) => [f, readFileSync(join(root, f), "utf8")]));
-  const media = revisaMedia(css, GRID_CUTS);
-  const offGrid = media.filter((x) => !x.ok);
-  check(`geometry: every @media of the portal's CSS is a cut of the grid (${GRID_CUTS.join(", ")})`, media.length > 0 && offGrid.length === 0,
-    offGrid.map((x) => `${x.archivo}: @media ${x.condicion} — ${x.detalle}`).join("; "));
-
-  // The piece screen: its frame (the brand's edge) where every other screen has it, at the page margin from both sides
-  // from 672 (MAR-02, MAR-11); and the piece's iframe over the frame's box, margins included, as wide as widthInPortal.
   const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
   const pieceScreens = [
     { name: "piece screen", backend: () => newBackend(html), hash: `#/piece/${IDS.questions}` },
     // The owner reading Luis's send of the questions, closed with observer.
     { name: "owner piece screen", backend: () => ownerViewBackend(html, null, null, {}), hash: ownerHref(IDS.ownedProject, OWNED.questions, PEOPLE.luis) },
   ];
-  for (const screen of pieceScreens) for (const scheme of ["light", "dark"]) for (const width of [...GEOMETRY_WIDTHS, 1600]) {
-    const tag = `geometry: ${screen.name} ${width}px ${scheme}`;
-    const backend = screen.backend();
-    const context = await mockedContext(browser, { backend, width, locale: "es-CO" });
+  for (const screen of pieceScreens) for (const scheme of ["light", "dark"]) for (const width of [320, 672, 1056, 1440, 1600]) {
+    const tag = `piece width: ${screen.name} ${width}px ${scheme}`;
+    const context = await mockedContext(browser, { backend: screen.backend(), width, locale: "es-CO" });
     const page = await context.newPage();
     await page.setViewportSize({ width, height: width < 672 ? 640 : 900 });
     await page.emulateMedia({ colorScheme: scheme });
@@ -5555,25 +5318,13 @@ async function portalGeometryChecks(browser, base, html, factory) {
     const box = await page.evaluate(() => {
       const frame = document.querySelector(".piece-layout > .frame"), iframe = document.querySelector("iframe.piece-frame");
       if (!frame || !iframe) return null;
-      const f = frame.getBoundingClientRect(), cs = getComputedStyle(frame), i = iframe.getBoundingClientRect();
-      return { vw: document.documentElement.clientWidth, margin: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--margin-page")),
-        outer: { x: Math.round(f.left), der: Math.round(f.right) },
-        content: { x: Math.round(f.left + parseFloat(cs.paddingLeft)), der: Math.round(f.right - parseFloat(cs.paddingRight)) },
-        iframe: { x: Math.round(i.left), der: Math.round(i.right), width: iframe.clientWidth } };
+      const f = frame.getBoundingClientRect(), i = iframe.getBoundingClientRect();
+      return { outer: { x: Math.round(f.left), der: Math.round(f.right) }, iframe: { x: Math.round(i.left), der: Math.round(i.right), width: iframe.clientWidth } };
     });
     await context.close();
     const expected = widthInPortal(width);
     check(`${tag}: the piece's iframe covers the frame's box, margins included, and is ${expected} px wide (piece-host.mjs widthInPortal)`,
       box && near(box.iframe.x, box.outer.x) && near(box.iframe.der, box.outer.der) && box.iframe.width === expected, JSON.stringify(box && { ...box.iframe, frame: box.outer }));
-    if (width === 1600) {
-      check(`${tag}: past its cap the frame is centred`, box && near(box.outer.x, box.vw - box.outer.der), JSON.stringify(box && box.outer));
-      continue;
-    }
-    const home = frames[`${width}-${scheme}`];
-    check(`${tag}: the frame is the other screens' (MAR-02)`, box && home && near(box.content.x, home.x) && near(box.content.der, home.der),
-      JSON.stringify({ piece: box && box.content, home }));
-    if (width >= 672) check(`${tag}: the same page margin on both sides (MAR-11)`, box && near(box.content.x, box.margin) && near(box.vw - box.content.der, box.margin),
-      JSON.stringify(box && { left: box.content.x, right: box.vw - box.content.der, margin: box.margin }));
   }
 }
 
@@ -5593,6 +5344,7 @@ try {
   if (args.questions) await decisionsScreens(browser, base, read(args.questions));
   if (args.questions) await brandShellChecks(browser, base, read(args.questions));
   if (args.questions) await threadChecks(browser, base, read(args.questions));
+  if (args.questions) await compositionChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));
@@ -5611,7 +5363,7 @@ try {
   if (args.questions && args.demo) await demoAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await closureChecks(browser, base, read(args.questions));
-  if (args.questions && args.factory) await portalGeometryChecks(browser, base, read(args.questions), args.factory);
+  if (args.questions && args.factory) await pieceWidthChecks(browser, base, read(args.questions), args.factory);
   await screenAxeChecks(browser);
 } finally {
   await browser.close();

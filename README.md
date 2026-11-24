@@ -61,8 +61,8 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    it): its ends curl away with a knot each, the violet 亻 disc sits in the gap and the row's link takes the `--stop` tint
    (`row--stop`). `--thread` and `--stop` are the portal's own two colours, set in `css/portal.css`. The thread is
    drawing: `aria-hidden`, beside the row's link and not in it, so each row still says its state in words and its mark;
-   under forced colours the line and the disc take the system's colours and the tint goes. From 1056 px the track comes
-   out of the title's column, so the meta and state columns stay on the same x as every other list's. It is not on
+   under forced colours the line and the disc take the system's colours and the tint goes. Each row ends with a chevron,
+   in the muted text and in `--signal` on a stop row. It is not on
    home, the owner's part, the pieces or the emails, and a project with only «Decisiones» has no empty track.
    The owner's part comes last, with the section's counts and what people proposed; each point opens at
    `#/project/<id>/decisions/<key>`, how each person answered it (read only). See **The owner's part** below.
@@ -72,24 +72,15 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    prototype that way; it now shows each key screen inside itself, in a nested iframe with `sandbox="allow-scripts"`
    on a `blob:` URL.) The screen keeps the portal's frame: the same masthead with the ninben brand as every
    screen, then the way back to the piece's project («← <project name>»; «← Tus proyectos» when its name cannot be
-   read) and the piece's title with its save line («Guardando…», «Guardado»), the way back and the title on the brand's
-   left edge. On a
-   phone (below 672 px) the frame takes the least it can, with nothing cut (the manual's MAR-14): the way back reads
-   «← Volver», one line, and its accessible name says where («Volver a <project>»); the title is never cut (a title
-   of two lines ends the band at 160 px or less of a 640 px screen; the factory's publisher keeps titles to that); and
-   the line next to the title, the save line («Guardando…», «Guardado») or on the owner's screen «Lo que envió … el …»,
-   goes in the row of «← Volver», on its right and set to the row's end, in small text, so it never takes a row of its
-   own under the title: with a title of 60 characters the band ends at 151 px at rest and with «Guardado» showing (on the
-   owner's screen too, 155 px with a sender's name of 59 characters, which wraps in that row); a failed save
-   wraps in that row as well: without connection («Sin guardar: no hay conexión. …», two lines) the title still ends at
-   151 px, and so it does with a change too long to keep («Sin guardar: texto muy largo. …», two lines). From 672 px the line goes under the
-   title. The brand in the masthead is a link to home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"`
-   on home itself). Below 672 px the project's page has no «← Volver» (home is one tap on the brand), so a name of
-   two lines ends its title at 141 px. One point of «Decisiones» as the owner reads it goes back to its project, so it
-   keeps «← Volver» on a phone, on its own row; then its band reads as every list's: the point's title as the h1, and its
-   counts under it as the list's data line (each count whole on one line). On a phone the h1 is 16 px, the largest step
-   of the type scale with which a title of 60 characters (the most the factory publishes) ends at 160 px or less (153 px;
-   at the lists' 24 px it would end at 203 px); from 672 px, the frame's band as on every screen. The iframe is as
+   read) and the piece's title with its save line («Guardando…», «Guardado»). On a phone (below 672 px) the band takes
+   little of the screen, with nothing cut: the way back reads «← Volver», one line, and its accessible name says where
+   («Volver a <project>»); the title is never cut; and the line next to the title, the save line («Guardando…»,
+   «Guardado») or on the owner's screen «Lo que envió … el …», goes in the row of «← Volver», on its right, in small
+   text (a failed save wraps there). From 672 px the line goes under the title. The brand in the masthead is a link to
+   home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"` on home itself). Every screen with a
+   way back shows it above the title at every width («← Volver» on a phone): a project's page goes home, one point of
+   «Decisiones» as the owner reads it goes back to its project; there the point's title is the h1 and its counts go under
+   it as the list's data line (each count whole on one line). The iframe is as
    tall as the piece (the height the bridge posts; until the first one, what is left of the screen under the frame)
    and the portal's page scrolls, never the piece: nothing of the frame is fixed or sticky, so on a phone it goes up
    with the page. The piece's scroll requests move the portal's page (`followPiece` in `js/app.js`): a position is
@@ -99,8 +90,9 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    («Sin guardar: …», in the row of «← Volver» on a phone, where it may wrap; under the title from 672 px) and
    announced to screen readers by the screen's status region; it is not a notice, and nothing floats or stays fixed
    for it. The
-   iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it), and the factory's pieces, inside the portal, start their content at the frame's
-   margin (16 px, 24 px from 672 px), on the brand's edge, keeping their reading measure. The piece does
+   iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it: the
+   width the factory's `piece-host.mjs` measures its pieces at), and the factory's pieces, inside the portal, start their
+   content at the frame's margin (16 px, 24 px from 672 px), keeping their reading measure. The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
    which the piece shows on its own sent screen, and says nothing until the person changes something.
    Only when the server has a send that the piece's saved draft cannot show (the draft was last saved
@@ -300,10 +292,11 @@ Mono (only for the sign-in code's figures), the logo in the masthead, and the co
 pieces. Since the «Hilo de jidoka» look (spec 2026-11-24 in the factory) the palette is aizome indigo and white cotton:
 the work area is white (`--bg` and `--sheet` both `#FFFFFF`), text and lines are indigo-tinted (`--ink`, `--muted`,
 `--line`, `--line-strong`), the violet `--signal` stays for what can be touched, and the masthead is the **shell**: a
-bar in `--shell` across the window's whole width (its content still on the frame's edge), the brand's words in
+bar in `--shell` across the window's whole width (its content on the frame's edge), the brand's words in
 `--on-shell`, the 亻 stroke in `--signal-on-shell` (the logo file's own stroke is `--signal`; `css/portal.css`
-overrides it on the shell), «Salir» a quiet outlined button in `--on-shell` with an `--on-shell-muted` border, and the
-focus ring on the shell in `--signal-on-shell`. Each token has a light and a dark value; the dark shell is an indigo
+overrides it on the shell), «Entraste como …» in `--on-shell-muted` (beside «Salir» from 672 px, on its own line under
+the brand below), «Salir» a quiet outlined button in `--on-shell` with an `--on-shell-muted` border, and the focus ring
+on the shell in `--signal-on-shell`. Each token has a light and a dark value; the dark shell is an indigo
 lighter than the dark ground, so the bar still reads as a band (the factory's contrast eval holds it at
 ≥ 1.2:1). The single
 source lives in the software factory repo, in `design-system/assets/brand/` (`ninben.css`,
@@ -331,23 +324,23 @@ the piece view and the rest of the state dots. The portal never uses the base's 
 the pieces that dot means «Con observaciones» or «Pidió un cambio», so «En curso» is the portal's ink ring
 (`.status--in-progress`).
 
-The sign-in screens follow the visual manual's `formulario` pattern and home follows `lista`; their
-`data-rol` marks (`marco`, `cabecera`, `avisos`, `cuerpo`, `accion-principal`, `marca-producto`,
-`data-medida="formulario"`) are what the factory's verifier measures (see [Tests](#tests)). The frame is the
-base's on every screen: the page margin on both sides (16 px, 24 px from 672 px) and no cap before 1440 px, where it
-stops growing and centres (the manual's MAR-11). Inside `<main>`, `data-rol="marco"` holds the title band, the
-notices and the body. A form's primary action is its last control (what follows it, like «Enviarme otro código», goes
-after the form). The empty home has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top
-rule, and one row, its title and message at the reading measure, under them the base's section notice that asks to
-check the email they were invited with, carrying its own action «Entrar con otro correo» (the base's link action) and,
-right after it in the same column at every width, «Actualizar», the view's `accion-principal`, as wide as the body up
-to the form measure like the sign-in buttons, as MAR-06 asks of an empty state. It does not reach FUN-43's 60 % from 1056 px and
-carries that rule's empty-view exception, with its reason, in the geometry check. From 1056 px the rows of every list
-(home's projects, a project's pieces, the owner's entries) are equal columns, decided by the list, not by the row: three
-(the title, the meta line and the state or aside) as soon as one row of the list has a meta line, a row without one
-leaving its middle cell empty; two (the title and the state or aside) when no row has one (every project is another
-person's). Each column falls on the same x down the list (FUN-43, «el grupo tabular como tabla»); from 672 to 1056 px the state
-stays on the row's right, and below 672 px the rows keep their phone layout.
+The composition follows the approved sketch (`.impeccable/mocks/decision/grounded-hilo.html` and
+`grounded-hilo-movil.html`); the factory's retired visual manual no longer binds the portal (spec 2026-11-24,
+«Amendment»). The shell runs across the window; under it, `data-rol="marco"` is the **reading column**, centred and
+at most `--reading-column` (60rem) wide, holding the title band, the notices and the body. The page title takes the
+portal's display size, `--text-display` (24 px on a phone, 32 px from 672 px), in bold. A list row reads at a glance:
+on a phone its title and data line with the state under them; from 672 px the state on the title's line; from 1056 px
+one line, title · state · date (the data line) · chevron, the state and the date each in a column of the same width
+down the list. A row that opens something ends with a chevron (muted; `--signal` on a stop row of the thread). The
+«Decisiones» points sit inside one hairline panel (1 px `--line`, `--radius`, `--sheet`), the proposal form under it.
+The owner's entries keep their own layout (the name with its links, the date line, the state on the right). A form's
+primary action is its last control (what follows it, like «Enviarme otro código», goes after the form). The empty home
+has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top rule, and one row, its title and
+message at the reading measure, under them the base's section notice that asks to check the email they were invited
+with, carrying its own action «Entrar con otro correo» (the base's link action) and, right after it, «Actualizar», the
+view's primary action. The `data-rol` marks that stay (`marco`, `cuerpo`, `avisos`, `aviso-fijo`, `vacio`,
+`accion-principal`, `marca-producto`) are what the browser checks select by; the ones only the frozen measure read
+(`cabecera`, `data-medida`) are gone.
 
 ## The sign-in code email
 
@@ -504,9 +497,14 @@ with no horizontal scroll and no axe colour-contrast violation; `brand-*.png`), 
 in each state at 320 and 1440 px, light and dark, and under forced colours: one `aria-hidden` thread per row of «Lo que
 se te pidió», cut with the disc and tinted `--stop` only at «Por empezar» and «En curso», painted where it should be
 (read off a screenshot), the line 3:1 on the page and on the tint, in its track; at 320 px with a two-line project
-name and a piece title of `TITLE_MAX` characters, no horizontal scroll, the band at 160 px or less and every state
-shown; a project with everything sent has a whole thread; none on home, the piece, the owner's part or a project with
-only «Decisiones»; `thread-*.png`), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
+name and a piece title of `TITLE_MAX` characters, no horizontal scroll and every state shown; a project with everything sent has a whole thread; none on home, the piece, the owner's part or a project with
+only «Decisiones»; `thread-*.png`), the composition of the approved sketch (`compositionChecks`: from 1056 px the
+content of home, a project's page, the owner's page and the owner's point of «Decisiones» in a centred column no wider
+than 60rem under a wider shell; the page title in `--text-display`, 24 px at 320 and 32 px at 1440; «Entraste como …» in
+the shell, beside «Salir» at 672 and 1440 px and under the brand at 320, 4.5:1 on the shell, light and dark, and not
+in the title band; every row of «Lo que se te pidió» ending with a hidden chevron, in `--signal` only on a stop row, and
+from 1056 px reading title · state · date · chevron on one line; the «Decisiones» points inside one panel of 1 px
+`--line`, `--radius` and `--sheet`), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
 change was saved, a session that comes back while the piece hands over its draft, a change too long
 to keep). With `--demo` as well, the demo sheet in the harness: the sheet carries the prototype and shows each key
@@ -531,23 +529,21 @@ opens again on 55000; a send whose late check cannot be read still answers ok an
 server has it (closed after a late send, open after a normal one); and signing out with a change request written and
 not sent asks first («Quedarme» keeps the text). The piece screen is checked at 320, 768 and
 1440 px, light and dark, and at 672 and 1056 px: one brand on screen (the portal's), above the way back and
-the title and on their left edge; no brand bar inside the piece; every top-level block of each screen
-the checks walk (start, review, inside a flow, a note being written, the flows' final screen, sent),
-and «Ver todos los flujos» in a flow, on that same edge, with the reading measure kept; no second
-banner inside the piece; a piece opened and left alone says nothing about saving and saves nothing;
+the title; no brand bar inside the piece; the piece's texts (the questions, the flows' band, a step, the demo's opening)
+keeping their reading measure; no second banner inside the piece; a piece opened and left alone says nothing about saving and saves nothing;
 and «Enviada el …» only for a send the saved draft cannot show. Each piece opened on its own still
 shows its bar. Below 672 px the review captures are 320 × 640 (`host-<piece>-w320-light.png` included). The
-piece screen on a phone (MAR-14, `phoneFrameChecks`), at 320 × 640 with a project of a long name, in Chromium and
+piece screen on a phone (`phoneFrameChecks`), at 320 × 640 with a project of a long name, in Chromium and
 also in WebKit when playwright-core has its build installed (otherwise a `NOTE` line says it did not run; Playwright's
-WebKit emulates the screen of the top page only, so there the piece's iframe is given the phone's screen too): at rest
-the title band ends at 160 px or less, with a title of `TITLE_MAX` characters too; «← Volver» is one line named
-«Volver a <project>»; the iframe is as tall as the piece, which does not scroll inside, and the page is taller than
-the screen; one screen down nothing fixed or sticky is on screen; the project's page, the owner's project page and the
-owner's piece screen (with a title of `TITLE_MAX` characters too) end their band at 160 px or less, with «← Volver»
-in one line named after where it goes, and so does the owner's point of «Decisiones» (a title of `DECISION_TITLE_MAX`, 60,
-characters too, in two lines, with its counts under the h1; in English with five kinds of answer in two digits too); «Guardado» and a failed save («Sin guardar: …», without connection or too long to keep, announced by the status region)
-in the row of «← Volver», on its right and above the title, with the h1 ending at 160 px or less with either showing and the
-whole band with «Guardado» too (a title of `TITLE_MAX` characters); a scroll request below the piece's last height is
+WebKit emulates the screen of the top page only, so there the piece's iframe is given the phone's screen too): the
+title whole, a title of `TITLE_MAX` characters too; «← Volver» is one line named «Volver a <project>»; the iframe is as
+tall as the piece, which does not scroll inside, and the page is taller than the screen; one screen down nothing fixed
+or sticky is on screen; the project's page, the owner's project page and the owner's piece screen (with a title of
+`TITLE_MAX` characters too) show the title whole, with «← Volver» in one line, a 44 px target named after where it
+goes, and so does the owner's point of «Decisiones» (a title of `DECISION_TITLE_MAX`, 60, characters too, with its
+counts under the h1, no count split across two lines; in English with five kinds of answer in two digits too);
+«Guardado» and a failed save («Sin guardar: …», without connection or too long to keep, announced by the status region)
+said in the title band; a scroll request below the piece's last height is
 done when the new height arrives; a short piece's box ends at the screen's bottom with nothing to scroll; at the bottom of a step «Siguiente» shows the new step's title, and a link of the flows' index its group; the
 step's last field, focused, is in the window; an opened `<details>` grows the iframe; and a piece that grows again
 in the same rendering frame as the portal's resize of its iframe ends as tall as the iframe, with the resize event
@@ -593,11 +589,10 @@ piece, and that the owner's screens save, send and ask nothing and never read a 
 `sign-in-code.html` (pattern `formulario`) and `home-empty.html` (pattern `lista`); with `--questions`, also
 `home-projects.html` and `project-page.html` (`lista`) and `project-received.html` (`lista`, a project with closed
 pieces); with `--questions` and `--demo`, also `project-owner.html` (`lista`, an owned project with the
-owner's part). With `--questions`, also the «Decisiones» screens, all `lista` (the section's forms inside are marked
-`data-medida="formulario"`): `project-decisions.html` (a person's section with the four marks and a comment open),
+owner's part). With `--questions`, also the «Decisiones» screens, all `lista`: `project-decisions.html` (a person's section with the four marks and a comment open),
 `project-decisions-errors.html` (its error states), `project-decisions-only.html` (a project with the section and no
 pieces), `project-owner-decisions.html` (the owner's page with the section's counts and proposals) and
-`owner-decision.html` (one point as the owner reads it). That is twelve snapshots, and all twelve are measured. Each one is the rendered DOM without scripts,
+`owner-decision.html` (one point as the owner reads it). That is twelve snapshots. Each one is the rendered DOM without scripts,
 next to a copy of `css/` and `brand/`, so it looks exactly as in the app. Every snapshot taken goes through axe
 (`screenAxeChecks`, with the axe-core of the software factory cache) at 320, 768 and 1440 px, in light and dark, and
 each run is one check that names the violated rules; with `--questions` and `--demo`, all twelve must have been
@@ -606,17 +601,19 @@ factory retired that verifier with its manual, so only axe remains.) To look at 
 (for example `node -e 'import("./tests/browser/static-server.mjs").then(async (m) => { const s = await m.serveDir(process.argv[1]); console.log(s.address().port); })' <out>/screens`)
 and open `<screen>.html` in a browser.
 
-**The portal's frame.** With `--factory`, the same twelve screens (`sign-in-email`, `sign-in-code`, `home-projects`,
-`project-page`, `home-empty`, `project-owner`, `project-received` and the five «Decisiones» screens) also go through
-`tests/fixtures/geometria.mjs`, the frame measure the factory's pieces were held to: the factory retired it after its
-1.47.0, and this is its last version, frozen here (its header says where it comes from). At 320, 672, 1056 and
-1440 px, light and dark: every rule at each width (one margin on both sides, MAR-11; sections side by side in equal
-parts, MAR-12; the body not left half empty from 1056, FUN-43; …), the same frame on the twelve screens (MAR-02), and
-every `@media` of `css/portal.css` and the base on the grid's cuts (MAR-08). One check per screen, width and scheme
-names what fails. The piece screen, and the owner's read-only piece screen, are checked at the same widths and at 1600: its frame on the other screens' edges
-with the page margin on both sides, and its iframe over the frame's box, as wide as the factory's
+**The piece's width.** With `--factory`, the piece screen and the owner's read-only piece screen at 320, 672, 1056,
+1440 and 1600 px, light and dark: the iframe over the frame's box, as wide as the factory's
 `design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the factory measures its pieces inside the
-portal at the width a person sees them.
+portal at the width a person sees them (`pieceWidthChecks`).
+
+**What is no longer checked.** The factory's retired visual manual no longer binds the portal (spec 2026-11-24,
+«Amendment»), so its frozen frame measure (`tests/fixtures/geometria.mjs`) and the checks that only enforced its layout
+rules are gone: the frame geometry of the twelve screens and the `@media` grid cuts, the frame shared by every screen and
+its page margins, shared left edges (brand, way back, title, the piece's blocks, the empty home's parts), the lists'
+equal columns, the «Decisiones» and owner's answers' three columns, the phone band of 160 px (and the 16 px title it
+forced on the owner's point), the project page without a way back on a phone and the save line's place in the band.
+What stays is accessibility and function: no sideways scroll from 320 to 1440 px, 44 px targets, visible focus, axe
+(contrast included) light and dark, nothing cut, and every behaviour, brand and thread check.
 
 ## Files
 
@@ -637,4 +634,4 @@ portal at the width a person sees them.
 | `js/piece-frame.js` | Mounts a piece in the sandboxed iframe and speaks the bridge protocol |
 | `js/host.js` | Message validation and the draft save queue |
 | `js/auth-errors.js`, `js/i18n.js`, `js/dom.js`, `js/supabase-client.js` | Helpers |
-| `tests/` | Unit tests, browser checks (with the screen snapshots), the bridge harness and SQL checks; `tests/fixtures/` keeps what the factory retired and the checks still need, frozen: the last flow piece (`legacy-flow.html`) and the geometry measure (`geometria.mjs`) |
+| `tests/` | Unit tests, browser checks (with the screen snapshots), the bridge harness and SQL checks; `tests/fixtures/` keeps what the factory retired and the checks still need, frozen: the last flow piece (`legacy-flow.html`) |

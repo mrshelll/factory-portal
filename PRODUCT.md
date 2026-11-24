@@ -45,9 +45,11 @@ No neighboring tool can claim that the human decision is the whole point of the 
 - Static site: HTML, CSS, ES modules, no build step; Supabase for data; Cloudflare hosting.
 - Must work from 320 to 1440 px wide, light and dark.
 - Behavior, routes, copy and states are product truth; the visual redesign does not change them.
-- Large browser test suite measures the frame's geometry (band heights, rows on a phone); a redesign
-  updates those tests deliberately, never silently.
-- The factory's visual manual (design-system plugin) governs the factory's visual work; the portal follows it.
+- Large browser test suite covers behaviour, brand, the thread and the chosen composition; a redesign updates those
+  tests deliberately, never silently.
+- Accessibility is the floor, not a visual manual (owner, 2026-11-24: the factory's retired manual no longer binds the
+  portal): no sideways scroll from 320 to 1440 px, 44 px targets, visible focus, axe (contrast included) in light and
+  dark, nothing cut.
 
 ## Brand Commitments
 
