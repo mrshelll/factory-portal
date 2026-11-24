@@ -285,8 +285,16 @@ with scope `local`, supabase-js removes the local session even when the network 
 
 ## Brand
 
-The portal wears the ninben brand: its colours (light and dark), the 4 px radius, IBM Plex Sans and JetBrains
-Mono, the logo in the masthead, and the components it shares with the factory's pieces. The single
+The portal wears the ninben brand: its colours (light and dark), the 4 px radius, Figtree (400–700) and JetBrains
+Mono (only for the sign-in code's figures), the logo in the masthead, and the components it shares with the factory's
+pieces. Since the «Hilo de jidoka» look (spec 2026-11-24 in the factory) the palette is aizome indigo and white cotton:
+the work area is white (`--bg` and `--sheet` both `#FFFFFF`), text and lines are indigo-tinted (`--ink`, `--muted`,
+`--line`, `--line-strong`), the violet `--signal` stays for what can be touched, and the masthead is the **shell**: a
+bar in `--shell` across the window's whole width (its content still on the frame's edge), the brand's words in
+`--on-shell`, the 亻 stroke in `--signal-on-shell` (the logo file's own stroke is `--signal`; `css/portal.css`
+overrides it on the shell), «Salir» a quiet outlined button in `--on-shell` with an `--on-shell-muted` border, and the
+focus ring on the shell in `--signal-on-shell`. Each token has a light and a dark value; the dark shell is deeper than
+the dark ground. The single
 source lives in the software factory repo, in `design-system/assets/brand/` (`ninben.css`,
 `ninben-components.css`, `logo.svg`, `fonts/`). `brand/` here is a generated copy; never edit it by
 hand:
@@ -304,7 +312,7 @@ anything. `index.html` loads `brand/ninben.css`, then `brand/ninben-components.c
 `css/portal.css`; the fonts are referenced as
 `url("fonts/…")` relative to that CSS, so GitHub Pages serves them from `brand/fonts/` (their SIL Open
 Font License texts travel with them). The logo is read once from `brand/logo.svg` and placed inline,
-so its stroke follows the brand's signal colour in light and dark. `brand/ninben-components.css` is the
+so its stroke follows the brand's colours in light and dark (on the shell, `--signal-on-shell`). `brand/ninben-components.css` is the
 base the portal and the three pieces share: the three text sizes, the 4/8 spacing scale, the frame, and
 the notices, fields, buttons, actions, rows and status (`.status--done` once a piece is received). `css/portal.css`
 keeps only the portal's own: the masthead, the page head, the sign-in form and its code field, the list rows' link,
@@ -476,7 +484,11 @@ The browser checks serve the repo with `tests/browser/static-server.mjs` (Node, 
 free port), drive Chrome headless with `playwright-core` (from `PLAYWRIGHT_CORE_DIR`, or the software
 factory cache) and cover: the sign-in screen at 320,
 360, 768 and 1440 px (no console errors, no horizontal scroll, axe, the brand's logo, colour and
-font), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
+font: the masthead is the shell, the logo's stroke `--signal-on-shell`, the body font Figtree), the shell on the
+signed-in screens (`brandShellChecks`: at 320 and 1440 px, light and dark, the masthead in `--shell` across the
+window's whole width, read off a screenshot, with the dark value read from `brand/ninben.css`; «Salir» outlined in the
+shell's colours with its focus ring in `--signal-on-shell`; at 320 px dark, home, a project's page and the piece screen
+with no horizontal scroll and no axe colour-contrast violation; `brand-*.png`), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
 change was saved, a session that comes back while the piece hands over its draft, a change too long
 to keep). With `--demo` as well, the demo sheet in the harness: the sheet carries the prototype and shows each key

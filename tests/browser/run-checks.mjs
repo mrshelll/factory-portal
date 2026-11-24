@@ -27,6 +27,10 @@
 // factory's geometry measure, which the factory retired after its 1.47.0 (see portalGeometryChecks): every screen at
 // 320, 672, 1056 and 1440, light and dark, and the piece screen's iframe against the factory's piece-host.mjs.
 //
+// With --questions, the brand's shell on the signed-in screens (brandShellChecks): the masthead in --shell across the
+// window at 320 and 1440, light and dark; at 320 dark, home, a project's page and the piece screen without sideways scroll
+// or an axe colour-contrast violation.
+//
 // With --questions, the piece screen on a phone too (phoneFrameChecks, MAR-14), at 320 x 640: in Chromium, and in
 // WebKit when playwright-core has its build installed (otherwise a NOTE line says it did not run).
 
@@ -64,6 +68,15 @@ const BRAND_SANS = (() => {
   const faces = [...css.matchAll(/@font-face\s*{[^}]*font-family:\s*["']([^"']+)["'][^}]*url\(\s*["']?fonts\//g)].map((m) => m[1]);
   if (!family || !faces.includes(family)) throw new Error(`brand/ninben.css: --font-sans (${family}) is not one of its @font-face families (${faces.join(", ")})`);
   return family;
+})();
+// The shell (the masthead's indigo) in the dark scheme, read from brand/ninben.css's dark block, as an rgb() string: the
+// brand may move the dark lightness for contrast, and the check follows it. The light shell is pinned in the checks.
+const DARK_SHELL = (() => {
+  const css = readFileSync(join(root, "brand", "ninben.css"), "utf8");
+  const dark = css.slice(css.indexOf("prefers-color-scheme: dark"));
+  const hex = (dark.match(/--shell:\s*#([0-9A-Fa-f]{6})\b/) || [])[1];
+  if (!hex) throw new Error("brand/ninben.css: no --shell in its dark block");
+  return `rgb(${[0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
 })();
 
 function loadPlaywright() {
@@ -152,10 +165,18 @@ async function portalChecks(browser, base) {
           signal: getComputedStyle(document.documentElement).getPropertyValue("--signal").trim(),
           sansLoaded: [...document.fonts].some((f) => f.family.replace(/"/g, "") === sans && f.status === "loaded"),
           body: getComputedStyle(document.body).fontFamily.split(",")[0].replace(/"/g, "").trim(),
+          family: getComputedStyle(document.body).fontFamily,
+          figtree: document.fonts.check("16px Figtree"),
+          shell: getComputedStyle(document.querySelector(".masthead")).backgroundColor,
+          words: mark && getComputedStyle(mark).color,
         };
       }, BRAND_SANS);
       check("brand: the masthead shows the ninben logo and name", brand.logo && brand.name === "ninben", JSON.stringify(brand));
-      check("brand: the logo stroke is the signal colour", brand.stroke === "rgb(65, 55, 255)" && brand.signal === "#4137FF", `${brand.stroke} · ${brand.signal}`);
+      // The masthead is the indigo shell, the brand's words on it in --on-shell and the 亻 in the light violet that holds 3:1 on
+      // it; --signal itself stays the action violet (the logo file's own stroke, overridden on the shell by portal.css).
+      check("brand: the masthead is the shell", brand.shell === "rgb(31, 42, 78)" && brand.words === "rgb(255, 255, 255)", `${brand.shell} · ${brand.words}`);
+      check("brand: the logo stroke is the signal on the shell", brand.stroke === "rgb(168, 162, 255)" && brand.signal === "#4137FF", `${brand.stroke} · ${brand.signal}`);
+      check("brand: the body font is Figtree", /^"?Figtree"?(,|$)/.test(brand.family) && brand.figtree, `${brand.family} · check ${brand.figtree}`);
       check(`brand: the brand's font (${BRAND_SANS}, from brand/ninben.css) loads from brand/fonts and is the body font`, brand.sansLoaded && brand.body === BRAND_SANS,
         JSON.stringify({ sans: BRAND_SANS, loaded: brand.sansLoaded, body: brand.body }));
       // Signed out the brand has nowhere to go: it is the mark without a link (nothing to tap, nothing lost on the code step).
@@ -963,6 +984,81 @@ async function settledSend(frame, timeout = 10000) {
   return waitFor(async () => { const s = await pieceState(frame).catch(() => null); return s && !s.text.includes("Enviando…") && (s.error || s.sent) ? s : null; }, timeout);
 }
 
+// The colour on screen at a few x of one pixel row (a screenshot of that row, read back through a canvas): what a person
+// sees there, box-shadows and other paint included, which getComputedStyle cannot say.
+async function rowPixels(page, y, xs) {
+  const width = page.viewportSize().width;
+  const png = await page.screenshot({ clip: { x: 0, y, width, height: 1 } });
+  return page.evaluate(async ({ b64, xs }) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width; canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    return xs.map((x) => { const d = ctx.getImageData(Math.min(x, img.width - 1), 0, 1, 1).data; return [d[0], d[1], d[2]]; });
+  }, { b64: png.toString("base64"), xs });
+}
+const rgbOf = (css) => (css.match(/\d+/g) || []).slice(0, 3).map(Number);
+const sameColour = (a, b) => a.length === 3 && b.length === 3 && a.every((v, i) => Math.abs(v - b[i]) <= 3);
+
+// The new ninben brand on the signed-in screens (spec 2026-11-24 «Hilo de jidoka»): the masthead is the indigo shell across
+// the window's whole width, light and dark, the 亻 on it in --signal-on-shell, «Salir» a quiet outlined button in the shell's
+// colours with its focus ring in --signal-on-shell. On a 320 px phone in the dark scheme home, a project's page and the piece
+// screen do not scroll sideways and axe finds no colour-contrast violation.
+async function brandShellChecks(browser, base, html) {
+  const LIGHT_SHELL = "rgb(31, 42, 78)", ON_SHELL = "rgb(255, 255, 255)", SIGNAL_ON_SHELL = "rgb(168, 162, 255)";
+  const contrastOf = (violations) => (violations || ["axe did not run"]).filter((v) => /^color-contrast/.test(v) || v === "axe did not run");
+  for (const scheme of ["light", "dark"]) for (const width of [320, 1440]) {
+    const tag = `brand ${scheme} ${width}px`;
+    const shell = scheme === "dark" ? DARK_SHELL : LIGHT_SHELL;
+    const context = await mockedContext(browser, { backend: newBackend(html), width, height: 800, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(`${base}/`, { waitUntil: "networkidle" });
+    await page.waitForSelector(".row-link", { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => document.fonts.ready);
+    const head = await page.evaluate(() => {
+      const m = document.querySelector(".masthead"), mark = m.querySelector("[data-rol=marca-producto]"), out = m.querySelector(".button--secondary");
+      const r = m.getBoundingClientRect(), cs = getComputedStyle(out);
+      return { bg: getComputedStyle(m).backgroundColor, words: getComputedStyle(mark).color, stroke: getComputedStyle(mark.querySelector("svg")).stroke,
+        out: { color: cs.color, border: cs.borderTopColor, bg: cs.backgroundColor }, y: Math.round(r.top + r.height / 2) };
+    });
+    check(`${tag}: the masthead is the shell, the brand's words on it in --on-shell`, head.bg === shell && head.words === ON_SHELL, `${head.bg} (${shell}) · ${head.words}`);
+    check(`${tag}: the logo stroke is the signal on the shell`, head.stroke === SIGNAL_ON_SHELL, head.stroke);
+    const edges = await rowPixels(page, head.y, [0, Math.round(width / 2), width - 1]);
+    check(`${tag}: the shell runs across the window's whole width`, edges.every((px) => sameColour(px, rgbOf(shell))), JSON.stringify({ edges, shell }));
+    // «Salir»: its words in --on-shell on the shell itself (no fill of its own), its outline the shell's muted line.
+    check(`${tag}: «Salir» is a quiet outlined button on the shell`, head.out.color === ON_SHELL && head.out.bg === "rgba(0, 0, 0, 0)" && head.out.border !== head.bg,
+      JSON.stringify(head.out));
+    await page.keyboard.press("Tab"); // the brand link
+    await page.keyboard.press("Tab"); // «Salir»
+    const ring = await page.evaluate(() => { const el = document.activeElement, cs = getComputedStyle(el);
+      return { salir: el.matches(".masthead .button--secondary"), visible: el.matches(":focus-visible"), color: cs.outlineColor, style: cs.outlineStyle }; });
+    check(`${tag}: «Salir» shows its focus ring in --signal-on-shell`, ring.salir && ring.visible && ring.style === "solid" && ring.color === SIGNAL_ON_SHELL, JSON.stringify(ring));
+    if (scheme === "dark" && width === 320) {
+      await page.screenshot({ path: join(outDir, "brand-home-320-dark.png"), fullPage: true });
+      check(`${tag}: home has no horizontal scroll`, await noHorizontalScroll(page));
+      const homeAxe = contrastOf(await axeViolations(page));
+      check(`${tag}: axe finds no colour-contrast violation on home`, homeAxe.length === 0, homeAxe.join(", "));
+      await openProject(page);
+      await page.screenshot({ path: join(outDir, "brand-project-320-dark.png"), fullPage: true });
+      check(`${tag}: a project's page has no horizontal scroll`, await noHorizontalScroll(page));
+      const projectAxe = contrastOf(await axeViolations(page));
+      check(`${tag}: axe finds no colour-contrast violation on a project's page`, projectAxe.length === 0, projectAxe.join(", "));
+      await page.click(`a[href="#/piece/${IDS.questions}"]`);
+      const piece = await appPiece(page);
+      await page.screenshot({ path: join(outDir, "brand-piece-320-dark.png") });
+      check(`${tag}: the piece screen has no horizontal scroll`, piece && await noHorizontalScroll(page));
+      const pieceAxe = contrastOf(await axeViolations(page));
+      check(`${tag}: axe finds no colour-contrast violation on the piece screen (portal chrome)`, pieceAxe.length === 0, pieceAxe.join(", "));
+    }
+    if (width === 1440) await page.screenshot({ path: join(outDir, `brand-home-1440-${scheme}.png`), fullPage: true });
+    await context.close();
+  }
+}
+
 async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   const backend = newBackend(html, flowHtml, demoHtml);
   const context = await mockedContext(browser, { backend });
@@ -1519,7 +1615,8 @@ const LONG_PROJECT = "Biblioteca del barrio San Martín de Porres: préstamos, s
 // a margin for an unlucky break. The check's title is the earliest-breaking of those, at exactly TITLE_MAX characters.
 const TITLE_MAX = 60;
 // A project name of two lines of running text at 320 px (24 px type); PROJECT_TITLE_MAX is the longest that keeps two lines.
-const PROJECT_TWO_LINES = "Tienda virtual de artesanías";
+// Figtree is narrower than the brand's earlier face: «Tienda virtual de artesanías» now fits one line, so the name grew.
+const PROJECT_TWO_LINES = "Tienda virtual de artesanías del barrio";
 const TITLE_AT_MAX = "Demo de la tienda virtual de artesanías: catálogo y compras.";
 if (TITLE_AT_MAX.length !== TITLE_MAX) throw new Error(`TITLE_AT_MAX is ${TITLE_AT_MAX.length} characters, not ${TITLE_MAX}`);
 // The longest title of a «Decisiones» point the factory publishes (its decisions.py pins the same number): the pieces' TITLE_MAX,
@@ -5251,6 +5348,7 @@ try {
   if (args.questions) await decisionsChecks(browser, base, read(args.questions));
   if (args.questions) await ownerDecisionsChecks(browser, base, read(args.questions));
   if (args.questions) await decisionsScreens(browser, base, read(args.questions));
+  if (args.questions) await brandShellChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));

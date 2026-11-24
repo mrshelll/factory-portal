@@ -8,9 +8,17 @@
 
 html { -webkit-text-size-adjust: 100%; }
 p, h1, h2, ol, ul { margin: 0; }
+/* The parts of the page the browser draws take the brand too: a selection in the signal's tint, the caret in the signal. */
+::selection { background: var(--soft); color: var(--ink); }
+input, textarea { caret-color: var(--signal); }
 
 /* ---- masthead and page ------------------------------------------------------------------ */
 
+/* The masthead is the shell (spec 2026-11-24 «Hilo de jidoka»): an indigo bar across the window's whole width, its content
+   on the frame's edge like every block under it. Its box stays the frame's (so the brand keeps the h1's left edge); a
+   spread shadow in the same colour, clipped to the bar's own height, paints it out to the window's edges without widening
+   the page. Its bottom border, in the shell's colour, keeps the bar's height and becomes the line between the bar and the
+   page under forced colours, where backgrounds and shadows go. */
 .masthead {
   display: flex;
   align-items: center;
@@ -18,11 +26,21 @@ p, h1, h2, ol, ul { margin: 0; }
   gap: var(--space-4);
   min-height: calc(var(--target-min) + 2 * var(--space-2));
   padding-block: var(--space-2);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--shell);
+  background: var(--shell);
+  color: var(--on-shell);
+  box-shadow: 0 0 0 100vmax var(--shell);
+  clip-path: inset(0 -100vmax);
 }
-/* The brand is a link home: its words keep the brand's type (brand/ninben-components.css), the link keeps the tap target. */
+/* The brand is a link home: its words keep the brand's type (brand/ninben-components.css), the link keeps the tap target.
+   On the shell the 亻 takes the light violet that holds on the indigo (the logo file's own stroke is the signal). */
 .masthead .brand { min-height: var(--target-min); color: inherit; text-decoration: none; }
+.masthead .brand svg { stroke: var(--signal-on-shell); }
+.masthead :focus-visible { outline-color: var(--signal-on-shell); }
 .masthead-actions { display: flex; gap: var(--space-2); }
+/* «Salir» is a quiet outlined button on the shell: its words in the shell's text colour, a muted border, no fill. */
+.masthead .button--secondary { color: var(--on-shell); border-color: var(--on-shell-muted); }
+@media (hover: hover) { .masthead .button--secondary:hover { border-color: var(--on-shell); } }
 
 main { padding-block: var(--space-6) var(--space-7); }
 
@@ -342,9 +360,10 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
   column-gap: var(--space-3);
   padding-block: 0 var(--space-3);
 }
-.back-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--signal); font-weight: 600; text-decoration: none; }
+/* The way back is quiet, in the muted text: it is how to leave, not what to do here. Hovered, it takes the text colour. */
+.back-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--muted); font-weight: 600; text-decoration: none; }
 .piece-bar .back-link { justify-self: start; }
-@media (hover: hover) { .back-link:hover { text-decoration: underline; text-underline-offset: 3px; } }
+@media (hover: hover) { .back-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; } }
 .back-link-long { display: none; }
 .back-link-short { white-space: nowrap; }
 .piece-heading { display: contents; font-size: var(--text-body); line-height: 1.3; }

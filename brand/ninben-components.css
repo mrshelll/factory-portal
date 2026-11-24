@@ -78,7 +78,7 @@ a { color: var(--signal); text-underline-offset: 3px; }
   margin-inline: auto;
   padding-inline: var(--margin-page);
 }
-/* The ninben logo: the 亻 stroke in signal, left of «ninben» in IBM Plex Sans 600, lowercase (brand spec §2.3).
+/* The ninben logo: the 亻 stroke in signal, left of «ninben» in Figtree 600, lowercase (brand spec §2.3).
    Tight tracking and line-height 1 keep it apart from the headings. */
 .brand {
   display: inline-flex;
