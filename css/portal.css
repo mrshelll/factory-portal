@@ -6,7 +6,7 @@
    grounded-hilo.html and grounded-hilo-movil.html): the shell across the window, the content in a centred reading
    column. The portal's own tokens are set here: the reading column and the page title's display size (below), the
    thread's two colours (with the thread). */
-:root { --reading-column: 60rem; --text-display: var(--text-title); }
+:root { --reading-column: 60rem; --text-display: var(--text-title); --brand-shell-text: 19px; --brand-shell-mark: 22px; }
 @media (min-width: 672px) { :root { --text-display: 32px; } }
 
 html { -webkit-text-size-adjust: 100%; }
@@ -41,10 +41,12 @@ h1, h2, h3 { text-wrap: balance; }
   box-shadow: 0 0 0 100vmax var(--shell);
   clip-path: inset(0 -100vmax);
 }
-/* The brand is a link home: its words keep the brand's type (brand/ninben-components.css), the link keeps the tap target.
-   On the shell the 亻 takes the light violet that holds on the indigo (the logo file's own stroke is the signal). */
-.masthead .brand { min-height: var(--target-min); color: inherit; text-decoration: none; }
-.masthead .brand svg { stroke: var(--signal-on-shell); }
+/* The brand is a link home: its words keep the brand's weight and tracking (brand/ninben-components.css), the link keeps the
+   tap target. On the shell the wordmark takes the sketch's sizes (portal-only): «ninben» at 19 px with a 22 px 亻, so
+   «Salir» (16 px, a 48 px target) never outweighs it. The 亻 takes the light violet that holds on the indigo (the logo
+   file's own stroke is the signal). */
+.masthead .brand { min-height: var(--target-min); color: inherit; text-decoration: none; font-size: var(--brand-shell-text); }
+.masthead .brand svg { width: var(--brand-shell-mark); height: var(--brand-shell-mark); stroke: var(--signal-on-shell); }
 .masthead :focus-visible { outline-color: var(--signal-on-shell); }
 .masthead-actions { display: flex; gap: var(--space-2); }
 .masthead-who { order: 1; flex-basis: 100%; min-width: 0; padding-bottom: var(--space-1); color: var(--on-shell-muted);
@@ -167,6 +169,11 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
   .row-link:hover .row-title { text-decoration: underline; text-underline-offset: 3px; }
 }
 .row-item .row-title { color: var(--ink); }
+/* In «Lo que se te pidió» the signal marks where the factory waits: a stop row's title keeps it, the others read in the ink
+   (the chevron and the hover underline still say they open). On home, what is left to answer takes the signal too, apart
+   from «Eres responsable» and «Todo enviado» in the muted text. */
+.rows--thread > .row > .row-link:not(.row--stop) .row-title { color: var(--ink); }
+.row-aside.row-aside--stop { color: var(--signal); font-weight: 600; }
 @media (min-width: 672px) {
   .row-item { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
   .row-link { grid-template-columns: minmax(0, 1fr) auto var(--space-4); grid-template-areas: "main state chev"; column-gap: var(--space-4); }
@@ -185,6 +192,33 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
    «Enviada» the green ring; «Recibida» filled green (base); «Reemplazada» the grey ring struck through. The portal never
    draws a state with the base's ink-filled dot (.status--active): inside the pieces that dot means «Con observaciones» or
    «Pidió un cambio», so along the owner's path one colour keeps one meaning. */
+/* The states are pills, as in the sketch, each tint with its words at 4.5:1 or more in both schemes, the dot kept inside:
+   «En curso» violet, «Por empezar» (and «La abrió», «Reemplazada») grey, «Enviada» and «Recibida» green. The tints and
+   their words are the portal's own. */
+:root {
+  --pill-run: #2F25C9; --pill-run-bg: #E4E1FF;
+  --pill-todo: #4A5272; --pill-todo-bg: #EEF0F6;
+  --pill-sent: #17663B; --pill-sent-bg: #E6F4EC;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pill-run: #C4BEFF; --pill-run-bg: #2C2866;
+    --pill-todo: #C1C7DA; --pill-todo-bg: #232A40;
+    --pill-sent: #8BD39A; --pill-sent-bg: #133022;
+  }
+}
+:is(.row-link, .owner-piece .row-item) > .status {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--pill-todo-bg);
+  color: var(--pill-todo);
+  font-weight: 600;
+  line-height: 1.2;
+}
+:is(.row-link, .owner-piece .row-item) > .status--in-progress { background: var(--pill-run-bg); color: var(--pill-run); }
+:is(.row-link, .owner-piece .row-item) > :is(.status--sent, .status--done) { background: var(--pill-sent-bg); color: var(--pill-sent); }
+/* With forced colours the tints go: the pill keeps a border so it still reads as one. */
+@media (forced-colors: active) { :is(.row-link, .owner-piece .row-item) > .status { border: 1px solid CanvasText; } }
 .status--opened .status-dot { --dot: var(--ink); --dot-fill: linear-gradient(90deg, var(--ink) 50%, transparent 50%); }
 .status--in-progress .status-dot { --dot: var(--ink); }
 .status--sent .status-dot { --dot: var(--ok); }
@@ -272,10 +306,20 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
   .owner-piece .owner-links { grid-area: links; display: flex; flex-wrap: wrap; column-gap: var(--space-4); }
   .owner-piece .owner-links .owner-open { display: inline-flex; align-items: center; min-height: 44px; padding-block: 0; margin-block: 0; }
 }
+/* From 672 px the state sits in the project list's 9rem column (never flush right, far from the name): the name line and its
+   date line, then the state; from 1056 the name line · state · date line, the project list's columns (its chevron's
+   column left empty). */
 @media (min-width: 672px) {
-  .owner-piece .row-item { display: flex; }
-  .owner-piece .row-item > .row-main { display: grid; }
+  .owner-piece .row-item { grid-template-columns: minmax(0, 1fr) 9rem var(--space-4); grid-template-areas: "main state ."; column-gap: var(--space-4); }
+  .owner-piece .row-item > .row-main { display: grid; grid-area: main; }
   .owner-piece .row-meta { grid-area: auto; }
+  .owner-piece .row-item > .status { justify-self: start; }
+}
+@media (min-width: 1056px) {
+  .owner-piece .row-item { grid-template-columns: minmax(0, 1fr) 9rem minmax(0, 20rem) var(--space-4); grid-template-areas: "name state meta ."; }
+  .owner-piece .row-item > .row-main { display: contents; }
+  .owner-piece .owner-name { grid-area: name; }
+  .owner-piece .row-meta { grid-area: meta; }
 }
 /* Next to the name (from 672 px), and «Ver respuestas» everywhere, the link is a 44 px target like every other link of the
    portal (FUN-18): its padding grows what can be touched, and the same negative margin keeps its line, and so the entry, at
@@ -341,7 +385,10 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
 .decision-basis blockquote { max-width: var(--measure-text); margin: 0; padding-inline-start: var(--space-4); border-inline-start: var(--mark) solid var(--line); }
 .decisions-propose, .decisions-propose-main { display: grid; gap: var(--space-3); }
 .decisions-propose { margin-top: var(--space-5); }
-.decisions-propose h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
+/* «¿Falta algo?» is a heading one step under «Decisiones» (16 px under its 20 px, bold); its field's label is regular, so the
+   heading is the only bold line of the form. */
+.decisions-propose h3 { margin: 0; font-size: var(--text-body); font-weight: 700; line-height: 1.4; }
+.decisions-propose .field > label { font-weight: 400; }
 /* «Lo que propusiste», above the form: a small label (as a point's mark), then each proposal as a row of a list (the base's
    rule between rows), its date in muted small text over its text, which keeps its line breaks, the reading measure and
    breaks anywhere (a long address never widens the page). */

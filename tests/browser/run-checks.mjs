@@ -1195,6 +1195,114 @@ async function compositionChecks(browser, base, html) {
   }
 }
 
+// The finish review's second batch (2026-11-24): the decision's send is the primary button; the states are pills (violet
+// «En curso», grey «Por empezar», green «Enviada»/«Recibida», 4.5:1 light and dark, the dot kept inside); in the thread's list
+// only a stop row's title is in --signal; home's «N por responder» in --signal; the owner's state in the project list's
+// 9rem column; «¿Falta algo?» a heading under «Decisiones» with a regular-weight label; the shell's wordmark 19 px with a
+// 22 px 亻, «Salir» smaller and still a 44 px target.
+const PILLS_LIGHT = { "En curso": ["rgb(47, 37, 201)", "rgb(228, 225, 255)"], "Por empezar": ["rgb(74, 82, 114)", "rgb(238, 240, 246)"],
+  "Enviada": ["rgb(23, 102, 59)", "rgb(230, 244, 236)"], "Recibida": ["rgb(23, 102, 59)", "rgb(230, 244, 236)"] };
+async function finishBatchChecks(browser, base, html) {
+  const open = async (backend, hash, ready, { width, scheme = "light" }) => {
+    const context = await mockedContext(browser, { backend, width, height: width < 672 ? 640 : 900, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+    await page.waitForSelector(ready, { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => document.fonts.ready);
+    return { context, page };
+  };
+  const pillsOf = (page, selector) => page.evaluate((sel) => [...document.querySelectorAll(sel)].map((s) => {
+    const cs = getComputedStyle(s), r = s.getBoundingClientRect();
+    return { word: s.textContent.trim(), color: cs.color, bg: cs.backgroundColor, radius: parseFloat(cs.borderTopLeftRadius), h: Math.round(r.height),
+      dot: Boolean(s.querySelector(":scope > .status-dot")) };
+  }), selector);
+  const colour = (page, value) => page.evaluate((v) => { const el = document.createElement("span"); el.style.color = v; document.body.append(el);
+    const c = getComputedStyle(el).color; el.remove(); return c; }, value);
+
+  // 1. The decision's send is the primary (violet) button.
+  {
+    const { context, page } = await open(decisionsBackend(html), `#/project/${IDS.project}`, ".decision", { width: 1440 });
+    const sends = await page.$$eval(".decision form button[type=submit]", (els) => els.map((b) => b.className));
+    check("finish: each «Decisiones» point's send is the primary button", sends.length > 0 && sends.every((c) => /\bbutton--primary\b/.test(c) && !/\bbutton--secondary\b/.test(c)),
+      JSON.stringify(sends));
+    // 6. «¿Falta algo?»: a heading one step under «Decisiones», its field's label in the regular weight.
+    const propose = await page.evaluate(() => {
+      const h2 = document.querySelector("#decisions-title"), h3 = document.querySelector("#decisions-propose-title"), label = document.querySelector('label[for="decisions-propose-text"]');
+      const st = (el) => el && { size: parseFloat(getComputedStyle(el).fontSize), weight: Number(getComputedStyle(el).fontWeight) };
+      return { h2: st(h2), h3: st(h3), label: st(label) };
+    });
+    check("finish: «¿Falta algo?» is a heading one step under «Decisiones» (16 px under 20 px, bold) and its field's label is regular",
+      propose.h2 && propose.h3 && propose.label && propose.h2.size === 20 && propose.h3.size === 16 && propose.h3.weight >= 600 && propose.label.weight === 400,
+      JSON.stringify(propose));
+    await context.close();
+  }
+
+  // 2 and 3. The person's rows: pills, and only a stop row's title in --signal; at 390 and 1440, light and dark.
+  for (const scheme of ["light", "dark"]) for (const width of [390, 1440]) {
+    const tag = `finish: project page ${width}px ${scheme}`;
+    const { context, page } = await open(threadBackend(html), `#/project/${IDS.project}`, '[aria-labelledby="asked-title"] .row-link', { width, scheme });
+    const pills = await pillsOf(page, '[aria-labelledby="asked-title"] .row-link .status');
+    const okColours = (p) => scheme === "light" ? PILLS_LIGHT[p.word] && p.color === PILLS_LIGHT[p.word][0] && p.bg === PILLS_LIGHT[p.word][1]
+      : p.bg !== "rgba(0, 0, 0, 0)" && contrastRatio(p.color, p.bg) >= 4.5;
+    const of = (word) => pills.find((p) => p.word === word);
+    check(`${tag}: each state is a pill with its dot, its words 4.5:1 on its tint${scheme === "light" ? " (the sketch's colours)" : ""}`, pills.length === 4 &&
+      pills.every((p) => okColours(p) && p.radius >= p.h / 2 - 1 && p.dot), JSON.stringify(pills.map((p) => [p.word, p.color, p.bg, p.bg !== "rgba(0, 0, 0, 0)" && contrastRatio(p.color, p.bg).toFixed(2)])));
+    check(`${tag}: «Por empezar» and «En curso» are told apart by their tint and their words' colour`, of("Por empezar") && of("En curso") &&
+      of("Por empezar").bg !== of("En curso").bg && of("Por empezar").color !== of("En curso").color, JSON.stringify([of("Por empezar"), of("En curso")]));
+    const titles = await page.$$eval('[aria-labelledby="asked-title"] .row-link', (els) => els.map((a) => ({ stop: a.classList.contains("row--stop"), color: getComputedStyle(a.querySelector(".row-title")).color })));
+    const [ink, signal] = [await colour(page, "var(--ink)"), await colour(page, "var(--signal)")];
+    check(`${tag}: in «Lo que se te pidió» only a stop row's title is in --signal, the others in --ink`, titles.length === 4 && titles.some((t) => t.stop) &&
+      titles.every((t) => t.color === (t.stop ? signal : ink)), JSON.stringify({ ink, signal, titles }));
+    await context.close();
+  }
+
+  // 4. Home: «N por responder» in --signal, apart from «Eres responsable» in --muted.
+  for (const scheme of ["light", "dark"]) {
+    const { context, page } = await open(ownerBackend(html), "", ".row-link", { width: 1440, scheme });
+    const asides = await page.$$eval(".row-link .row-aside", (els) => els.map((a) => ({ text: a.textContent.trim(), color: getComputedStyle(a).color })));
+    const [muted, signal, bg] = [await colour(page, "var(--muted)"), await colour(page, "var(--signal)"), await colour(page, "var(--bg)")];
+    const toAnswer = asides.find((a) => /por responder/.test(a.text)), owner = asides.find((a) => a.text === "Eres responsable");
+    check(`finish: home ${scheme}: «N por responder» is in --signal (4.5:1), «Eres responsable» in --muted`, toAnswer && owner && toAnswer.color === signal &&
+      owner.color === muted && contrastRatio(signal, bg) >= 4.5, JSON.stringify({ asides, signal, muted }));
+    await context.close();
+  }
+
+  // 2 and 5. The owner's progress: pills, and the state in the project list's 9rem column (not flush right).
+  for (const scheme of ["light", "dark"]) {
+    const { context, page } = await open(ownerBackend(html), `#/project/${IDS.ownedProject}`, ".owner-piece .row-item", { width: 1440, scheme });
+    const pills = await pillsOf(page, ".owner-piece .row-item > .status");
+    check(`finish: owner's project ${scheme}: each state is a pill with its dot, 4.5:1 on its tint`, pills.length > 0 &&
+      pills.every((p) => p.bg !== "rgba(0, 0, 0, 0)" && contrastRatio(p.color, p.bg) >= 4.5 && p.dot &&
+        (scheme !== "light" || !PILLS_LIGHT[p.word] || (p.color === PILLS_LIGHT[p.word][0] && p.bg === PILLS_LIGHT[p.word][1]))),
+      JSON.stringify(pills.map((p) => [p.word, p.color, p.bg])));
+    const cols = await page.$$eval(".owner-piece .row-item", (els) => els.map((el) => {
+      const r = el.getBoundingClientRect(), s = el.querySelector(":scope > .status").getBoundingClientRect();
+      return { fromEnd: Math.round(r.right - s.left), x: Math.round(s.left), rem: parseFloat(getComputedStyle(document.documentElement).fontSize) };
+    }));
+    // The project list from 1056: title · state (9rem) · date (20rem) · chevron (16 px), with 16 px gaps: from the state's start
+    // to the row's end, the state, a gap, the date, a gap and the chevron's column.
+    const expected = (c) => Math.round(9 * c.rem + 20 * c.rem + 16 + 2 * 16);
+    check(`finish: owner's project ${scheme}: the state sits in the project list's 9rem column, on one x down the list`, cols.length > 0 &&
+      cols.every((c) => Math.abs(c.fromEnd - expected(c)) <= 2 && Math.abs(c.x - cols[0].x) <= 1), JSON.stringify(cols.slice(0, 3)));
+    await context.close();
+  }
+
+  // 7. The shell's wordmark.
+  for (const width of [390, 1440]) {
+    const { context, page } = await open(newBackend(html), "", ".row-link", { width });
+    const mark = await page.evaluate(() => {
+      const brand = document.querySelector(".masthead [data-rol=marca-producto]"), words = brand.querySelector("span"), svg = brand.querySelector("svg");
+      const out = document.querySelector(".masthead .button--secondary"), s = svg.getBoundingClientRect();
+      return { words: getComputedStyle(words).fontSize, svg: [Math.round(s.width), Math.round(s.height)], out: { size: getComputedStyle(out).fontSize,
+        h: Math.round(out.getBoundingClientRect().height), w: Math.round(out.getBoundingClientRect().width) } };
+    });
+    check(`finish: shell ${width}px: «ninben» 19 px with a 22 px 亻, «Salir» smaller and a 44 px target`, mark.words === "19px" && mark.svg[0] === 22 && mark.svg[1] === 22 &&
+      parseFloat(mark.out.size) < 19 && mark.out.h >= 44 && mark.out.w >= 44, JSON.stringify(mark));
+    await context.close();
+  }
+}
+
 async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   const backend = newBackend(html, flowHtml, demoHtml);
   const context = await mockedContext(browser, { backend });
@@ -5395,6 +5503,7 @@ try {
   if (args.questions) await brandShellChecks(browser, base, read(args.questions));
   if (args.questions) await threadChecks(browser, base, read(args.questions));
   if (args.questions) await compositionChecks(browser, base, read(args.questions));
+  if (args.questions) await finishBatchChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));

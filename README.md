@@ -116,7 +116,9 @@ besides their own items, the section «Avance de lo que compartiste»: per piece
 assigned, with their state («Por empezar», «La abrió», «En curso», «Enviada», «Recibida» or «Reemplazada») and a
 date that says what it is («Recibida el …», «Envió el …», «La abrió el …», «Último cambio el …», «Compartida el …»). A
 change request («pidió un cambio el …») and a send after the close («la reenvió el …») are said by their date, never their
-text. Below 672 px each entry is three lines: the name with the state on its right, the date line, then its links. Names are plain text; a send the owner can read carries the link «Ver lo que
+text. Below 672 px each entry is three lines: the name with the state on its right, the date line, then its links; from
+672 px the state sits in the project list's 9rem column (from 1056 px the name line · state · date line, as the project
+list's columns), never flush right far from the name. Names are plain text; a send the owner can read carries the link «Ver lo que
 envió» next to the name, which opens the same piece, closed and read only, with «Lo que envió <name> el <date>» in the title band. The owner never
 responds, saves or sends for anyone: that screen posts nothing.
 
@@ -331,9 +333,16 @@ at most `--reading-column` (60rem) wide, holding the title band, the notices and
 portal's display size, `--text-display` (24 px on a phone, 32 px from 672 px), in bold. A list row reads at a glance:
 on a phone its title and data line with the state under them; from 672 px the state on the title's line; from 1056 px
 one line, title · state · date (the data line) · chevron, the state and the date each in a column of the same width
-down the list. A row that opens something ends with a chevron (muted; `--signal` on a stop row of the thread). The
-«Decisiones» points sit inside one hairline panel (1 px `--line`, `--radius`, `--sheet`), the proposal form under it.
-The owner's entries keep their own layout (the name with its links, the date line, the state on the right). A form's
+down the list. A row that opens something ends with a chevron (muted; `--signal` on a stop row of the thread). In
+«Lo que se te pidió» only a stop row's title is in `--signal`; the others read in `--ink` (the chevron and the hover
+underline still say they open). On home, «N por responder» is in `--signal` and bold, apart from «Eres responsable».
+The states of the person's rows and the owner's entries are **pills** with their dot inside (the portal's own tints, each
+4.5:1 or more in light and dark): «En curso» violet (`#2F25C9` on `#E4E1FF`), «Por empezar», «La abrió» and
+«Reemplazada» grey (`#4A5272` on `#EEF0F6`), «Enviada» and «Recibida» green (`#17663B` on `#E6F4EC`); under forced colours
+they keep a border. The «Decisiones» points sit inside one hairline panel (1 px `--line`, `--radius`, `--sheet`), each
+point's send the primary (violet) button, the proposal form under it, «¿Falta algo?» a bold 16 px heading one step under
+the section's 20 px and its field's label regular. The shell's wordmark takes the sketch's sizes (portal-only): «ninben»
+19 px with a 22 px 亻, «Salir» 16 px and a 48 px target. A form's
 primary action is its last control (what follows it, like «Enviarme otro código», goes after the form). The empty home
 has the shape of the list it replaces (`data-rol="vacio"`): the list, with its own top rule, and one row, its title and
 message at the reading measure, under them the base's section notice that asks to check the email they were invited
@@ -504,7 +513,11 @@ than 60rem under a wider shell; the page title in `--text-display`, 24 px at 320
 the shell, beside «Salir» at 672 and 1440 px and under the brand at 320, 4.5:1 on the shell, light and dark, and not
 in the title band; every row of «Lo que se te pidió» ending with a hidden chevron, in `--signal` only on a stop row, and
 from 1056 px reading title · state · date · chevron on one line; the «Decisiones» points inside one panel of 1 px
-`--line`, `--radius` and `--sheet`), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
+`--line`, `--radius` and `--sheet`), the finish review's second batch (`finishBatchChecks`: each point's send the primary
+button; the states as pills with their dot, the sketch's colours in light and 4.5:1 in dark, «Por empezar» and «En
+curso» told apart, at 390 and 1440 px; only a stop row's title in `--signal`; home's «N por responder» in `--signal` and
+«Eres responsable» in `--muted`; the owner's state in the 9rem column on one x; «¿Falta algo?» 16 px bold under the 20 px
+section title, its label regular; the wordmark 19 px with a 22 px 亻 and «Salir» smaller, 44 px or more), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
 change was saved, a session that comes back while the piece hands over its draft, a change too long
 to keep). With `--demo` as well, the demo sheet in the harness: the sheet carries the prototype and shows each key

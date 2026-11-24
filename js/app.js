@@ -561,7 +561,8 @@ function projectRow({ project, toAnswer, owned, summary, onlyDecisions }) {
       h("span", { class: "row-main" },
         h("span", { class: "row-title" }, project.name || project.slug || t("untitled")),
         meta.length ? h("span", { class: "row-meta" }, meta.join(" · ")) : null),
-      h("span", { class: "row-aside" }, aside),
+      // What is left to answer takes the stop's signal colour, so it stands apart from «Eres responsable» (portal.css).
+      h("span", { class: toAnswer > 0 ? "row-aside row-aside--stop" : "row-aside" }, aside),
       rowChevron()));
 }
 
@@ -1006,7 +1007,7 @@ function decisionsSection({ projectId, viewId, points, proposals = [], live }) {
     const commentLabel = h("label", { for: comment.id }, t("commentLabel"));
     const commentField = h("div", { class: "field" }, commentLabel, comment, commentError);
     const failure = h("div", { class: "decision-notice" });
-    const button = h("button", { type: "submit", class: "button button--secondary" });
+    const button = h("button", { type: "submit", class: "button button--primary" });
     // Off and saying so while its answer is on its way, also when a reload of the section drew it again meanwhile.
     function setSending(on) {
       button.disabled = on;
