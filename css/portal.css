@@ -1,11 +1,13 @@
-/* Portal styles: only what is the portal's own. Mobile first; one breakpoint at 672px (the factory
-   grid's first tier). Everything else comes from the ninben brand, loaded before this file and copied
-   from the factory by scripts/sync-brand.mjs: brand/ninben.css (colours, light and dark; the radius;
-   the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based spacing scale, the frame
-   and the shared components: notices, fields, buttons, actions, rows and status, and the brand mark). Nothing
-   here sets a brand token or uses a loose value (FUN-35); the portal's own two colours, the thread's and its stop tint,
-   are set below, with the thread. The frame is the base's: the page margin on both sides at every width, and not cut
-   before 1440 (MAR-11). */
+/* Portal styles: only what is the portal's own. Mobile first; breakpoints at 672px and 1056px. Everything else comes
+   from the ninben brand, loaded before this file and copied from the factory by scripts/sync-brand.mjs: brand/ninben.css
+   (colours, light and dark; the radius; the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based
+   spacing scale, the frame and the shared components: notices, fields, buttons, actions, rows and status, and the brand
+   mark). Nothing here sets a brand token. The composition follows the approved sketch (.impeccable/mocks/decision/
+   grounded-hilo.html and grounded-hilo-movil.html): the shell across the window, the content in a centred reading
+   column. The portal's own tokens are set here: the reading column and the page title's display size (below), the
+   thread's two colours (with the thread). */
+:root { --reading-column: 60rem; --text-display: var(--text-title); }
+@media (min-width: 672px) { :root { --text-display: 32px; } }
 
 html { -webkit-text-size-adjust: 100%; }
 p, h1, h2, ol, ul { margin: 0; }
@@ -20,15 +22,17 @@ h1, h2, h3 { text-wrap: balance; }
 /* ---- masthead and page ------------------------------------------------------------------ */
 
 /* The masthead is the shell (spec 2026-11-24 «Hilo de jidoka»): an indigo bar across the window's whole width, its content
-   on the frame's edge like every block under it. Its box stays the frame's (so the brand keeps the h1's left edge); a
-   spread shadow in the same colour, clipped to the bar's own height, paints it out to the window's edges without widening
-   the page. Its bottom border, in the shell's colour, keeps the bar's height and becomes the line between the bar and the
-   page under forced colours, where backgrounds and shadows go. */
+   on the frame's edge. Its box stays the frame's; a spread shadow in the same colour, clipped to the bar's own height,
+   paints it out to the window's edges without widening the page. Its bottom border, in the shell's colour, keeps the
+   bar's height and becomes the line between the bar and the page under forced colours, where backgrounds and shadows go.
+   «Entraste como …» (.masthead-who) sits in it, in the shell's muted text: from 672 px on the brand's line, before
+   «Salir»; below, on its own line under the brand and «Salir», as the phone sketch puts it. */
 .masthead {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: 0 var(--space-4);
   min-height: calc(var(--target-min) + 2 * var(--space-2));
   padding-block: var(--space-2);
   border-bottom: 1px solid var(--shell);
@@ -43,14 +47,25 @@ h1, h2, h3 { text-wrap: balance; }
 .masthead .brand svg { stroke: var(--signal-on-shell); }
 .masthead :focus-visible { outline-color: var(--signal-on-shell); }
 .masthead-actions { display: flex; gap: var(--space-2); }
+.masthead-who { order: 1; flex-basis: 100%; min-width: 0; padding-bottom: var(--space-1); color: var(--on-shell-muted);
+  font-size: var(--text-small); overflow-wrap: anywhere; }
+@media (min-width: 672px) {
+  .masthead-who { order: 0; flex: 0 1 auto; margin-inline-start: auto; padding-bottom: 0; text-align: end; }
+}
 /* «Salir» is a quiet outlined button on the shell: its words in the shell's text colour, no fill, and a border half way
    between the shell's muted text and the shell, so it never outweighs the brand; hovered, the border takes the words' colour. */
 .masthead .button--secondary { color: var(--on-shell); border-color: color-mix(in srgb, var(--on-shell-muted) 50%, var(--shell)); }
 @media (hover: hover) { .masthead .button--secondary:hover { border-color: var(--on-shell); } }
 
-main { padding-block: var(--space-6) var(--space-7); }
+main { padding-block: var(--space-4) var(--space-7); }
+@media (min-width: 672px) { main { padding-top: var(--space-6); } }
+/* The reading column: everything under the shell, centred and at most --reading-column wide (the sketch's 920 px reading
+   width, on the rem scale), so a row reads at a glance instead of from the window's far left to its far right. */
+main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto; }
 
-.page-head h1 { font-size: var(--text-title); line-height: 1.25; font-weight: 600; letter-spacing: -0.02em; }
+/* The page title takes the portal's display size (--text-display: 24 px on a phone, 32 px from 672), in bold and
+   tracked tight as in the sketch, so it leads the page above the sections' 20 px titles. */
+.page-head h1 { font-size: var(--text-display); line-height: 1.2; font-weight: 700; letter-spacing: -0.025em; }
 .page-meta {
   max-width: var(--measure-text);
   margin-top: var(--space-2);
@@ -110,42 +125,41 @@ main { padding-block: var(--space-6) var(--space-7); }
   .empty .row-main { flex: 1 1 auto; }
 }
 
-/* A project's page: the way back above the title (the manual's «contexto» zone), and the line that says what the
-   project's owner sees, first in the body and at the reading measure, one block's gap above the lists. */
+/* A screen's way back sits above the title at every width (a 44 px target), and the line that says what the project's owner
+   sees goes first in the body, at the reading measure, one block's gap above the lists. On the owner's point of «Decisiones»
+   the counts go under the title as its data line, each count whole on one line: the line wraps between two counts. */
 .page-context { margin-bottom: var(--space-1); }
-/* The project's page has no «volver» on a phone: its destination is home, which the brand in the masthead links to. The
-   title takes its place, so a name of two lines (24 px each) still ends the band at 160 px or less (MAR-14). */
-main.context-wide { padding-top: var(--space-4); }
-.page-context--wide { display: none; }
-/* A way back elsewhere (the owner's point of «Decisiones», back to its project) stays on a phone, «← Volver» on its own row right
-   under the masthead (its 44 px target the only gap); then the title band reads as every list's: the h1, and the counts under
-   it as the list's data line. On a phone the h1 takes the body size, the largest step of the type scale with which a point's
-   title of 60 characters (the most the factory publishes) ends at 160 px or less (MAR-14; at the lists' 24 px it ends at
-   203 px). At that size it drops the h1's tight tracking, so it never takes the brand name's type (the brand is 16 px, 600 and
-   tracked tight: NAV-08). From 672 px, the frame's title band as on every screen. Each count of the data line stays whole on
-   one line: the line wraps between two counts. */
-main.context-back { padding-top: 0; }
-main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: normal; }
 .page-meta .count { white-space: nowrap; }
-@media (min-width: 672px) {
-  main:is(.context-wide, .context-back) { padding-top: var(--space-6); }
-  .page-context--wide { display: block; }
-  main.context-back .page-head h1 { font-size: var(--text-title); letter-spacing: -0.02em; }
-}
 .page-note { max-width: var(--measure-text); color: var(--muted); }
+/* When the line about what the owner sees opens the body right under the title band, it reads as the band's own line
+   (the sketch's note under the title): a small gap, not a block's. */
+.notices:empty + .body:has(> .page-note:first-child) { margin-top: var(--space-2); }
 .page-note + .section { margin-top: var(--space-between-blocks); }
 
-/* A row of the list (.rows, .row and .status come from the base): the whole row is the link. An entry of the owner's part
-   (.row-item) is laid out the same, its name in the text colour, not the link's: what opens is its own link. */
+/* A row of the list (.rows, .row and .status come from the base): the whole row is the link, and it ends with a chevron
+   (app.js rowChevron) in the muted text, in the signal on a stop row of the thread. As in the sketch, a row reads at a
+   glance: on a phone its title and data line, its state under them, the chevron at the row's end; from 672 the state on
+   the title's line; from 1056 one line, title · state · date (the data line) · chevron, the state and the date each in a
+   column of the same width down the list. An entry of the owner's part (.row-item) is a flex row, its name in the text
+   colour, not the link's: what opens is its own link. */
 .row-link, .row-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
   min-height: 56px;
   padding-block: var(--space-4);
   color: inherit;
   text-decoration: none;
 }
+.row-item { display: flex; flex-direction: column; gap: var(--space-2); }
+.row-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--space-4);
+  grid-template-areas: "main chev" "state chev";
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.row-link > .row-main { grid-area: main; }
+.row-link > :is(.status, .row-aside) { grid-area: state; justify-self: start; }
+.row-chevron { grid-area: chev; width: var(--space-4); height: var(--space-4); color: var(--muted); }
+.row--stop .row-chevron { color: var(--signal); }
 .row-main { display: grid; gap: var(--space-1); }
 .row-title { color: var(--signal); font-weight: 600; }
 .row-meta { color: var(--muted); font-size: var(--text-small); }
@@ -154,7 +168,14 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 }
 .row-item .row-title { color: var(--ink); }
 @media (min-width: 672px) {
-  .row-link, .row-item { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
+  .row-item { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
+  .row-link { grid-template-columns: minmax(0, 1fr) auto var(--space-4); grid-template-areas: "main state chev"; column-gap: var(--space-4); }
+}
+@media (min-width: 1056px) {
+  .row-link { grid-template-columns: minmax(0, 1fr) 9rem minmax(0, 20rem) var(--space-4); grid-template-areas: "title state meta chev"; }
+  .row-link > .row-main { display: contents; }
+  .row-link .row-title { grid-area: title; }
+  .row-link .row-meta { grid-area: meta; }
 }
 /* What decides on a home row (left to answer, all sent, the owner), on the row's right as a list's state. */
 .row-aside { color: var(--muted); font-size: var(--text-small); }
@@ -267,15 +288,19 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .owner-open:focus-visible { outline: none; }
 .owner-open:focus-visible > span { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* The «Decisiones» section (app.js decisionsSection: the manual's «formulario» inside the page's «lista»). Its lead at the
-   reading measure, then the points as rows of a list (the base's rule between rows), each holding its title in the
-   section-title type, its mark, what was decided, the fold «En qué se apoya», when she answered and the answer's form;
-   then the proposal form, last. The four choices sit side by side and wrap, each a 48 px target, its words in regular
+/* The «Decisiones» section (app.js decisionsSection). Its lead at the reading measure, then the points inside one hairline
+   panel (1 px --line, --radius, --sheet, as the sketch's), a rule between them, each holding its title with its mark beside
+   it, what was decided, the fold «En qué se apoya», when she answered and the answer's form; then the proposal form, last,
+   under the panel. The four choices sit side by side and wrap, each a 48 px target, its words in regular
    weight (they are answers, not field labels). The fold is the pieces' «more» fold: a signal chevron that turns, only the
    words underlined, a 44 px summary; a quote inside it is set off by a rule on its start edge. */
 .decisions-lead { margin-bottom: var(--space-4); }
-.decision { padding-block: var(--space-4); }
-.decision-row, .decision-head, .decision-body { display: grid; gap: var(--space-2); }
+.decisions-points { border: 1px solid var(--line); border-radius: var(--radius); background: var(--sheet); }
+.decisions-points > .decision { padding: var(--space-4); }
+.decisions-points > .decision:last-child { border-bottom: 0; }
+@media (min-width: 672px) { .decisions-points > .decision { padding: var(--space-5); } }
+.decision-row, .decision-body { display: grid; gap: var(--space-2); }
+.decision-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
 .decision-title { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
 .decision-title:focus { outline: none; } /* it takes the focus after a reload of the section; it is not a control */
 /* A point's mark: «Cambió desde tu respuesta» and «Ya lo confirmaste» in quiet muted text; «Nuevo» a tag, the signal on its
@@ -287,9 +312,10 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 /* A point already answered on this version folds its form: the answer line says what she said, and «Cambiar respuesta» (the
    base's secondary button, a 48 px target) opens the form again in its place. */
 .decision-change { margin-top: var(--space-2); }
-/* Below 672 the four choices are two columns, two rows, so «No sé» never sits alone on a line. */
-.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
-@media (min-width: 672px) { .choices { display: flex; flex-wrap: wrap; } }
+/* Below 672 the four choices are two columns, two rows, so «No sé» never sits alone on a line; a narrow gap keeps
+   «Lo cambiaría» on one line inside the panel at 320 px. */
+.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-3); min-width: 0; margin: 0; padding: 0; border: 0; }
+@media (min-width: 672px) { .choices { display: flex; flex-wrap: wrap; column-gap: var(--space-5); } }
 /* Each choice is a row, as the pieces' options (preguntas.template.html): the whole 44 px row is what you touch and what
    shows the focus (FUN-18, FUN-16); the real radio lies over it, invisible, so a click anywhere chooses and the keyboard
    moves through the group; the mark is drawn. */
@@ -329,9 +355,8 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
    proposed, each by name and date over its text. A point's screen lists each person: the name in the text colour and regular
    weight, and the answer that counts on its right, small and in bold (the row's one emphasis); the dates, «Ya no se le
    pregunta» and «Respondió a la versión anterior del punto» under them in muted text; the comment under them in the text
-   colour, on the row's own start line (MAR-10: no indent of its own); and the earlier answers folded as «En qué se apoya» is
-   (from 1056 px the row's three columns, below). Texts keep the reading measure and break anywhere (a long word or address
-   never widens the page). */
+   colour, on the row's own start line; and the earlier answers folded as «En qué se apoya» is. Texts keep the reading
+   measure and break anywhere (a long word or address never widens the page). */
 .owner-decisions .owner-lead { margin-bottom: var(--space-3); }
 .owner-proposals { margin-top: var(--space-5); }
 .owner-proposals h3 { margin: 0 0 var(--space-3); font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
@@ -354,69 +379,17 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .owner-history-list { list-style: none; margin: 0; padding: 0 0 var(--space-2); display: grid; gap: var(--space-3); }
 .owner-history-line { color: var(--muted); font-size: var(--text-small); }
 
-/* From 1056 px a list row is a row of a table: its title (a person's name with «Ver lo que envió» in the owner's part), its
-   meta line (people, dates) and its state or aside, in three equal columns of the row (FUN-43: «reparte el ancho con lo que
-   ya existe, el grupo tabular como tabla»). Every row of a screen is as wide as the body, so each column falls on the same
-   x down every list, and the eye crosses the row in short steps instead of from the far left to the far right. The row
-   keeps its markup (a link, or an entry, holding its main part and its state): .row-main only stops being a box. Below
-   1056 the row is as above. The empty home is not a list of rows: it keeps its one column. */
-@media (min-width: 1056px) {
-  .rows:not(.empty) :is(.row-link, .row-item) {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-areas: "title meta state";
-    align-items: center;
-    gap: var(--space-4);
-  }
-  .rows:not(.empty) .row-main { display: contents; }
-  .rows:not(.empty) .row-main > :first-child { grid-area: title; }
-  .rows:not(.empty) .row-meta { grid-area: meta; }
-  .rows:not(.empty) :is(.row-aside, .status) { grid-area: state; }
-  /* Decided by the list, not by the row: a list in which no row has a meta line (every project is another person's: a name and
-     what is left to answer) has two equal columns, title · state, so no column stands empty; as soon as one row has a meta line
-     the list keeps its three columns and a row without one leaves that cell empty, so every state still falls on the same x. */
-  .rows:not(.empty):not(:has(.row-meta)) :is(.row-link, .row-item) { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "title state"; }
-  /* «Lo que se te pidió» keeps the thread's track at its rows' start, and its columns on the same x as every other list's: the
-     track and the text's indent come out of the title's column (the meta and the state columns are a third of the whole row, gap included), and the
-     state, a third of the row from its end, needs no room at the row's right edge. */
-  .rows--thread > .row > .row-link {
-    padding-inline-end: 0;
-    grid-template-columns: minmax(0, 1fr) repeat(2, calc((100% + var(--thread-indent) - 2 * var(--space-4)) / 3));
-  }
-  /* A person's row on the owner's point of «Decisiones» is a list row too, in the same three equal columns: the name, then the
-     dates with the comment and the earlier answers under them, then the answer (the row's state), each on the same x down the
-     list. A row with no dates leaves that cell empty. */
-  .owner-answers .owner-answer { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--space-4); align-items: start; }
-  .owner-answers .owner-answer-head { display: contents; }
-  .owner-answers .owner-answer .row-title { grid-area: 1 / 1; }
-  .owner-answers .owner-answer-value { grid-area: 1 / 3; }
-  .owner-answers .owner-answer .row-meta { grid-area: 1 / 2; }
-  .owner-answers .owner-answer :is(.owner-answer-comment, .owner-history) { grid-column: 2; }
-  /* A proposal is not a row of the table: its author and date, then its text, both on the row's start as below 1056 (the
-     lists' rule above would send the author line to a column of its own). */
-  .owner-proposals .owner-proposal .row-meta, .decisions-proposed .decisions-proposed-item .row-meta { grid-area: auto; }
-  /* The «Decisiones» section takes the page's column as the pieces' list does: each point's three parts side by side in the
-     same three equal columns, its title (and its mark under it) · what was decided, with the fold «En qué se apoya» and when
-     she answered under it · the answer, which starts where the pieces' states do: the part spans its column (MAR-12) and
-     its form keeps the form measure at the part's edge (MAR-09); «¿Falta algo?» likewise, its title · its form. The texts
-     keep the reading measure inside their column. */
-  .decision-row, .decisions-propose { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--space-4); align-items: start; }
-  .decision-answer > :is(.decision-form, .decision-change) { margin-top: 0; }
-  .decisions-propose > .decisions-propose-main { grid-column: 3; }
-}
-
 /* ---- piece ------------------------------------------------------------------------------ */
 
-/* The piece is as tall as its content and the page scrolls, never the piece (MAR-14): the iframe takes the height the
+/* The piece is as tall as its content and the page scrolls, never the piece: the iframe takes the height the
    piece posts (app.js followPiece), and its box (.piece-main) fills the screen under the frame, so a short piece still
    has the screen. Nothing of the frame is fixed or sticky: on a phone it goes up as the page scrolls. */
 .piece-layout { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 .piece-layout > .frame { flex: none; }
 /* Under the masthead, at every width: «Volver», then the title band (the piece's title and its line: whether the draft
-   was saved, or on the owner's screen «Lo que envió … el …»). Both start on the brand's left edge, the frame's. On a phone
-   the frame takes the least it can, with nothing cut (MAR-14, FUN-14): at rest, and with «Guardado» showing, the title band
-   ends at 160 px or less of a 640 px screen with a title of two lines (the factory's publisher keeps titles to what fits
-   there). «← Volver» goes right under the masthead, one line (its name still says where), and the line goes in its row, on
+   was saved, or on the owner's screen «Lo que envió … el …»). Both start on the brand's left edge, the frame's: the piece
+   below takes the frame's whole width, so this screen keeps no reading column. On a phone the band takes little of the
+   screen, with nothing cut, so the piece shows early. «← Volver» goes right under the masthead, one line (its name still says where), and the line goes in its row, on
    its right and in small text, so it never takes a row of its own under the title; the title takes the row below, across
    the bar. The heading's box gives way to the grid (the title and the line are its items); a longer line (a save that
    failed, a long name) wraps inside that row and the row grows, nothing is cut. From 672 px «Volver» shows where it goes

@@ -85,37 +85,37 @@ function masthead(headerActions = [], tag = "header") {
     ? h("div", { class: "brand", "data-rol": "marca-producto" }, mark)
     : h("a", { class: "brand", "data-rol": "marca-producto", href: "#/", "aria-label": t("brandHome"),
       "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, mark);
+  // Who is signed in, in the shell next to «Salir» (on a phone on its own line under the brand: portal.css): on the screens
+  // that carry «Salir», never on sign-in nor on the piece screen.
+  const email = headerActions.length && state.view !== "sign-in" ? state.session?.user?.email : null;
   return h(tag, { class: "masthead" },
     brand,
+    email ? h("p", { class: "masthead-who" }, t("signedInAs", { email })) : null,
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
 }
 
 // «← Tus proyectos», «← {project}»: where the screen goes back to. The arrow is drawn (backArrow) and not read; the link's
-// name says where. Below 672 px the link reads «← Volver», one line whatever the destination's name (MAR-14), and its name
-// still says where («Volver a {project}»); from 672 it shows the destination (portal.css).
+// name says where. Below 672 px the link reads «← Volver», one line whatever the destination's name, and its name still
+// says where («Volver a {project}»); from 672 it shows the destination (portal.css).
 function backLink({ href, text, label }) {
   return h("a", { class: "back-link", href, "aria-label": label }, backArrow(),
     h("span", { class: "back-link-long" }, text), h("span", { class: "back-link-short" }, t("backShort")));
 }
 const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backToProjectsLabel") });
 
-// One frame for every screen: masthead, then inside <main> the title band, the notice zone and
-// the body. The frame's box is the .frame (the masthead's too); inside <main>, its data-rol="marco" holds
-// the title band, the notices and the body, as the visual manual's anatomy puts them (marco.md). `back`
-// ({ href, text, label }) puts the way back first, as the manual's optional «contexto» zone, without a data-rol. A way back
-// home shows only from 672 px: on a phone the brand links there (portal.css). A way back elsewhere (the owner's point of
-// «Decisiones» goes back to its project) shows at every width, «← Volver» on a phone, on its own row above the title.
+// One frame for every screen: the masthead (the shell, across the window), then inside <main> the reading column
+// (data-rol="marco", centred and at most 60rem wide: portal.css) with the title band, the notice zone and the body. `back`
+// ({ href, text, label }) puts the way back first, above the title, at every width («← Volver» on a phone).
 function frameLayout({ title, meta = [], headerActions = [], back = null }) {
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
   const body = h("div", { class: "body", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
-  const home = Boolean(back) && back.href === "#/";
   replaceChildren(root, h("div", { class: "frame" },
     masthead(headerActions),
-    h("main", { id: "main", class: back ? (home ? "context-wide" : "context-back") : null },
+    h("main", { id: "main" },
       h("div", { "data-rol": "marco" },
-        back ? h("p", { class: home ? "page-context page-context--wide" : "page-context" }, backLink(back)) : null,
-        h("div", { class: "page-head", "data-rol": "cabecera" },
+        back ? h("p", { class: "page-context" }, backLink(back)) : null,
+        h("div", { class: "page-head" },
           h("h1", {}, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
         notices, body, live))));
@@ -261,7 +261,7 @@ function showEmailStep(prefill = "", { notice } = {}) {
     showNotice(notices, { tone: "error", text: kind === "network" ? t("networkError") : t("unknownError") });
   }
 
-  signInBody(body, h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+  signInBody(body, h("form", { class: "form", novalidate: true, onsubmit: onSubmit },
     h("div", { class: "field" },
       h("label", { for: "email" }, t("emailLabel")),
       h("p", { class: "hint", id: "email-hint" }, t("emailHint")),
@@ -360,7 +360,7 @@ function showCodeStep(pending, { notice } = {}) {
     showEmailStep(pending.email);
   });
 
-  const form = h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: verify },
+  const form = h("form", { class: "form", novalidate: true, onsubmit: verify },
     h("div", { class: "field" }, h("label", { for: "code" }, t("codeLabel", { length: EMAIL_OTP_LENGTH })), input, error),
     button);
   signInBody(body, form, h("div", { class: "secondary-actions" }, resendStatus, resendButton, otherEmail));
@@ -511,7 +511,8 @@ function pieceRow({ piece, assignment, lastRequestAt }) {
         h("span", { class: "row-title" }, piece.title || t("untitled")),
         h("span", { class: "row-meta" }, meta.join(" · "))),
       h("span", { class: STATUS_CLASSES[status] },
-        h("span", { class: "status-dot", "aria-hidden": "true" }), t(STATUS_KEYS[status]))));
+        h("span", { class: "status-dot", "aria-hidden": "true" }), t(STATUS_KEYS[status])),
+      rowChevron()));
 }
 
 // The thread of «Lo que se te pidió» (spec 2026-11-24 «Hilo de jidoka»), the only list that has one: a line down the list's
@@ -560,7 +561,8 @@ function projectRow({ project, toAnswer, owned, summary, onlyDecisions }) {
       h("span", { class: "row-main" },
         h("span", { class: "row-title" }, project.name || project.slug || t("untitled")),
         meta.length ? h("span", { class: "row-meta" }, meta.join(" · ")) : null),
-      h("span", { class: "row-aside" }, aside)));
+      h("span", { class: "row-aside" }, aside),
+      rowChevron()));
 }
 
 const unsavedWarning = (notices) => {
@@ -572,7 +574,7 @@ async function showHome(viewId) {
   const user = state.session.user;
   const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
   setTitle(t("projectsTitle"));
-  let layout = frameLayout({ title: t("projectsTitle"), meta: [t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
+  let layout = frameLayout({ title: t("projectsTitle"), headerActions: [signOutButton()] });
   layout.body.append(h("p", { class: "loading", role: "status" }, t("loadingList")));
 
   let rows;
@@ -598,7 +600,7 @@ async function showHome(viewId) {
   setLanguage(languages.length === 1 ? languages[0] : browserLanguage);
   setTitle(t("projectsTitle"));
   const count = !rows.length ? null : rows.length === 1 ? t("projectsCountOne") : t("projectsCount", { count: rows.length });
-  layout = frameLayout({ title: t("projectsTitle"), meta: [count, t("signedInAs", { email: user.email })], headerActions: [signOutButton()] });
+  layout = frameLayout({ title: t("projectsTitle"), meta: [count], headerActions: [signOutButton()] });
   unsavedWarning(layout.notices);
 
   if (!rows.length) {
@@ -905,6 +907,8 @@ function lineIcon(d, className = null) {
 }
 // The fold's chevron, as the pieces draw theirs (a «more» fold): it turns when the fold opens.
 function chevron() { return lineIcon("M6 3l5 5-5 5"); }
+// The end of a row that opens something (a project, a piece): a chevron, drawing only (the link's name stays its words).
+function rowChevron() { return lineIcon("M6 3l5 5-5 5", "row-chevron"); }
 // The way back's arrow, pointing to the start.
 function backArrow() { return lineIcon("M13 8H3M7 4L3 8l4 4", "back-link-arrow"); }
 
@@ -1135,7 +1139,7 @@ function decisionsSection({ projectId, viewId, points, proposals = [], live }) {
           answered),
         h("section", { class: "decision-answer" },
           changeButton,
-          form = h("form", { class: "form decision-form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+          form = h("form", { class: "form decision-form", novalidate: true, onsubmit: onSubmit },
             h("fieldset", { class: "choices" },
               h("legend", { class: "visually-hidden" }, title),
               radios.map((radio) => h("label", { class: "choice", for: radio.id }, radio, h("span", { class: "choice-mark", "aria-hidden": "true" }),
@@ -1221,7 +1225,7 @@ function decisionsSection({ projectId, viewId, points, proposals = [], live }) {
       h("div", { class: "decisions-propose-head" }, h("h3", { id: "decisions-propose-title" }, t("proposeTitle"))),
       h("section", { class: "decisions-propose-main" },
         proposed,
-        h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit, "aria-labelledby": "decisions-propose-title" },
+        h("form", { class: "form", novalidate: true, onsubmit: onSubmit, "aria-labelledby": "decisions-propose-title" },
           h("div", { class: "field" }, h("label", { for: input.id }, t("proposeLead")), input, error),
           failure, button),
         sent));
@@ -1276,7 +1280,7 @@ function pieceLayout(titleText, back = homeBack()) {
         h("div", { class: "piece-bar" },
           backLink(back),
           // The space parts the title and the save line on one line, and goes at a line break (portal.css).
-          h("div", { class: "piece-heading", "data-rol": "cabecera" }, title, " ", status))),
+          h("div", { class: "piece-heading" }, title, " ", status))),
       pinned, notices),
     main));
   return { pinned, notices, title, status, main, live };
@@ -1417,7 +1421,7 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
     }
 
     // The form's primary action is its last control; «Cancelar» goes after it, as on the sign-in screens (MAR-06, FUN-08).
-    replaceChildren(slot, h("form", { class: "form", "data-medida": "formulario", novalidate: true, onsubmit: onSubmit },
+    replaceChildren(slot, h("form", { class: "form", novalidate: true, onsubmit: onSubmit },
       h("div", { class: "field" },
         h("label", { for: "change-request-text" }, t("changeRequestLabel")),
         h("p", { class: "hint", id: "change-request-hint" }, t("changeRequestHint")),
