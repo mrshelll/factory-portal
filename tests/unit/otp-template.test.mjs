@@ -63,7 +63,9 @@ test("the subject names the product, has no code, no alarm and is fifty characte
 test("its colours are the brand's light ones (brand/ninben.css), so the email follows the brand", () => {
   const css = readFileSync(new URL("../../brand/ninben.css", import.meta.url), "utf8");
   const root = css.slice(css.indexOf(":root"), css.indexOf("}", css.indexOf(":root"))); // the light tokens, before any dark block
-  const tokens = Object.fromEntries([...root.matchAll(/--(bg|sheet|ink|muted|line):\s*(#[0-9A-Fa-f]{6})/g)].map(([, k, v]) => [k, v.toUpperCase()]));
+  // Pure white is banned by the inline-styles test (clients invert an exact #FFFFFF), so the brand's #FFFFFF is #FCFCFD here.
+  const tokens = Object.fromEntries([...root.matchAll(/--(bg|sheet|ink|muted|line):\s*(#[0-9A-Fa-f]{6})/g)]
+    .map(([, k, v]) => [k, v.toUpperCase() === "#FFFFFF" ? "#FCFCFD" : v.toUpperCase()]));
   assert.deepEqual(Object.keys(tokens).sort(), ["bg", "ink", "line", "muted", "sheet"]);
   const used = [...body.matchAll(/(?:^|[;\s"])(?:color|background-color):\s*(#[0-9A-Fa-f]{3,8})/g)].map((m) => m[1].toUpperCase());
   assert.ok(used.length > 0);
