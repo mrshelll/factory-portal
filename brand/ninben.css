@@ -39,8 +39,8 @@
   --font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-/* Dark: the same roles, the shell deeper than the ground and the violet lightened for AA
-   (checked by design-system/evals/brand/contrast.py). */
+/* Dark: the same roles, the shell an indigo lighter than the ground (so the bar reads as a band, ≥ 1.2:1)
+   and the violet lightened for AA (checked by design-system/evals/brand/contrast.py). */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0F1424;
@@ -54,7 +54,7 @@
     --soft: #24224A;
     --ok: #6FBF7A;
     --error: #FF8A80;
-    --shell: #0A0D18;
+    --shell: #1B2547;
     --on-shell: #FFFFFF;
     --on-shell-muted: #A9B1CC;
     --signal-on-shell: #A8A2FF;

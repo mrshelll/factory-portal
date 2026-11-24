@@ -293,8 +293,9 @@ the work area is white (`--bg` and `--sheet` both `#FFFFFF`), text and lines are
 bar in `--shell` across the window's whole width (its content still on the frame's edge), the brand's words in
 `--on-shell`, the 亻 stroke in `--signal-on-shell` (the logo file's own stroke is `--signal`; `css/portal.css`
 overrides it on the shell), «Salir» a quiet outlined button in `--on-shell` with an `--on-shell-muted` border, and the
-focus ring on the shell in `--signal-on-shell`. Each token has a light and a dark value; the dark shell is deeper than
-the dark ground. The single
+focus ring on the shell in `--signal-on-shell`. Each token has a light and a dark value; the dark shell is an indigo
+lighter than the dark ground, so the bar still reads as a band (the factory's contrast eval holds it at
+≥ 1.2:1). The single
 source lives in the software factory repo, in `design-system/assets/brand/` (`ninben.css`,
 `ninben-components.css`, `logo.svg`, `fonts/`). `brand/` here is a generated copy; never edit it by
 hand:
