@@ -5144,6 +5144,175 @@ async function ownerDecisionsChecks(browser, base, html) {
   }
 }
 
+// The thread (spec 2026-11-24 «Hilo de jidoka», «The thread»): a line down the left of «Lo que se te pidió» on a project's
+// page, and nowhere else. It is whole at «Enviada» and «Recibida» (a replaced version that was sent reads «Recibida») and cut
+// at «Por empezar» and «En curso», where the factory waits for the person: two curled ends and the violet 亻 disc, the row
+// tinted --stop. It is decoration: aria-hidden, outside the row's link (its accessible name does not change), and each row
+// keeps its state in words and its mark. Not on home, the owner's «Avance de lo que compartiste», the piece, a project with
+// only «Decisiones». At 320 px, light and dark, with a two-line project name and a piece title of TITLE_MAX characters, the
+// page does not scroll sideways, the title band ends at 160 px or less and every row's state shows; under forced colours
+// (a contrast theme) every state still shows and the thread stays in its column. The line holds 3:1 on the page and on
+// the stop tint, light and dark.
+const THREAD_STATES = { pending: "Por empezar", in_progress: "En curso", submitted: "Enviada", received: "Recibida" };
+// One item in each of the four states: questions to start, the flows in progress, the demo sent, its first version received.
+function threadBackend(html, statuses = { [IDS.questions]: "pending", [IDS.flow]: "in_progress", [IDS.demo]: "submitted", [IDS.replaced]: "received" }) {
+  const backend = newBackend(html);
+  for (const [pieceId, status] of Object.entries(statuses)) backend.patch[pieceId] = { status };
+  return backend;
+}
+// What the page draws of the thread: every .thread, and each row of «Lo que se te pidió» with its thread, cut, disc, tint.
+const threadView = (page) => page.evaluate((asked) => {
+  window.scrollTo(0, 0);
+  const own = [...document.querySelectorAll("[data-rol=cuerpo] section")].find((s) => s.querySelector("h2")?.textContent === asked) || null;
+  const colour = (value) => { const probe = document.createElement("span"); probe.style.backgroundColor = value; document.body.append(probe);
+    const out = getComputedStyle(probe).backgroundColor; probe.remove(); return out; };
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, der: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height }; };
+  const threads = [...document.querySelectorAll(".thread")];
+  const rows = own ? [...own.querySelectorAll("ul.rows > li.row")].map((li) => {
+    const link = li.querySelector(":scope > .row-link"), mine = [...li.querySelectorAll(".thread")], status = link && link.querySelector(".status");
+    const thread = li.querySelector(":scope > .thread"), disc = li.querySelector(".thread-disc"), cs = link && getComputedStyle(link);
+    // The line: down the track whole; cut, the upper end's right border and the lower end's left one.
+    const upper = thread && getComputedStyle(thread, "::before"), lower = thread && getComputedStyle(thread, "::after");
+    const cutLine = Boolean(thread && thread.classList.contains("thread--cut"));
+    const sides = !thread ? [] : cutLine ? [[upper.borderRightColor, upper.borderRightWidth], [lower.borderLeftColor, lower.borderLeftWidth]]
+      : [[upper.borderLeftColor, upper.borderLeftWidth]];
+    return { state: status ? status.textContent.trim() : null, threads: mine.length, direct: Boolean(thread),
+      hidden: mine.length > 0 && mine.every((t) => t.getAttribute("aria-hidden") === "true"), inLink: Boolean(link && link.querySelector(".thread")),
+      cut: Boolean(li.querySelector(".thread--cut")), disc: Boolean(disc), stop: Boolean(link && link.classList.contains("row--stop")),
+      bg: cs ? cs.backgroundColor : null, lines: sides.map(([c, w]) => [c, parseFloat(w)]),
+      li: box(li), link: box(link), track: cs ? parseFloat(cs.paddingLeft) : null, thread: box(thread), disc: box(disc),
+      title: box(link && link.querySelector(".row-title")), titleText: link && link.querySelector(".row-title")?.textContent,
+      status: box(status), statusColour: status ? getComputedStyle(status).color : null, statusShown: Boolean(status) && status.getClientRects().length > 0 &&
+        getComputedStyle(status).visibility !== "hidden" && Number(getComputedStyle(status).opacity) > 0 };
+  }) : null;
+  const h1 = document.querySelector(".page-head h1");
+  return { all: threads.length, outside: threads.filter((t) => !own || !own.contains(t)).length, lists: document.querySelectorAll(".rows--thread").length,
+    rows, stop: colour("var(--stop)"), thread: colour("var(--thread)"), bg: colour("var(--bg)"), signal: colour("var(--signal)"),
+    band: h1 ? Math.round(Math.max(h1.getBoundingClientRect().bottom, document.querySelector(".page-head").getBoundingClientRect().bottom)) : null,
+    scroll: document.documentElement.scrollWidth <= window.innerWidth, vw: window.innerWidth };
+}, PROJECT.askedOfYou);
+const luminance = (rgb) => { const [r, g, b] = rgb.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrastRatio = (a, b) => { const [hi, lo] = [luminance(rgbOf(a)), luminance(rgbOf(b))].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+
+async function threadChecks(browser, base, html) {
+  const openAt = async (backend, hash, ready, { width = 1440, height = 900, scheme = "light" } = {}) => {
+    const context = await mockedContext(browser, { backend, width, height, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
+    await page.waitForSelector(ready, { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => document.fonts.ready);
+    return { context, page };
+  };
+  const ownRows = '[aria-labelledby="asked-title"] .row-link';
+  const isStop = (row) => [THREAD_STATES.pending, THREAD_STATES.in_progress].includes(row.state);
+
+  // A project with one item in each state, at 1440 and 320, light and dark.
+  for (const scheme of ["light", "dark"]) for (const width of [1440, 320]) {
+    const tag = `thread ${scheme} ${width}px`;
+    const backend = threadBackend(html);
+    if (width === 320) { backend.projects[0].name = PROJECT_TWO_LINES; backend.pieces[0].title = TITLE_AT_MAX; }
+    const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows, { width, height: width === 320 ? PHONE.height : 900, scheme });
+    const view = await threadView(page);
+    await page.screenshot({ path: join(outDir, `thread-project-${width}-${scheme}.png`), fullPage: true });
+    const rows = view.rows || [];
+    const detail = JSON.stringify(rows.map((r) => [r.state, r.threads, r.hidden, r.cut, r.disc, r.stop, r.bg]));
+    check(`${tag}: «Lo que se te pidió» shows one item in each of the four states`, rows.length === 4 &&
+      Object.values(THREAD_STATES).every((s) => rows.some((r) => r.state === s)), detail);
+    check(`${tag}: exactly one .thread per row, in the row's li (not in its link: the link's name does not change), all aria-hidden`,
+      rows.length === 4 && rows.every((r) => r.threads === 1 && r.direct && r.hidden && !r.inLink) && view.outside === 0, detail);
+    check(`${tag}: cut with the disc, and the link row--stop on the --stop tint, only at «Por empezar» and «En curso»`, rows.length === 4 &&
+      rows.every((r) => (isStop(r) ? r.cut && r.disc && r.stop && r.bg === view.stop : !r.cut && !r.disc && !r.stop && r.bg === "rgba(0, 0, 0, 0)")),
+      `${detail} · --stop ${view.stop}`);
+    check(`${tag}: the line is --thread, 2 px, and holds 3:1 on the page and on the stop tint`, rows.length === 4 &&
+      rows.every((r) => r.lines.length === (r.cut ? 2 : 1) && r.lines.every(([c, w]) => c === view.thread && w === 2)) && contrastRatio(view.thread, view.bg) >= 3 && contrastRatio(view.thread, view.stop) >= 3,
+      JSON.stringify({ thread: view.thread, bg: view.bg, stop: view.stop, onBg: contrastRatio(view.thread, view.bg).toFixed(2),
+        onStop: contrastRatio(view.thread, view.stop).toFixed(2), lines: rows.map((r) => r.lines) }));
+    // What a person sees: the line's colour at a whole row's middle, the disc's violet inside a stop row's disc.
+    const whole = rows.find((r) => !isStop(r) && r.thread);
+    const stopRow = rows.find((r) => isStop(r) && r.disc);
+    if (whole && whole.thread.bottom <= (width === 320 ? PHONE.height : 900)) {
+      const cx = whole.thread.x + whole.thread.w / 2;
+      const px = await rowPixels(page, Math.round(whole.thread.top + whole.thread.h / 2), [Math.floor(cx - 1), Math.floor(cx)]);
+      check(`${tag}: the thread is painted down a whole row`, px.some((p) => sameColour(p, rgbOf(view.thread))), JSON.stringify({ px, thread: view.thread }));
+    }
+    if (stopRow && stopRow.disc.bottom <= (width === 320 ? PHONE.height : 900)) {
+      const px = await rowPixels(page, Math.round(stopRow.disc.top + stopRow.disc.h / 2 + 2), [Math.round(stopRow.disc.x + stopRow.disc.w / 2 + 4)]);
+      check(`${tag}: the disc is painted in --signal on the stop row`, sameColour(px[0], rgbOf(view.signal)), JSON.stringify({ px, signal: view.signal }));
+    }
+    check(`${tag}: the thread stays in its track, left of every row's text`, rows.length === 4 && rows.every((r) => r.thread && r.thread.x >= r.li.x - 1 &&
+      r.thread.der <= r.li.x + r.track + 1 && r.title.x >= r.thread.der - 1 && r.status.x >= r.thread.der - 1), JSON.stringify(rows.map((r) => [r.thread, r.track, r.title && r.title.x])));
+    if (width === 320) {
+      check(`${tag}: no horizontal scroll`, view.scroll);
+      check(`${tag}: a two-line project name and the thread: the title band ends at ${PHONE_FRAME_MAX} px or less`, view.band !== null && view.band <= PHONE_FRAME_MAX, String(view.band));
+      check(`${tag}: every row's state shows, inside the screen, and a title of ${TITLE_MAX} characters is whole inside its row`, rows.length === 4 &&
+        rows.every((r) => r.statusShown && r.status.w > 0 && r.status.x >= 0 && r.status.der <= view.vw && r.title.der <= r.link.der + 1) &&
+        rows.some((r) => r.titleText === TITLE_AT_MAX), JSON.stringify(rows.map((r) => [r.state, r.status, r.title, r.link && r.link.der])));
+    }
+    await context.close();
+  }
+
+  // Forced colours (a contrast theme), at 320 and 1440: every row's state still shows, the thread stays in its column, no scroll.
+  for (const width of [320, 1440]) {
+    const tag = `thread forced colours ${width}px`;
+    const backend = threadBackend(html);
+    if (width === 320) { backend.projects[0].name = PROJECT_TWO_LINES; backend.pieces[0].title = TITLE_AT_MAX; }
+    const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows, { width, height: width === 320 ? PHONE.height : 900 });
+    await page.emulateMedia({ forcedColors: "active" });
+    await sleep(200);
+    const view = await threadView(page);
+    await page.screenshot({ path: join(outDir, `thread-forced-${width}.png`), fullPage: true });
+    const rows = view.rows || [];
+    check(`${tag}: every row's state still shows in words`, rows.length === 4 && rows.every((r) => r.statusShown && r.status.w > 0 && r.status.der <= view.vw &&
+      Object.values(THREAD_STATES).includes(r.state)), JSON.stringify(rows.map((r) => [r.state, r.status, r.statusColour])));
+    check(`${tag}: the thread takes no width beyond its column`, rows.length === 4 && rows.every((r) => r.thread && r.thread.x >= r.li.x - 1 &&
+      r.thread.der <= r.li.x + r.track + 1 && r.title.x >= r.thread.der - 1), JSON.stringify(rows.map((r) => [r.thread, r.track])));
+    check(`${tag}: no horizontal scroll`, view.scroll);
+    await context.close();
+  }
+
+  // Everything asked was sent: a whole thread, no cut, no disc, no tint.
+  {
+    const backend = threadBackend(html, { [IDS.questions]: "submitted", [IDS.flow]: "submitted", [IDS.demo]: "received", [IDS.replaced]: "replaced" });
+    const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows);
+    const view = await threadView(page);
+    const rows = view.rows || [];
+    check("thread all sent: one whole thread down every row, no cut, no disc, no stop tint", rows.length > 0 &&
+      rows.every((r) => r.threads === 1 && !r.cut && !r.disc && !r.stop && ["Enviada", "Recibida"].includes(r.state)) &&
+      (await page.$$(".thread--cut, .thread-disc, .row--stop")).length === 0, JSON.stringify(rows.map((r) => [r.state, r.cut, r.disc, r.stop])));
+    await context.close();
+  }
+
+  // Nowhere else: home, the owner's «Avance de lo que compartiste», the piece (its screen and its iframe), a project with only
+  // «Decisiones» (no thread, no empty track).
+  {
+    const { context, page } = await openAt(threadBackend(html), "", ".row-link");
+    const view = await threadView(page);
+    check("thread: none on home", (await page.$$(".row-link")).length > 0 && view.all === 0 && view.lists === 0, JSON.stringify({ all: view.all, lists: view.lists }));
+    await openProject(page).catch(() => {});
+    await page.click(`a[href="#/piece/${IDS.questions}"]`).catch(() => {});
+    const frame = await appPiece(page);
+    const inside = frame ? await frame.evaluate(() => document.querySelectorAll(".thread, .thread-disc").length).catch(() => null) : null;
+    check("thread: none on the piece screen nor inside the piece", frame && inside === 0 && (await page.$$(".thread")).length === 0, String(inside));
+    await context.close();
+  }
+  {
+    const { context, page } = await openAt(ownerBackend(html), `#/project/${IDS.ownedProject}`, ".owner-piece .row-item");
+    const view = await threadView(page);
+    check("thread: none on the owner's «Avance de lo que compartiste»", (await page.$$(".owner-piece .row-item")).length > 0 && view.all === 0 && view.lists === 0,
+      JSON.stringify({ all: view.all, lists: view.lists }));
+    await context.close();
+  }
+  {
+    const { context, page } = await openAt(withAudienceOnly(decisionsBackend(html)), `#/project/${DIDS.project}`, ".decision");
+    const view = await threadView(page);
+    check("thread: a project with only «Decisiones» has no thread and no empty track", (await page.$$(".decision")).length > 0 && view.rows === null &&
+      view.all === 0 && view.lists === 0, JSON.stringify({ all: view.all, lists: view.lists }));
+    await context.close();
+  }
+}
+
 const GEOMETRY_WIDTHS = [320, 672, 1056, 1440];
 // The screens every run captures and measures: the sign-in steps, home (the projects, and empty), a project's page, an
 // owned project's page with the owner's part (captured with --flow and --demo too), a project's page with a received
@@ -5181,12 +5350,18 @@ const listColumns = (page) => page.evaluate(() => {
       top: Math.round(Math.min(...rects.map((x) => x.top))), bottom: Math.round(Math.max(...rects.map((x) => x.bottom))) } : null;
   };
   const boxOf = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), der: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+  // The row's own box without its inline padding: a row of «Lo que se te pidió» keeps the thread's track (and below 1056 a
+  // step at its end, for the stop tint) inside its link, and its content starts after the track.
+  const contentOf = (el) => { const b = boxOf(el), cs = getComputedStyle(el);
+    return { ...b, x: Math.round(b.x + parseFloat(cs.paddingLeft)), der: Math.round(b.der - parseFloat(cs.paddingRight)) }; };
   return [...document.querySelectorAll("[data-rol=cuerpo] ul.rows > li.row")].filter((li) => li.querySelector(":scope > .row-link, :scope > .row-item")).map((li) => {
     const row = li.querySelector(":scope > .row-link, :scope > .row-item");
+    // lead: the thread's track, from the row's outer start to its content (0 on every other list).
+    const lead = row && li.querySelector(":scope > .thread") ? Math.round(parseFloat(getComputedStyle(row).paddingLeft)) : 0;
     const main = row && row.querySelector(":scope > .row-main");
     const state = row && row.querySelector(":scope > .row-aside, :scope > .status");
     const title = main && main.firstElementChild;
-    return { text: title ? title.textContent : null, row: row ? boxOf(row) : null, gap: row ? Math.round(parseFloat(getComputedStyle(row).columnGap) || 0) : null,
+    return { text: title ? title.textContent : null, row: row ? contentOf(row) : null, lead, gap: row ? Math.round(parseFloat(getComputedStyle(row).columnGap) || 0) : null,
       title: textBox(title),
       meta: textBox(main && main.querySelector(":scope > .row-meta")), state: state ? boxOf(state) : null };
   });
@@ -5201,14 +5376,17 @@ function listColumnChecks(name, width, scheme, rows) {
   const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
   const same = (xs) => xs.length > 0 && xs.every((x) => near(x, xs[0]));
   const ok = rows.length > 0 && rows.every((r) => r.row && r.title && r.state);
-  const detail = JSON.stringify(rows.map((r) => [r.text, r.row && [r.row.x, r.row.der], r.title && [r.title.x, r.title.der, r.title.top],
+  const detail = JSON.stringify(rows.map((r) => [r.text, r.row && [r.row.x, r.row.der, r.lead], r.title && [r.title.x, r.title.der, r.title.top],
     r.meta && [r.meta.x, r.meta.der, r.meta.top], r.state && [r.state.x, r.state.der, r.state.top]]));
   if (width >= 1056) {
     const metas = rows.filter((r) => r.meta);
+    // Where a row's columns start: its outer start, before the thread's track on «Lo que se te pidió» (the track comes out of
+    // the title's column there, so the meta and the state still fall on every other list's x).
+    const start = (r) => r.row.x - (r.lead || 0);
     // The columns are decided by the list: with a meta line in any row the list has three columns and every state falls on the
     // same x, a row without a meta line leaving that cell empty (a mixed list, like home with an owned project and another's);
     // with none, two equal columns, title · state.
-    check(`${tag}: the rows are columns, title · meta · state, each column aligned down the list`, ok && same(rows.map((r) => r.title.x)) &&
+    check(`${tag}: the rows are columns, title · meta · state, each column aligned down the list`, ok && same(rows.map((r) => r.title.x - (r.lead || 0))) &&
       (!metas.length || same(metas.map((r) => r.meta.x))) && same(rows.map((r) => r.state.x)) &&
       rows.every((r) => near(r.title.x, r.row.x) && (!r.meta || r.meta.x > r.title.der) && r.state.x > (r.meta ? r.meta.der : r.title.der) &&
         r.state.top < r.title.bottom && (!r.meta || r.meta.top < r.title.bottom)), detail);
@@ -5216,9 +5394,9 @@ function listColumnChecks(name, width, scheme, rows) {
     // to the row's end, plus the gap, the same step: a third of the row and one gap), two when none has (the state half way in).
     const parts = metas.length ? 3 : 2;
     check(`${tag}: the row's width is shared in ${parts} equal columns, the state ${metas.length ? "two thirds" : "half way"} into the row, not on its far edge`, ok &&
-      rows.every((r) => { const step = (r.row.der - r.row.x + r.gap) / parts;
-        return Math.abs(r.state.x - r.title.x - step * (parts - 1)) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2 &&
-          (!r.meta || Math.abs(r.meta.x - r.title.x - step) <= 2); }),
+      rows.every((r) => { const step = (r.row.der - start(r) + r.gap) / parts;
+        return Math.abs(r.state.x - start(r) - step * (parts - 1)) <= 2 && Math.abs(r.row.der + r.gap - r.state.x - step) <= 2 &&
+          (!r.meta || Math.abs(r.meta.x - start(r) - step) <= 2); }),
       JSON.stringify({ parts, gap: rows[0] && rows[0].gap, rows: JSON.parse(detail) }));
   } else if (width >= 672) {
     check(`${tag}: as before the columns, the title on the row's left, the meta under it, the state on the row's right edge`, ok &&
@@ -5349,6 +5527,7 @@ try {
   if (args.questions) await ownerDecisionsChecks(browser, base, read(args.questions));
   if (args.questions) await decisionsScreens(browser, base, read(args.questions));
   if (args.questions) await brandShellChecks(browser, base, read(args.questions));
+  if (args.questions) await threadChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));
   if (args.questions) await tooLargeAppChecks(browser, base, read(args.questions));

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRoute, projectHref, ownerPieceHref, ownerReceivedHref, ownerDecisionHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE } from "../../js/project.js";
+import { parseRoute, projectHref, ownerPieceHref, ownerReceivedHref, ownerDecisionHref, ownerStatus, latestActivity, latestActivityKind, personRows, projectRows, DONE, threadStop } from "../../js/project.js";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -156,4 +156,12 @@ test("projectRows: owned only, shared only, both merged, ordered by name", () =>
   assert.equal(rows[2].summary, owned[1]);
   assert.deepEqual(projectRows(null, undefined), []);
   assert.deepEqual([...DONE].sort(), ["received", "replaced", "submitted"]);
+});
+
+test("threadStop: the thread breaks where the factory waits for the person, and nowhere on bad data", () => {
+  assert.equal(threadStop("pending"), true);
+  assert.equal(threadStop("in_progress"), true);
+  for (const status of ["submitted", "received", "replaced", undefined, null, "", "PENDING", "In_Progress", "opened", 1, {}]) {
+    assert.equal(threadStop(status), false, String(status));
+  }
 });

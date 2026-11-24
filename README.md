@@ -54,6 +54,16 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    «No va» or «No sé» and a comment (optional with «Va», required with the others), and «¿Falta algo?» to
    propose what is missing, with what they already proposed listed as «Lo que propusiste». A point already answered on the version shown is folded to its answer line and
    «Cambiar respuesta». A project with only the section (no pieces for the person) is listed at home too.
+   **The thread** (spec 2026-11-24 «Hilo de jidoka»): «Lo que se te pidió», and no other list, carries a 2 px line in
+   `--thread` down its left, in a track of its own (36 px with the text at 48 from 672; 24 px with the text at 32 below). It is whole
+   beside an item that was sent («Enviada», «Recibida»; a replaced version listed is one that was sent) and cut where the
+   factory waits for the person («Por empezar», «En curso», `threadStop` in `js/project.js`; an unknown status never cuts
+   it): its ends curl away with a knot each, the violet 亻 disc sits in the gap and the row's link takes the `--stop` tint
+   (`row--stop`). `--thread` and `--stop` are the portal's own two colours, set in `css/portal.css`. The thread is
+   drawing: `aria-hidden`, beside the row's link and not in it, so each row still says its state in words and its mark;
+   under forced colours the line and the disc take the system's colours and the tint goes. From 1056 px the track comes
+   out of the title's column, so the meta and state columns stay on the same x as every other list's. It is not on
+   home, the owner's part, the pieces or the emails, and a project with only «Decisiones» has no empty track.
    The owner's part comes last, with the section's counts and what people proposed; each point opens at
    `#/project/<id>/decisions/<key>`, how each person answered it (read only). See **The owner's part** below.
 4. **Piece**: rendered in `<iframe sandbox="allow-scripts allow-downloads allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox">`
@@ -490,7 +500,13 @@ font: the masthead is the shell, the logo's stroke `--signal-on-shell`, the body
 signed-in screens (`brandShellChecks`: at 320 and 1440 px, light and dark, the masthead in `--shell` across the
 window's whole width, read off a screenshot, with the dark value read from `brand/ninben.css`; «Salir» outlined in the
 shell's colours with its focus ring in `--signal-on-shell`; at 320 px dark, home, a project's page and the piece screen
-with no horizontal scroll and no axe colour-contrast violation; `brand-*.png`), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
+with no horizontal scroll and no axe colour-contrast violation; `brand-*.png`), the thread (`threadChecks`: one item
+in each state at 320 and 1440 px, light and dark, and under forced colours: one `aria-hidden` thread per row of «Lo que
+se te pidió», cut with the disc and tinted `--stop` only at «Por empezar» and «En curso», painted where it should be
+(read off a screenshot), the line 3:1 on the page and on the tint, in its track; at 320 px with a two-line project
+name and a piece title of `TITLE_MAX` characters, no horizontal scroll, the band at 160 px or less and every state
+shown; a project with everything sent has a whole thread; none on home, the piece, the owner's part or a project with
+only «Decisiones»; `thread-*.png`), the bridge on real pieces through `tests/harness.html` (no Supabase), and the whole app
 against a mocked Supabase (home, autosave, send, errors, empty state, a session that ends before a
 change was saved, a session that comes back while the piece hands over its draft, a change too long
 to keep). With `--demo` as well, the demo sheet in the harness: the sheet carries the prototype and shows each key

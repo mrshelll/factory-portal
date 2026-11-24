@@ -3,8 +3,9 @@
    from the factory by scripts/sync-brand.mjs: brand/ninben.css (colours, light and dark; the radius;
    the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based spacing scale, the frame
    and the shared components: notices, fields, buttons, actions, rows and status, and the brand mark). Nothing
-   here sets a token or uses a loose value (FUN-35). The frame is the base's: the page margin on both sides at every
-   width, and not cut before 1440 (MAR-11). */
+   here sets a brand token or uses a loose value (FUN-35); the portal's own two colours, the thread's and its stop tint,
+   are set below, with the thread. The frame is the base's: the page margin on both sides at every width, and not cut
+   before 1440 (MAR-11). */
 
 html { -webkit-text-size-adjust: 100%; }
 p, h1, h2, ol, ul { margin: 0; }
@@ -163,6 +164,49 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .status--sent .status-dot { --dot: var(--ok); }
 .status--replaced .status-dot { --dot-fill: linear-gradient(135deg, transparent 40%, var(--muted) 40%, var(--muted) 60%, transparent 60%); }
 
+/* The thread (spec 2026-11-24 «Hilo de jidoka»), only on «Lo que se te pidió» (app.js threadOf): a 2 px line in a track down
+   the list's left, through every row and the rules between them, whole beside an item that was sent. Where the factory waits
+   for the person («Por empezar», «En curso») it is cut: its two ends curl away, each with a knot, and the violet 亻 disc sits
+   in the gap; that row takes the stop tint. The row keeps its state in words and its mark (COM-13): the thread is drawing,
+   hidden from assistive technology. The track is the row's first column (the li is a grid, track · content, and its link
+   spans both, so the tint runs under the thread and the row starts at the list's edge with the thread); the link's text
+   starts after it, on the spacing scale: the track 24 px and the text at 32 below 672, the track 36 px and the text at 48
+   from 672 (the disc 8 px from the track's edges, then 20 px of air). The row's text keeps the reading measure after it.
+   Its two colours are the portal's own. */
+:root { --thread: #2E3B6E; --stop: #F3F2FF; --thread-track: var(--space-5); --thread-indent: var(--space-6); }
+@media (prefers-color-scheme: dark) { :root { --thread: #8C98C8; --stop: #1C1A3A; } }
+@media (min-width: 672px) { :root { --thread-track: calc(var(--space-6) + var(--space-1)); --thread-indent: var(--space-7); } }
+.rows--thread > .row { display: grid; grid-template-columns: var(--thread-track) minmax(0, 1fr); }
+.rows--thread > .row > .row-link { grid-row: 1; grid-column: 1 / -1; padding-inline: var(--thread-indent) var(--space-3); }
+.row-link.row--stop { background: var(--stop); }
+/* From 672 a row is one line: a stop row takes a step more above and below, so the cut has room to read as a cut. */
+@media (min-width: 672px) { .rows--thread > .row > .row-link.row--stop { padding-block: var(--space-5); } }
+.thread { grid-area: 1 / 1; position: relative; pointer-events: none; }
+.thread::before, .thread--cut::after { content: ""; position: absolute; border: 0 solid var(--thread); }
+/* Whole: one line down the track's middle, over the row's bottom rule so it meets the next row's. */
+.thread::before { inset-block: 0 -1px; left: calc(50% - 1px); border-left-width: 2px; }
+/* Cut: the upper end curls to the left and the lower one to the right, a short quarter turn each, clear of the 20 px disc. */
+.thread--cut::before { inset-block: 0 calc(50% + var(--space-4)); left: auto; right: calc(50% - 1px); width: var(--space-2);
+  border-width: 0 2px 2px 0; border-bottom-right-radius: var(--space-2); }
+.thread--cut::after { inset-block: calc(50% + var(--space-4)) -1px; left: calc(50% - 1px); width: var(--space-2);
+  border-width: 2px 0 0 2px; border-top-left-radius: var(--space-2); }
+/* The knots, one at each curled end. */
+.thread--cut {
+  background:
+    radial-gradient(circle at calc(50% - var(--space-2) + 1px) calc(50% - var(--space-4) - 1px), var(--thread) 2.5px, transparent 3px),
+    radial-gradient(circle at calc(50% + var(--space-2) - 1px) calc(50% + var(--space-4) + 1px), var(--thread) 2.5px, transparent 3px);
+}
+.thread-disc { position: absolute; top: 50%; left: 50%; width: calc(var(--space-4) + var(--space-1)); height: calc(var(--space-4) + var(--space-1)); translate: -50% -50%; }
+.thread-disc circle { fill: var(--signal); }
+.thread-disc-mark { stroke: var(--on-signal); }
+/* With the system's forced colours (a contrast theme) the tint and the knots go; the line, as a border, takes the system's
+   text colour; the disc is drawn in the text colour with the 亻 in the page's. The state still reads from the row's words. */
+@media (forced-colors: active) {
+  .thread-disc { forced-color-adjust: none; }
+  .thread-disc circle { fill: CanvasText; }
+  .thread-disc-mark { stroke: Canvas; }
+}
+
 /* The owner's part of a project's page reads, squinting, section, then piece, then person: the section's title as every
    section's, first in the part and followed by its line in muted text; each piece's title in the same type (a section
    title in the base's scale, as a piece is in «Lo que se te pidió»), with its kind; each person's name a step smaller and
@@ -316,6 +360,13 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
      what is left to answer) has two equal columns, title · state, so no column stands empty; as soon as one row has a meta line
      the list keeps its three columns and a row without one leaves that cell empty, so every state still falls on the same x. */
   .rows:not(.empty):not(:has(.row-meta)) :is(.row-link, .row-item) { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "title state"; }
+  /* «Lo que se te pidió» keeps the thread's track at its rows' start, and its columns on the same x as every other list's: the
+     track and the text's indent come out of the title's column (the meta and the state columns are a third of the whole row, gap included), and the
+     state, a third of the row from its end, needs no room at the row's right edge. */
+  .rows--thread > .row > .row-link {
+    padding-inline-end: 0;
+    grid-template-columns: minmax(0, 1fr) repeat(2, calc((100% + var(--thread-indent) - 2 * var(--space-4)) / 3));
+  }
   /* A person's row on the owner's point of «Decisiones» is a list row too, in the same three equal columns: the name, then the
      dates with the comment and the earlier answers under them, then the answer (the row's state), each on the same x down the
      list. A row with no dates leaves that cell empty. */

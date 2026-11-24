@@ -5,6 +5,14 @@
 // Statuses that count as answered, as DONE in app.js.
 export const DONE = new Set(["submitted", "received", "replaced"]);
 
+// Where the thread of «Lo que se te pidió» breaks (spec 2026-11-24 «Hilo de jidoka»): at an item the factory waits for the
+// person on, «Por empezar» or «En curso». Anything else keeps it whole, an unknown status too: elsewhere it reads as
+// pending, but a stop is never drawn from bad data.
+const THREAD_STOPS = new Set(["pending", "in_progress"]);
+export function threadStop(status) {
+  return THREAD_STOPS.has(status);
+}
+
 const STATUSES = new Set(["pending", "in_progress", "submitted", "received", "replaced"]);
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const PROJECT_ROUTE = new RegExp(`^#/project/(${UUID})$`, "i");

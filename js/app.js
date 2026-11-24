@@ -8,7 +8,7 @@ import { translate, pickLanguage, formatDate } from "./i18n.js";
 import { classifyAuthError, retryAfterSeconds, isNetworkError } from "./auth-errors.js";
 import { loadProjects, loadProjectItems, loadOwnerProject, loadOwnerPiece, loadPiece, markPieceOpened, saveDraft, submitResponse, requestChange, isAuthExpired,
   loadDecisionProjects, loadMyDecisions, answerDecision, proposeDecision, markDecisionsOpened, loadOwnerDecisions } from "./api.js";
-import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref, ownerReceivedHref, ownerDecisionHref } from "./project.js";
+import { parseRoute, projectHref, projectRows, personRows, ownerPieceHref, ownerReceivedHref, ownerDecisionHref, threadStop } from "./project.js";
 import { seedFor, hasUnsentChanges, unsentReference, validRequestText, REQUEST_TEXT_MAX } from "./closure.js";
 import { createDraftSaver, trySaveAll, sendNotInDraft } from "./host.js";
 import { mountPiece } from "./piece-frame.js";
@@ -502,13 +502,36 @@ function pieceRow({ piece, assignment, lastRequestAt }) {
   if (replaced) meta.push(t("newerVersionExists"));
   const requested = formatDate(state.lang, lastRequestAt);
   if (requested) meta.push(t("requestedChangeOn", { date: requested }));
+  // The row is a stop of the thread where the factory waits for the person (threadStop): its link takes the stop tint.
+  const stop = threadStop(assignment.status);
   return h("li", { class: "row" },
-    h("a", { class: "row-link", href: `#/piece/${piece.id}` },
+    threadOf(stop),
+    h("a", { class: stop ? "row-link row--stop" : "row-link", href: `#/piece/${piece.id}` },
       h("span", { class: "row-main" },
         h("span", { class: "row-title" }, piece.title || t("untitled")),
         h("span", { class: "row-meta" }, meta.join(" · "))),
       h("span", { class: STATUS_CLASSES[status] },
         h("span", { class: "status-dot", "aria-hidden": "true" }), t(STATUS_KEYS[status]))));
+}
+
+// The thread of «Lo que se te pidió» (spec 2026-11-24 «Hilo de jidoka»), the only list that has one: a line down the list's
+// left, whole beside an item that was sent, cut with the 亻 disc where the factory waits for the person. It is drawing only:
+// hidden from assistive technology and outside the row's link, so the link's name stays its title, meta and state.
+function threadOf(stop) {
+  return h("span", { class: stop ? "thread thread--cut" : "thread", "aria-hidden": "true" }, stop ? threadDisc() : null);
+}
+// The disc in the cut: the logo's two strokes (brand/logo.svg) on a circle; its colours come from portal.css.
+function threadDisc() {
+  const node = (tag, attrs) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return el;
+  };
+  const svg = node("svg", { class: "thread-disc", viewBox: "0 0 24 24", focusable: "false" });
+  const mark = node("g", { class: "thread-disc-mark", transform: "translate(4.6 4) scale(0.667)", fill: "none", "stroke-width": "3.2", "stroke-linecap": "square" });
+  mark.append(node("path", { d: "M15 3 L6.5 12.5" }), node("path", { d: "M10.6 8.2 V21" }));
+  svg.append(node("circle", { cx: "12", cy: "12", r: "12" }), mark);
+  return svg;
 }
 
 const sortTime = (item) => Date.parse(item.assignment.updated_at || item.assignment.assigned_at) || 0;
@@ -835,7 +858,7 @@ async function showProject(projectId, viewId) {
     const sorted = [...items].sort((a, b) => isDone(a) - isDone(b) || sortTime(b) - sortTime(a));
     layout.body.append(h("section", { class: "section", "aria-labelledby": "asked-title" },
       h("h2", { id: "asked-title" }, t("askedOfYou")),
-      h("ul", { class: "rows" }, sorted.map(pieceRow))));
+      h("ul", { class: "rows rows--thread" }, sorted.map(pieceRow))));
   }
   if (points.length) {
     layout.body.append(decisionsSection({ projectId, viewId, points, proposals: decisions.proposals, live: layout.live }));
