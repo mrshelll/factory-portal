@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-24T20:50:46+00:00",
+  "generatedAt": "2026-11-24T22:25:14+00:00",
   "title": "Design System: ninben portal",
   "extensions": {
     "colorMeta": {
@@ -157,6 +157,108 @@
           "#FEFEFF"
         ]
       },
+      "pill-run": {
+        "role": "secondary",
+        "displayName": "Running Violet",
+        "canonical": "#2F25C9",
+        "dark": "#C4BEFF",
+        "source": "portal",
+        "tonalRamp": [
+          "#191736",
+          "#25215E",
+          "#2D278C",
+          "#3128BD",
+          "#635BD7",
+          "#A4A1DE",
+          "#D6D5EC",
+          "#F2F2F8"
+        ]
+      },
+      "pill-run-bg": {
+        "role": "secondary",
+        "displayName": "Running Wash",
+        "canonical": "#E4E1FF",
+        "dark": "#2C2866",
+        "source": "portal",
+        "tonalRamp": [
+          "#15103C",
+          "#1C136C",
+          "#1F10A2",
+          "#1C07DF",
+          "#513FF3",
+          "#9C93EC",
+          "#D3D0F1",
+          "#F1F0F9"
+        ]
+      },
+      "pill-todo": {
+        "role": "secondary",
+        "displayName": "Slate",
+        "canonical": "#4A5272",
+        "dark": "#C1C7DA",
+        "source": "portal",
+        "tonalRamp": [
+          "#22232B",
+          "#363A49",
+          "#4A5069",
+          "#5C658A",
+          "#868EAC",
+          "#B6BAC9",
+          "#DDDEE4",
+          "#F4F4F6"
+        ]
+      },
+      "pill-todo-bg": {
+        "role": "secondary",
+        "displayName": "Slate Wash",
+        "canonical": "#EEF0F6",
+        "dark": "#232A40",
+        "source": "portal",
+        "tonalRamp": [
+          "#1F232D",
+          "#32394D",
+          "#434E70",
+          "#526294",
+          "#7D8BB5",
+          "#B2B8CD",
+          "#DBDEE6",
+          "#F3F4F6"
+        ]
+      },
+      "pill-sent": {
+        "role": "secondary",
+        "displayName": "Sent Green",
+        "canonical": "#17663B",
+        "dark": "#8BD39A",
+        "source": "portal",
+        "tonalRamp": [
+          "#183425",
+          "#245C3D",
+          "#2B8855",
+          "#2FB76D",
+          "#60D294",
+          "#A3DBBD",
+          "#D6EBDF",
+          "#F2F8F5"
+        ]
+      },
+      "pill-sent-bg": {
+        "role": "secondary",
+        "displayName": "Green Wash",
+        "canonical": "#E6F4EC",
+        "dark": "#133022",
+        "source": "portal",
+        "tonalRamp": [
+          "#1E2F25",
+          "#2E513D",
+          "#3D7655",
+          "#499D6D",
+          "#76BC94",
+          "#AED1BD",
+          "#DAE7DF",
+          "#F3F7F5"
+        ]
+      },
       "bg": {
         "role": "neutral",
         "displayName": "Cotton",
@@ -295,13 +397,17 @@
       }
     },
     "typographyMeta": {
-      "title": {
-        "displayName": "Title",
-        "purpose": "The page's h1; 16 px with normal tracking on a phone's point page."
+      "display": {
+        "displayName": "Display",
+        "purpose": "The page's h1 only: 32 px from 672, 24 px below, 700."
       },
       "section": {
         "displayName": "Section",
         "purpose": "A section's h2 under the page title."
+      },
+      "subheading": {
+        "displayName": "Subheading",
+        "purpose": "A heading inside a section, such as «¿Falta algo?»."
       },
       "item-title": {
         "displayName": "Item title",
@@ -309,15 +415,15 @@
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Running text at the 40rem measure; inputs."
+        "purpose": "Running text at the 40rem measure; inputs; choice words."
       },
       "small": {
         "displayName": "Small",
-        "purpose": "Meta lines, status words, hints, tags, field errors."
+        "purpose": "Meta lines, pill words, hints, tags, «Entraste como …», field errors."
       },
       "brand": {
         "displayName": "Brand",
-        "purpose": "Only the lowercase «ninben» beside the 亻 stroke."
+        "purpose": "Only the lowercase «ninben» on the shell, beside a 22 px 亻."
       },
       "code": {
         "displayName": "Code",
@@ -363,18 +469,30 @@
       }
     ],
     "constraints": {
-      "source": "Brand tokens, fonts, logo and shared components are a generated copy (scripts/sync-brand.mjs) of software-factory/design-system/assets/brand/, which is authoritative. The type scale, spacing scale, 4px radius, 44/48px targets and frame rules come from the factory's visual manual and are measured by its verifier and the portal's browser tests.",
+      "source": "Brand tokens, fonts, logo and shared components are a generated copy (scripts/sync-brand.mjs) of software-factory/design-system/assets/brand/, which is authoritative. The portal's own tokens live only in css/portal.css.",
       "portalOwnTokens": [
+        "reading-column",
+        "text-display",
+        "brand-shell-text",
+        "brand-shell-mark",
+        "pill-run",
+        "pill-run-bg",
+        "pill-todo",
+        "pill-todo-bg",
+        "pill-sent",
+        "pill-sent-bg",
         "thread",
         "stop",
         "thread-track",
         "thread-indent"
       ],
+      "accessibilityFloor": "No sideways scroll and nothing cut from 320 to 1440 px; 48 px controls and 44 px link targets; visible focus; axe clean in light and dark; AA text in both schemes; legible forced colours. Measured by the portal's browser tests.",
       "targets": {
         "link": "44px",
         "control": "48px"
       },
-      "framePage": "1392px",
+      "readingColumn": "60rem",
+      "stateColumn": "9rem",
       "measureText": "40rem",
       "measureForm": "440px"
     }
@@ -384,16 +502,16 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The view's one main action: send the code, verify, «Actualizar».",
-      "html": "<button class=\"ds-btn-primary\">Enviar código</button>",
+      "description": "Completes a task: send the code, verify, «Actualizar», «Enviar respuesta» on each point of «Decisiones».",
+      "html": "<button class=\"ds-btn-primary\">Enviar respuesta</button>",
       "css": ".ds-btn-primary{font-family: var(--font-sans);display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:8px 24px;border:1px solid var(--signal);border-radius:var(--radius);background:var(--signal);color:var(--on-signal);font-size:16px;font-weight:600;line-height:1.2;cursor:pointer}.ds-btn-primary:focus-visible{outline:2px solid var(--signal);outline-offset:2px}.ds-btn-primary:disabled{background:var(--line);border-color:var(--line);color:var(--muted);cursor:not-allowed}"
     },
     {
       "name": "Secondary Button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Per-item actions: «Enviar respuesta» on a point, «Cambiar respuesta», «Enviar propuesta».",
-      "html": "<button class=\"ds-btn-secondary\">Enviar respuesta</button>",
+      "description": "Reopens or adds: «Cambiar respuesta», «Enviar propuesta».",
+      "html": "<button class=\"ds-btn-secondary\">Cambiar respuesta</button>",
       "css": ".ds-btn-secondary{font-family: var(--font-sans);display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:8px 24px;border:1px solid var(--muted);border-radius:var(--radius);background:transparent;color:var(--ink);font-size:16px;font-weight:600;line-height:1.2;cursor:pointer}.ds-btn-secondary:focus-visible{outline:2px solid var(--signal);outline-offset:2px}"
     },
     {
@@ -408,17 +526,17 @@
       "name": "Masthead",
       "kind": "nav",
       "refersTo": "masthead",
-      "description": "The indigo shell: logo home on the left, a quiet «Salir» on the right.",
-      "html": "<header class=\"ds-masthead\"><a class=\"ds-brand\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"2.8\" stroke-linecap=\"square\" aria-hidden=\"true\"><path d=\"M15 3 L6.5 12.5\"/><path d=\"M10.6 8.2 V21\"/></svg>ninben</a><button class=\"ds-salir\">Salir</button></header>",
-      "css": ".ds-masthead{font-family: var(--font-sans);display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;padding:8px 24px;background:var(--shell);color:var(--on-shell)}.ds-brand{display:inline-flex;align-items:center;gap:8px;min-height:48px;color:inherit;text-decoration:none;font-size:16px;font-weight:600;line-height:1;letter-spacing:-0.02em}.ds-brand svg{stroke:var(--signal-on-shell)}.ds-brand:focus-visible,.ds-salir:focus-visible{outline:2px solid var(--signal-on-shell);outline-offset:2px}.ds-salir{min-height:48px;padding:8px 24px;border:1px solid color-mix(in srgb,var(--on-shell-muted) 50%,var(--shell));border-radius:var(--radius);background:transparent;color:var(--on-shell);font:inherit;font-weight:600;cursor:pointer}.ds-salir:hover{border-color:var(--on-shell)}"
+      "description": "The indigo shell across the window: the 19 px wordmark home on the left, «Entraste como …» and a quiet «Salir» on the right.",
+      "html": "<header class=\"ds-masthead\"><a class=\"ds-brand\" href=\"#\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"2.8\" stroke-linecap=\"square\" aria-hidden=\"true\"><path d=\"M15 3 L6.5 12.5\"/><path d=\"M10.6 8.2 V21\"/></svg>ninben</a><span class=\"ds-who\">Entraste como ana@example.com</span><button class=\"ds-salir\">Salir</button></header>",
+      "css": ".ds-masthead{font-family: var(--font-sans);display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;padding:8px 24px;background:var(--shell);color:var(--on-shell)}.ds-brand{display:inline-flex;align-items:center;gap:8px;min-height:48px;color:inherit;text-decoration:none;font-size:19px;font-weight:600;line-height:1;letter-spacing:-0.02em}.ds-brand svg{stroke:var(--signal-on-shell)}.ds-brand:focus-visible,.ds-salir:focus-visible{outline:2px solid var(--signal-on-shell);outline-offset:2px}.ds-salir{min-height:48px;padding:8px 24px;border:1px solid color-mix(in srgb,var(--on-shell-muted) 50%,var(--shell));border-radius:var(--radius);background:transparent;color:var(--on-shell);font:inherit;font-weight:600;cursor:pointer}.ds-salir:hover{border-color:var(--on-shell)}.ds-who{margin-inline-start:auto;color:var(--on-shell-muted);font-size:14px}"
     },
     {
-      "name": "Status",
+      "name": "State Pill",
       "kind": "chip",
-      "refersTo": "status",
-      "description": "A state in words with its 10 px dot; never a pill.",
+      "refersTo": "status-pill-run",
+      "description": "A state in words inside a soft pill with its 10 px dot: violet in progress, indigo-grey not started, green sent and received.",
       "html": "<span class=\"ds-status\"><span class=\"ds-dot\"></span>Por empezar</span> <span class=\"ds-status ds-status--progress\"><span class=\"ds-dot\"></span>En curso</span> <span class=\"ds-status ds-status--sent\"><span class=\"ds-dot\"></span>Enviada</span> <span class=\"ds-status ds-status--done\"><span class=\"ds-dot\"></span>Recibida</span>",
-      "css": ".ds-status{font-family: var(--font-sans);display:inline-flex;align-items:center;gap:8px;margin-right:16px;font-size:14px;color:var(--ink);white-space:nowrap}.ds-dot{width:10px;height:10px;border:2px solid var(--muted);border-radius:999px;box-sizing:border-box}.ds-status--progress .ds-dot{border-color:var(--ink)}.ds-status--sent .ds-dot{border-color:var(--ok)}.ds-status--done .ds-dot{border-color:var(--ok);background:var(--ok)}"
+      "css": ".ds-status{font-family: var(--font-sans);display:inline-flex;align-items:center;gap:8px;margin-right:8px;padding:4px 12px;border-radius:999px;background:var(--pill-todo-bg,#EEF0F6);color:var(--pill-todo,#4A5272);font-size:14px;font-weight:600;line-height:1.2;white-space:nowrap}.ds-dot{width:10px;height:10px;border:2px solid var(--muted);border-radius:999px;box-sizing:border-box}.ds-status--progress{background:var(--pill-run-bg,#E4E1FF);color:var(--pill-run,#2F25C9)}.ds-status--progress .ds-dot{border-color:var(--ink)}.ds-status--sent,.ds-status--done{background:var(--pill-sent-bg,#E6F4EC);color:var(--pill-sent,#17663B)}.ds-status--sent .ds-dot{border-color:var(--ok)}.ds-status--done .ds-dot{border-color:var(--ok);background:var(--ok)}"
     },
     {
       "name": "«Nuevo» Tag",
@@ -440,63 +558,67 @@
       "name": "Choice",
       "kind": "input",
       "refersTo": "choice",
-      "description": "An answer of «Decisiones»: a 48 px row, drawn ring, violet when chosen.",
+      "description": "An answer of «Decisiones»: a 48 px radio row, drawn ring, violet when chosen, regular words.",
       "html": "<label class=\"ds-choice\"><input type=\"radio\" name=\"ds-a\" checked><span class=\"ds-mark\"></span>Va</label><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-a\"><span class=\"ds-mark\"></span>Lo cambiaría</label>",
-      "css": ".ds-choice{font-family: var(--font-sans);position:relative;display:inline-flex;align-items:center;gap:8px;min-height:48px;margin-right:24px;color:var(--ink);cursor:pointer}.ds-choice input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}.ds-mark{width:20px;height:20px;box-sizing:border-box;border:2px solid var(--muted);border-radius:999px;background:var(--sheet)}.ds-choice input:checked+.ds-mark{border-color:var(--signal);background:var(--signal);box-shadow:inset 0 0 0 4px var(--sheet)}.ds-choice:hover .ds-mark{border-color:var(--signal)}.ds-choice:has(input:focus-visible){outline:2px solid var(--signal);outline-offset:2px}"
+      "css": ".ds-choice{font-family: var(--font-sans);position:relative;display:inline-flex;align-items:center;gap:8px;min-height:48px;margin-right:24px;font-weight:400;color:var(--ink);cursor:pointer}.ds-choice input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}.ds-mark{width:20px;height:20px;box-sizing:border-box;border:2px solid var(--muted);border-radius:999px;background:var(--sheet)}.ds-choice input:checked+.ds-mark{border-color:var(--signal);background:var(--signal);box-shadow:inset 0 0 0 4px var(--sheet)}.ds-choice:hover .ds-mark{border-color:var(--signal)}.ds-choice:has(input:focus-visible){outline:2px solid var(--signal);outline-offset:2px}"
+    },
+    {
+      "name": "Decisiones Panel",
+      "kind": "card",
+      "refersTo": "decisions-panel",
+      "description": "One hairline panel holding the points: 1 px line, 4 px radius, sheet, no shadow, a rule between points, each with its own violet «Enviar respuesta».",
+      "html": "<div class=\"ds-panel\"><div class=\"ds-point\"><p class=\"ds-point-title\">Un viaje cuenta cuando las dos personas lo confirman <span class=\"ds-new\">Nuevo</span></p><p>El viaje se registra solo cuando quien conduce y quien viaja dicen que ocurrió.</p><button class=\"ds-send\">Enviar respuesta</button></div><div class=\"ds-point\"><p class=\"ds-point-title\">Los pagos se cierran cada lunes</p><p class=\"ds-meta\">Respondiste «Va» el 12 oct</p></div></div>",
+      "css": ".ds-panel{font-family: var(--font-sans);border:1px solid var(--line);border-radius:var(--radius);background:var(--sheet);color:var(--ink)}.ds-panel p{margin:0}.ds-point{display:grid;gap:8px;padding:24px;border-bottom:1px solid var(--line)}.ds-point:last-child{border-bottom:0}.ds-point-title{font-weight:600;line-height:1.4}.ds-new{display:inline-block;margin-left:12px;padding:4px 8px;border-radius:var(--radius);background:var(--soft);color:var(--signal);font-size:14px;font-weight:600}.ds-meta{color:var(--muted);font-size:14px}.ds-send{justify-self:start;min-height:48px;padding:8px 24px;border:1px solid var(--signal);border-radius:var(--radius);background:var(--signal);color:var(--on-signal);font:inherit;font-weight:600;cursor:pointer}.ds-send:focus-visible{outline:2px solid var(--signal);outline-offset:2px}"
     },
     {
       "name": "Thread List",
       "kind": "custom",
       "refersTo": "list-row-stop",
-      "description": "Signature: «Lo que se te pidió» with the thread cut by the 亻 disc at a waiting row, whole at a sent one.",
+      "description": "Signature: «Lo que se te pidió» with the thread cut by the 亻 disc at a waiting row (stop wash, violet title), whole at a sent one (ink title).",
       "html": "<ul class=\"ds-rows\"><li class=\"ds-row\"><span class=\"ds-thread ds-thread--cut\" aria-hidden=\"true\"><svg class=\"ds-disc\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"12\"/><g transform=\"translate(4.6 4) scale(0.667)\" fill=\"none\" stroke-width=\"3.2\" stroke-linecap=\"square\"><path d=\"M15 3 L6.5 12.5\"/><path d=\"M10.6 8.2 V21\"/></g></svg></span><a class=\"ds-row-link ds-stop\" href=\"#\"><span class=\"ds-row-title\">Preguntas sobre el proyecto</span><span class=\"ds-row-meta\">Preguntas · Compartida el 16 oct</span></a></li><li class=\"ds-row\"><span class=\"ds-thread\" aria-hidden=\"true\"></span><a class=\"ds-row-link\" href=\"#\"><span class=\"ds-row-title\">Demo v2</span><span class=\"ds-row-meta\">Revisión de la demo · Enviada el 11 oct</span></a></li></ul>",
-      "css": ".ds-rows{font-family: var(--font-sans);list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}.ds-row{display:grid;grid-template-columns:36px minmax(0,1fr);border-bottom:1px solid var(--line)}.ds-row-link{grid-row:1;grid-column:1/-1;display:grid;gap:4px;min-height:56px;padding:16px 12px 16px 48px;color:inherit;text-decoration:none}.ds-stop{background:var(--stop,#F3F2FF);padding-block:24px}.ds-row-title{color:var(--signal);font-weight:600}.ds-row-link:hover .ds-row-title{text-decoration:underline;text-underline-offset:3px}.ds-row-meta{color:var(--muted);font-size:14px}.ds-thread{grid-area:1/1;position:relative;z-index:1;pointer-events:none}.ds-thread::before,.ds-thread--cut::after{content:'';position:absolute;border:0 solid var(--thread,#2E3B6E)}.ds-thread::before{top:0;bottom:-1px;left:calc(50% - 1px);border-left-width:2px}.ds-thread--cut::before{top:0;bottom:calc(50% + 16px);left:auto;right:calc(50% - 1px);width:8px;border-width:0 2px 2px 0;border-bottom-right-radius:8px}.ds-thread--cut::after{top:calc(50% + 16px);bottom:-1px;left:calc(50% - 1px);width:8px;border-width:2px 0 0 2px;border-top-left-radius:8px}.ds-disc{position:absolute;top:50%;left:50%;width:20px;height:20px;translate:-50% -50%}.ds-disc circle{fill:var(--signal)}.ds-disc g{stroke:var(--on-signal)}"
+      "css": ".ds-rows{font-family: var(--font-sans);list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}.ds-row{display:grid;grid-template-columns:36px minmax(0,1fr);border-bottom:1px solid var(--line)}.ds-row-link{grid-row:1;grid-column:1/-1;display:grid;gap:4px;min-height:56px;padding:16px 12px 16px 48px;color:inherit;text-decoration:none}.ds-stop{background:var(--stop,#F3F2FF);padding-block:24px}.ds-row-title{color:var(--ink);font-weight:600}.ds-stop .ds-row-title{color:var(--signal)}.ds-row-link:hover .ds-row-title{text-decoration:underline;text-underline-offset:3px}.ds-row-meta{color:var(--muted);font-size:14px}.ds-thread{grid-area:1/1;position:relative;z-index:1;pointer-events:none}.ds-thread::before,.ds-thread--cut::after{content:'';position:absolute;border:0 solid var(--thread,#2E3B6E)}.ds-thread::before{top:0;bottom:-1px;left:calc(50% - 1px);border-left-width:2px}.ds-thread--cut::before{top:0;bottom:calc(50% + 16px);left:auto;right:calc(50% - 1px);width:8px;border-width:0 2px 2px 0;border-bottom-right-radius:8px}.ds-thread--cut::after{top:calc(50% + 16px);bottom:-1px;left:calc(50% - 1px);width:8px;border-width:2px 0 0 2px;border-top-left-radius:8px}.ds-disc{position:absolute;top:50%;left:50%;width:20px;height:20px;translate:-50% -50%}.ds-disc circle{fill:var(--signal)}.ds-disc g{stroke:var(--on-signal)}"
     }
   ],
   "narrative": {
     "northStar": "The Loom That Stops",
-    "overview": "ninben is named for 亻, the stroke «person» that turned «to move» into jidoka: the loom stops by itself when a thread breaks, and a person decides. The portal is that stop. An aizome-indigo shell frames a white, undyed-cotton work area; inside it, one thread runs down the list of what was asked of the signed-in person and breaks exactly where the factory waits for them, with the violet 亻 disc sitting in the gap. Everything else is calm and exact: hairline rules, small radii, one family, no texture, no fabric imagery, no motion beyond standard hover and focus.\n\nDensity is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, text kept to a reading measure. Violet is reserved for what can be touched (actions, links, row titles) and for the person's stop; it never decorates. State is said in words and repeated by a small dot, never carried by colour alone.\n\n**Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the text sizes, the spacing scale, the frame and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. Only the thread's two colours (`thread`, `stop`) and the portal's own layout live in `css/portal.css`.\n\n**System constraints, not choices.** The type scale (14/16/20/24), the 4/8-based spacing scale, the 4 px radius, the 44 px link and 48 px control targets, the 672 px breakpoint and the frame rules (page margin 16/24 px at every width, frame capped at 1392 px + margins, nothing cut from 320 to 1440 px, title band ending at 160 px or less on a phone) come from the factory's visual manual and are measured by its verifier and the portal's browser tests. Do not tune them per screen.",
+    "overview": "ninben is named for 亻, the stroke «person» that turned «to move» into jidoka: the loom stops by itself when a thread breaks, and a person decides. The portal is that stop. An aizome-indigo shell runs across the window; under it, a white undyed-cotton page holds one centred reading column. Inside it, one thread runs down the list of what was asked of the signed-in person and breaks exactly where the factory waits for them, with the violet 亻 disc sitting in the gap. Everything else is calm and exact: hairline rules and one hairline panel, small radii, soft state pills, one family, no texture, no fabric imagery, no motion beyond standard hover and focus.\n\nDensity is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, a bold page title that leads, text kept to a reading measure. Violet is reserved for what can be touched (actions, links) and for what waits for the person (the stop rows, «N por responder», the «En curso» pill); it never decorates. Every state is said in words inside its pill; the tint and the dot only repeat it.\n\n**Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the 14/16/20/24 text steps, the spacing scale, the page margin and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. The portal's own tokens live in `css/portal.css`: the reading column, the page title's display size, the shell wordmark's sizes, the three state pills and the thread's two colours.\n\n**Accessibility is the floor.** No sideways scroll and nothing cut from 320 to 1440 px, 48 px controls and 44 px link targets, a visible focus ring on everything that can be touched, axe clean in light and dark, AA text in both schemes and a legible forced-colours rendering. The portal's browser tests measure these; a change that breaks one is a defect, not a design choice.",
     "keyCharacteristics": [
-      "Indigo shell (full-bleed top bar) over a white cotton work area; light and dark schemes from the same roles.",
+      "Indigo shell across the window over a white cotton page; content in a centred reading column of at most 60rem; light and dark from the same roles.",
       "One accent, violet, meaning «you can touch this» or «this waits for you».",
       "The thread: the portal's only signature, drawn on one list only.",
-      "Flat: hairline rules and tinted rows, no shadows for depth.",
-      "One family (Figtree), JetBrains Mono only for figures typed by the person (the sign-in code)."
+      "States as soft pills with their words and dot: violet in progress, indigo-grey not started, green sent.",
+      "Flat: hairline rules, one hairline panel and tinted rows; no shadows for depth.",
+      "One family (Figtree, 400/600/700); JetBrains Mono only for the sign-in code."
     ],
     "rules": [
       {
         "name": "The One Meaning Rule",
-        "body": "Violet means «you can touch this» or «this waits for you». A notice is never violet; a status is never violet; nothing decorative is violet.",
+        "body": "Violet means «you can touch this» or «this waits for you». A notice is never violet; nothing decorative is violet; the only violet state is «En curso».",
         "section": "colors"
       },
       {
         "name": "The Single Source Rule",
-        "body": "Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced. The portal sets exactly two colours of its own: the thread and the stop wash.",
+        "body": "Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced. The portal sets its own tokens only in `css/portal.css`: the reading column, the display size, the shell wordmark, the pills and the thread.",
         "section": "colors"
       },
       {
-        "name": "The Words First Rule",
-        "body": "A state is always said in words; the dot only repeats it. Hollow muted ring «Por empezar», ink half-fill «La abrió», ink ring «En curso», green ring «Enviada», green fill «Recibida», struck grey ring «Reemplazada». The portal never uses the base's ink-filled dot: inside the pieces it means «Con observaciones».",
+        "name": "The Words In The Pill Rule",
+        "body": "A state is always said in words inside its pill; the tint and the dot repeat it. Hollow grey ring «Por empezar», ink half-fill «La abrió», ink ring «En curso», green ring «Enviada», green fill «Recibida», struck grey ring «Reemplazada». The portal never uses the base's ink-filled dot: inside the pieces it means «Con observaciones».",
         "section": "colors"
-      },
-      {
-        "name": "The Four Steps Rule",
-        "body": "Text takes 14, 16, 20 or 24 px and nothing else; weights are 400 and 600.",
-        "section": "typography"
       },
       {
         "name": "The Brand Is Not A Heading Rule",
-        "body": "No heading takes the brand's combination (16 px, 600, tight tracking), so the logo never reads as a title.",
+        "body": "The wordmark's combination (19 px, 600, tight tracking, on the shell) is never used by a heading, and the page title is always bolder and larger than it.",
         "section": "typography"
       },
       {
-        "name": "The One Edge Rule",
-        "body": "Brand, way back, title, lists, forms and an embedded piece's content all start on the same left edge at every width.",
+        "name": "The Reading Column Rule",
+        "body": "Under the shell, content never runs wider than 60rem, centred; only an embedded piece takes the full frame.",
         "section": "layout"
       },
       {
-        "name": "The Measured Frame Rule",
-        "body": "Margins, the 672 tier, the 160 px title band on a phone and nothing cut at 320 px are verified by tests; a change to them is a deliberate test change, never a silent one.",
+        "name": "The Same Column Rule",
+        "body": "From 1056 px every list's state lives in the 9rem column, so states line up down the screen.",
         "section": "layout"
       },
       {
@@ -506,20 +628,21 @@
       }
     ],
     "dos": [
-      "**Do** take every brand token from the factory's `design-system/assets/brand/` source and sync it; treat `brand/` as generated.",
-      "**Do** keep violet for actions, links and the person's stop, and say every state in words with its dot.",
-      "**Do** keep text on the 14/16/20/24 scale, spacing on the 4/8 scale, controls at 48 px and links at 44 px.",
-      "**Do** start every block on the frame's left edge and keep running text at the 40rem measure.",
+      "**Do** take every brand token from the factory's `design-system/assets/brand/` source and sync it; treat `brand/` as generated, and keep the portal's own tokens in `css/portal.css`.",
+      "**Do** keep violet for actions, links and what waits for the person, and say every state in words inside its pill.",
+      "**Do** keep content in the centred 60rem reading column under the full-width shell, running text at 40rem and forms at 440 px.",
+      "**Do** put every list's state in the 9rem column from 1056 px (from 672 px on the owner's entries).",
       "**Do** draw the thread only on «Lo que se te pidió», cut with the 亻 disc at «Por empezar» and «En curso», whole at «Enviada» and «Recibida».",
-      "**Do** draw icons as SVG strokes and keep AA contrast in both schemes, including forced colours."
+      "**Do** hold the accessibility floor: no sideways scroll or cut content from 320 to 1440 px, 48 px controls, 44 px links, visible focus, axe clean and AA in light, dark and forced colours.",
+      "**Do** draw icons as SVG strokes."
     ],
     "donts": [
       "**Don't** edit `brand/ninben.css` or `brand/ninben-components.css` in the portal, or set a brand token in `css/portal.css`.",
       "**Don't** use shadows for elevation, coloured side stripes on notices, or texture or fabric imagery.",
       "**Don't** use the ink-filled status dot in the portal, or carry a state by colour alone.",
+      "**Don't** make a state other than «En curso» violet, or a notice violet.",
       "**Don't** draw the thread on lists about other people (the owner's progress list) or animate it.",
-      "**Don't** add a second type family or a display face; JetBrains Mono is only for typed figures.",
-      "**Don't** put «Decisiones» in a panel: its parts span their columns and its forms keep the form measure at the part's edge (manual MAR-09, MAR-12)."
+      "**Don't** add a second type family; JetBrains Mono is only for typed figures."
     ]
   }
 }
