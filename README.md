@@ -597,7 +597,11 @@ next to a copy of `css/` and `brand/`, so it looks exactly as in the app. Every 
 (`screenAxeChecks`, with the axe-core of the software factory cache) at 320, 768 and 1440 px, in light and dark, and
 each run is one check that names the violated rules; with `--questions` and `--demo`, all twelve must have been
 captured. (They used to go through the factory's `verifica-pantalla.mjs`, the visual manual's checks and axe; the
-factory retired that verifier with its manual, so only axe remains.) To look at one by hand, serve `<out>/screens/`
+factory retired that verifier with its manual, so only axe remains.) Every snapshot also goes through `screenFitChecks`
+at 320, 672, 1056 and 1440 px, light and dark, two checks each: no sideways overflow (the document no wider than the
+window, no element ending past its right edge, no box in `<main>` scrolling sideways on its own) and nothing cut (no
+heading, label, legend, button, alert or status cut with an ellipsis, a hidden or clipped overflow, or a line clamp);
+ported from the retired measure's «sin-desborde» and «sin-truncar». To look at one by hand, serve `<out>/screens/`
 (for example `node -e 'import("./tests/browser/static-server.mjs").then(async (m) => { const s = await m.serveDir(process.argv[1]); console.log(s.address().port); })' <out>/screens`)
 and open `<screen>.html` in a browser.
 
@@ -612,8 +616,9 @@ rules are gone: the frame geometry of the twelve screens and the `@media` grid c
 its page margins, shared left edges (brand, way back, title, the piece's blocks, the empty home's parts), the lists'
 equal columns, the «Decisiones» and owner's answers' three columns, the phone band of 160 px (and the 16 px title it
 forced on the owner's point), the project page without a way back on a phone and the save line's place in the band.
-What stays is accessibility and function: no sideways scroll from 320 to 1440 px, 44 px targets, visible focus, axe
-(contrast included) light and dark, nothing cut, and every behaviour, brand and thread check.
+What stays is accessibility and function: no sideways scroll and nothing cut from 320 to 1440 px (`screenFitChecks`
+on every snapshot, plus the screens' own scroll checks), 44 px targets, visible focus, axe (contrast included) light and
+dark, and every behaviour, brand and thread check.
 
 ## Files
 

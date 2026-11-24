@@ -22,7 +22,8 @@
 // «Decisiones» screens (decisionsScreens: a person's section, its error states, a project with the section only, the owner's
 // summary and one point as the owner reads it) are saved to <out>/screens/<screen>.html as the rendered DOM without scripts, next to a copy of css/ and
 // brand/, so they look exactly as in the app. Each one goes through axe (screenAxeChecks) at 320, 768 and 1440 px, light
-// and dark, and every run is one check (the factory retired the visual manual's verifier these used to go through).
+// and dark, and every run is one check (the factory retired the visual manual's verifier these used to go through); and
+// through screenFitChecks at 320, 672, 1056 and 1440 px, light and dark: no sideways overflow and no text cut.
 // With --factory, the piece screen's iframe against the factory's piece-host.mjs (pieceWidthChecks): as wide as
 // widthInPortal says, at 320, 672, 1056, 1440 and 1600, light and dark.
 //
@@ -5296,6 +5297,55 @@ async function screenAxeChecks(browser) {
     }
   } finally { server.close(); }
 }
+// Every screen snapshot taken in this run fits the window and cuts no text, at 320, 672, 1056 and 1440 px, light and
+// dark (ported from the retired frame measure's «sin-desborde» and «sin-truncar», which the accessibility floor keeps):
+// - no overflow: the document is no wider than the window, no visible leaf element (outside a box that scrolls on its own,
+//   or fixed) ends past the window's right edge, and no box in <main> scrolls sideways on its own;
+// - nothing cut: no heading, label, legend, button, alert or status (nor anything inside one) is cut with an ellipsis,
+//   a hidden or clipped overflow, or a line clamp.
+const FIT_WIDTHS = [320, 672, 1056, 1440];
+const screenFit = (page) => page.evaluate(() => {
+  const vw = document.documentElement.clientWidth;
+  const visible = (el) => { const cs = getComputedStyle(el); if (cs.display === "none" || cs.visibility === "hidden") return false;
+    const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2; };
+  const text = (el) => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60) || el.tagName.toLowerCase();
+  const scrollsOwn = (el) => { for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+    if (["auto", "scroll"].includes(getComputedStyle(a).overflowX)) return true; } return false; };
+  const outside = [...document.body.querySelectorAll("*")].filter((el) => visible(el) && !el.children.length && !scrollsOwn(el) &&
+    getComputedStyle(el).position !== "fixed" && el.getBoundingClientRect().right > vw + 1)
+    .map((el) => `«${text(el)}» to x=${Math.round(el.getBoundingClientRect().right)}`);
+  const main = document.querySelector("main") || document.body;
+  const scrolling = [...main.querySelectorAll("*")].filter((el) => visible(el) && ["auto", "scroll"].includes(getComputedStyle(el).overflowX) &&
+    el.scrollWidth > el.clientWidth + 1).map((el) => `${el.tagName.toLowerCase()} «${text(el)}»`);
+  const cut = [];
+  for (const el of main.querySelectorAll("h1,h2,h3,h4,h5,h6,label,legend,button,[role=alert],[role=status]")) {
+    for (const x of [el, ...el.querySelectorAll("*")]) {
+      if (!visible(x)) continue;
+      const cs = getComputedStyle(x);
+      const clipped = (cs.textOverflow === "ellipsis" || ["hidden", "clip"].includes(cs.overflowX)) && x.scrollWidth > x.clientWidth + 1;
+      const clamped = cs.webkitLineClamp && cs.webkitLineClamp !== "none" && x.scrollHeight > x.clientHeight + 1;
+      if (clipped || clamped) { cut.push(`«${text(x)}»`); break; }
+    }
+  }
+  return { doc: document.documentElement.scrollWidth, vw, outside: outside.slice(0, 5), scrolling: scrolling.slice(0, 5), cut: cut.slice(0, 5) };
+});
+async function screenFitChecks(browser) {
+  const server = await serveDir(screensDir);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const [name, pattern] of screens) for (const width of FIT_WIDTHS) for (const scheme of ["light", "dark"]) {
+      const page = await browser.newPage({ viewport: { width, height: width < 672 ? 640 : 900 }, colorScheme: scheme });
+      await page.goto(`${origin}/${name}.html`, { waitUntil: "networkidle" });
+      await page.evaluate(() => document.fonts.ready);
+      const fit = await screenFit(page);
+      await page.close();
+      const tag = `fit: ${name} (${pattern}) ${width}px ${scheme}`;
+      check(`${tag}: no sideways overflow (the document, no element past the window, no box scrolling sideways)`,
+        fit.doc <= fit.vw + 1 && fit.outside.length === 0 && fit.scrolling.length === 0, JSON.stringify(fit));
+      check(`${tag}: no heading, label, button, alert or status cut (ellipsis, clipped overflow or line clamp)`, fit.cut.length === 0, fit.cut.join(", "));
+    }
+  } finally { server.close(); }
+}
 // With --factory, the piece screen's iframe (the person's, and the owner's read-only one) against the factory's
 // design-system/assets/piece-host.mjs: as wide as widthInPortal says at each width, over the frame's box with its margins,
 // so the factory measures its pieces at the width the person sees them.
@@ -5365,6 +5415,7 @@ try {
   if (args.questions) await closureChecks(browser, base, read(args.questions));
   if (args.questions && args.factory) await pieceWidthChecks(browser, base, read(args.questions), args.factory);
   await screenAxeChecks(browser);
+  await screenFitChecks(browser);
 } finally {
   await browser.close();
   server.close();
