@@ -297,7 +297,7 @@ the work area is white (`--bg` and `--sheet` both `#FFFFFF`), text and lines are
 bar in `--shell` across the window's whole width (its content on the frame's edge), the brand's words in
 `--on-shell`, the 亻 stroke in `--signal-on-shell` (the logo file's own stroke is `--signal`; `css/portal.css`
 overrides it on the shell), «Entraste como …» in `--on-shell-muted` (beside «Salir» from 672 px, on its own line under
-the brand below), «Salir» a quiet outlined button in `--on-shell` with an `--on-shell-muted` border, and the focus ring
+the brand below), «Salir» a quiet outlined button in `--on-shell` with a border of `--on-shell-muted` mixed to 50 %, and the focus ring
 on the shell in `--signal-on-shell`. Each token has a light and a dark value; the dark shell is an indigo
 lighter than the dark ground, so the bar still reads as a band (the factory's contrast eval holds it at
 ≥ 1.2:1). The single
@@ -326,8 +326,7 @@ the piece view and the rest of the state dots. The portal never uses the base's 
 the pieces that dot means «Con observaciones» or «Pidió un cambio», so «En curso» is the portal's ink ring
 (`.status--in-progress`).
 
-The composition follows the approved sketch (`.impeccable/mocks/decision/grounded-hilo.html` and
-`grounded-hilo-movil.html`); the factory's retired visual manual no longer binds the portal (spec 2026-11-24,
+The composition follows the approved sketch (working material kept locally, not in the repo); the factory's retired visual manual no longer binds the portal (spec 2026-11-24,
 «Amendment»). The shell runs across the window; under it, `data-rol="marco"` is the **reading column**, centred and
 at most `--reading-column` (60rem) wide, holding the title band, the notices and the body. The page title takes the
 portal's display size, `--text-display` (24 px on a phone, 32 px from 672 px), in bold. A list row reads at a glance:

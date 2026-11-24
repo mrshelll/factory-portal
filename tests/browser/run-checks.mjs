@@ -4285,6 +4285,8 @@ async function decisionsChecks(browser, base, html) {
     const [yes, change, no] = [await look("yes"), await look("change"), await look("no")];
     check("decisions-forced-colors: under forced colours the chosen answer's mark is painted unlike the others', which look alike", chosen && yes && change && no &&
       yes !== change && change === no, JSON.stringify({ chosen, yes, change, no }));
+    const logoStroke = await page.locator(".masthead .brand svg").evaluate((el) => getComputedStyle(el).stroke).catch(() => null);
+    check("decisions-forced-colors: under forced colours the masthead logo's stroke is not the light violet (it holds on Canvas)", logoStroke && logoStroke !== "rgb(168, 162, 255)", String(logoStroke));
     await context.close();
   }
 
@@ -4749,7 +4751,7 @@ async function decisionsChecks(browser, base, html) {
 // ---- the «Decisiones» screens for the visual manual --------------------------------------------------------------
 // Snapshots of the section's screens (PORTAL_SCREENS), each in the state the manual measures and the judges look at, with
 // plain texts: the markup-as-text of the checks above stays in the checks. All «lista», the project page's pattern (the
-// section's forms inside it are marked data-medida="formulario"):
+// section's forms inside it):
 // - project-decisions: a person's project page, her pieces and the section with the four marks (new, changed since her
 //   answer, confirmed, none), «Lo cambiaría» chosen on the first point with its comment open and typed;
 // - project-decisions-errors: the same section in its error states: a point that changed while she read it, a send that

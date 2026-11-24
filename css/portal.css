@@ -2,8 +2,8 @@
    from the ninben brand, loaded before this file and copied from the factory by scripts/sync-brand.mjs: brand/ninben.css
    (colours, light and dark; the radius; the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based
    spacing scale, the frame and the shared components: notices, fields, buttons, actions, rows and status, and the brand
-   mark). Nothing here sets a brand token. The composition follows the approved sketch (.impeccable/mocks/decision/
-   grounded-hilo.html and grounded-hilo-movil.html): the shell across the window, the content in a centred reading
+   mark). Nothing here sets a brand token. The composition follows the approved sketch (working material kept locally,
+   not in the repo): the shell across the window, the content in a centred reading
    column. The portal's own tokens are set here: the reading column and the page title's display size (below), the
    thread's two colours (with the thread). */
 :root { --reading-column: 60rem; --text-display: var(--text-title); --brand-shell-text: 19px; --brand-shell-mark: 22px; }
@@ -47,6 +47,7 @@ h1, h2, h3 { text-wrap: balance; }
    file's own stroke is the signal). */
 .masthead .brand { min-height: var(--target-min); color: inherit; text-decoration: none; font-size: var(--brand-shell-text); }
 .masthead .brand svg { width: var(--brand-shell-mark); height: var(--brand-shell-mark); stroke: var(--signal-on-shell); }
+@media (forced-colors: active) { .masthead .brand svg { stroke: CanvasText; } }
 .masthead :focus-visible { outline-color: var(--signal-on-shell); }
 .masthead-actions { display: flex; gap: var(--space-2); }
 .masthead-who { order: 1; flex-basis: 100%; min-width: 0; padding-bottom: var(--space-1); color: var(--on-shell-muted);

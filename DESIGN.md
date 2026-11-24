@@ -199,7 +199,7 @@ Indigo and undyed cotton: an indigo-tinted neutral ramp, one violet signal, gree
 - **Cotton** (`bg`, `sheet`): the page, the «Decisiones» panel and every sheet; white in light, deep indigo-night in dark.
 - **Indigo Ink** (`ink`): text, row titles that do not wait, the secondary button's words, the «En curso» and «La abrió» dots.
 - **Faded Ink** (`muted`): meta lines, hints, the way back, field borders, the default chevron, «Eres responsable».
-- **Hairline** (`line`) and **Strong Hairline** (`line-strong`): rules between rows, the panel's border, notices; the disabled button's fill.
+- **Hairline** (`line`): rules between rows, the panel's border, notices; the disabled button's fill. The brand also defines **Strong Hairline** (`line-strong`), which the portal does not use.
 
 Dark scheme (same roles; brand values from the source, portal values derived in `css/portal.css`): bg #0F1424, sheet #151B2E, ink #E6E9F2, muted #A3ABC4, line #2A3250, signal #8E88FF, shell #1B2547 (lighter than the ground so the bar still reads as a band), ok #6FBF7A, error #FF8A80; thread #8C98C8, stop #1C1A3A; pills #C4BEFF on #2C2866, #C1C7DA on #232A40, #8BD39A on #133022.
 
