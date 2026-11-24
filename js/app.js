@@ -90,11 +90,11 @@ function masthead(headerActions = [], tag = "header") {
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
 }
 
-// «← Tus proyectos», «← {project}»: where the screen goes back to. The arrow is not read; the link's name says where.
-// Below 672 px the link reads «← Volver», one line whatever the destination's name (MAR-14), and its name still says
-// where («Volver a {project}»); from 672 it shows the destination (portal.css).
+// «← Tus proyectos», «← {project}»: where the screen goes back to. The arrow is drawn (backArrow) and not read; the link's
+// name says where. Below 672 px the link reads «← Volver», one line whatever the destination's name (MAR-14), and its name
+// still says where («Volver a {project}»); from 672 it shows the destination (portal.css).
 function backLink({ href, text, label }) {
-  return h("a", { class: "back-link", href, "aria-label": label }, h("span", { "aria-hidden": "true" }, "←"),
+  return h("a", { class: "back-link", href, "aria-label": label }, backArrow(),
     h("span", { class: "back-link-long" }, text), h("span", { class: "back-link-short" }, t("backShort")));
 }
 const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backToProjectsLabel") });
@@ -890,17 +890,23 @@ const COMMENT_PROMPT_KEYS = { change: "commentRequired", no: "commentRequiredNo"
 const DECISION_TEXT_MAX = 4000;
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// The fold's chevron, as the pieces draw theirs (a «more» fold): it turns when the fold opens.
-function chevron() {
+// A 16 px line icon in the text's colour, hidden from assistive technology: the fold's chevron and the way back's arrow
+// share its stroke.
+function lineIcon(d, className = null) {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
+  if (className) svg.setAttribute("class", className);
   const path = document.createElementNS(SVG_NS, "path");
-  for (const [name, value] of [["d", "M6 3l5 5-5 5"], ["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "2"]]) path.setAttribute(name, value);
+  for (const [name, value] of [["d", d], ["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "2"]]) path.setAttribute(name, value);
   svg.append(path);
   return svg;
 }
+// The fold's chevron, as the pieces draw theirs (a «more» fold): it turns when the fold opens.
+function chevron() { return lineIcon("M6 3l5 5-5 5"); }
+// The way back's arrow, pointing to the start.
+function backArrow() { return lineIcon("M13 8H3M7 4L3 8l4 4", "back-link-arrow"); }
 
 // «En qué se apoya», folded: each item's text and, under it, its literal quote (never the file it comes from). null when
 // there is nothing to show.
@@ -978,6 +984,7 @@ function decisionsSection({ projectId, viewId, points, proposals = [], live }) {
       const markText = markKey(markValue) ? t(markKey(markValue)) : "";
       mark.textContent = markText;
       mark.hidden = !markText;
+      mark.classList.toggle("decision-mark--new", markValue === "new"); // «Nuevo» is a tag; the other marks are quiet text
       const date = answer ? formatDate(state.lang, answer.created_at) : "";
       const said = answer && answer.version === point.version && ANSWER_KEYS[answer.value] ? t(ANSWER_KEYS[answer.value]) : "";
       answered.textContent = !date ? "" : said ? t("answerSentAs", { answer: said, date }) : t("answerSent", { date });

@@ -1689,7 +1689,8 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       .map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => Math.round(r.bottom));
     return { heading: band.length ? Math.max(...band) : null, title: bottom("h1.piece-title"), titleText: document.querySelector("h1.piece-title")?.textContent,
       back: back && { lines: rects.length && rects.every((r) => Math.abs(r.top - rects[0].top) < r.height / 2) ? 1 : rects.length,
-        text: back.innerText.trim(), label: back.getAttribute("aria-label") } };
+        text: back.innerText.trim(), label: back.getAttribute("aria-label"),
+        arrow: Boolean(back.querySelector(':scope > svg.back-link-arrow[aria-hidden="true"]')) && getComputedStyle(back.querySelector("svg path")).stroke === getComputedStyle(back).color } };
   });
   // One screen down: what is fixed or sticky on screen, and where the masthead went.
   const stuckOf = (page) => page.evaluate(() => {
@@ -1709,7 +1710,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       (!title || at.titleText === title), JSON.stringify(at));
     const named = await page.getByRole("link", { name: `Volver a ${name}`, exact: true }).count();
     check(`${tag}: «← Volver» is one line and its name is «Volver a ${name.length > 30 ? name.slice(0, 30) + "…" : name}»`,
-      at.back && at.back.lines === 1 && at.back.text.replace(/\s+/g, " ") === "← Volver" && at.back.label === `Volver a ${name}` && named === 1, JSON.stringify({ ...at.back, named }));
+      at.back && at.back.lines === 1 && at.back.text.replace(/\s+/g, " ") === "Volver" && at.back.arrow && at.back.label === `Volver a ${name}` && named === 1, JSON.stringify({ ...at.back, named }));
   };
   // The line next to the title on a phone: in the row of «← Volver», on its right and ending on the bar's right edge (the
   // title's box), above the title; the title's bottom and the whole band's, with the line showing. text: what it must say.
@@ -1897,7 +1898,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
     }, headSelector);
     // noBack: the project's page has no «volver» on a phone (its destination is home, which the brand links to).
     // backText, brandLabel: the link's words and the brand's name in the screen's language (Spanish unless said).
-    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false, backText = "← Volver", brandLabel = "ninben, ir a Tus proyectos" } = {}) => {
+    const phoneScreen = async (tag, backend, hash, headSelector, label, ready, { noBack = false, backText = "Volver", brandLabel = "ninben, ir a Tus proyectos" } = {}) => {
       const context = await mockedContext(engine, { backend, width: PHONE.width, height: PHONE.height, locale: "es-CO", frameScreen });
       const page = await context.newPage();
       await page.goto(`${base}/${hash}`, { waitUntil: "networkidle" });
@@ -2010,7 +2011,7 @@ async function phoneFrameChecks(engine, engineName, base, html, flowHtml) {
       const tag = `phone ${engineName}: owner's point of «Decisiones» with ${what}`;
       const screen = await phoneScreen(tag, b, `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ".page-head h1", english ? `Back to ${PROJECT.owned}` : `Volver a ${PROJECT.owned}`,
         () => document.querySelector(".page-head h1")?.textContent.length > 0 && document.querySelectorAll(".owner-answer").length > 0,
-        english ? { backText: "← Back", brandLabel: "ninben, go to Your projects" } : {});
+        english ? { backText: "Back", brandLabel: "ninben, go to Your projects" } : {});
       check(`${tag}: the title is whole (${title.length} characters, never cut)`, screen.at.h1Text === title, JSON.stringify(screen.at));
       if (title.length === DECISION_TITLE_MAX) check(`${tag}: it wraps to ${screen.at.h1Lines} lines (two at most)`, screen.at.h1Lines <= 2, JSON.stringify(screen.at));
       const head = await screen.page.evaluate(() => {
@@ -5168,15 +5169,22 @@ const threadView = (page) => page.evaluate((asked) => {
     const out = getComputedStyle(probe).backgroundColor; probe.remove(); return out; };
   const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, der: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height }; };
   const threads = [...document.querySelectorAll(".thread")];
+  const stopAt = (li) => Boolean(li && li.matches("li.row") && li.querySelector(":scope > .row-link.row--stop"));
   const rows = own ? [...own.querySelectorAll("ul.rows > li.row")].map((li) => {
     const link = li.querySelector(":scope > .row-link"), mine = [...li.querySelectorAll(".thread")], status = link && link.querySelector(".status");
     const thread = li.querySelector(":scope > .thread"), disc = li.querySelector(".thread-disc"), cs = link && getComputedStyle(link);
-    // The line: down the track whole; cut, the upper end's right border and the lower end's left one.
+    // The line: down the track whole; cut, the upper end's right border and the lower end's left one, each only when drawn
+    // (two stop rows in a row leave the thread open between their discs: no end on either side).
     const upper = thread && getComputedStyle(thread, "::before"), lower = thread && getComputedStyle(thread, "::after");
     const cutLine = Boolean(thread && thread.classList.contains("thread--cut"));
-    const sides = !thread ? [] : cutLine ? [[upper.borderRightColor, upper.borderRightWidth], [lower.borderLeftColor, lower.borderLeftWidth]]
+    const ends = cutLine ? { upper: upper.display !== "none", lower: lower.display !== "none" } : null;
+    const knots = cutLine ? { upper: getComputedStyle(thread).getPropertyValue("--knot-upper").trim() !== "none",
+      lower: getComputedStyle(thread).getPropertyValue("--knot-lower").trim() !== "none" } : null;
+    const sides = !thread ? [] : cutLine ? [ends.upper ? [upper.borderRightColor, upper.borderRightWidth] : null, ends.lower ? [lower.borderLeftColor, lower.borderLeftWidth] : null].filter(Boolean)
       : [[upper.borderLeftColor, upper.borderLeftWidth]];
-    return { state: status ? status.textContent.trim() : null, threads: mine.length, direct: Boolean(thread),
+    return { state: status ? status.textContent.trim() : null, threads: mine.length, direct: Boolean(thread), ends, knots,
+      prevStop: stopAt(li.previousElementSibling), nextStop: stopAt(li.nextElementSibling),
+      trackW: parseFloat(getComputedStyle(li).gridTemplateColumns),
       hidden: mine.length > 0 && mine.every((t) => t.getAttribute("aria-hidden") === "true"), inLink: Boolean(link && link.querySelector(".thread")),
       cut: Boolean(li.querySelector(".thread--cut")), disc: Boolean(disc), stop: Boolean(link && link.classList.contains("row--stop")),
       bg: cs ? cs.backgroundColor : null, lines: sides.map(([c, w]) => [c, parseFloat(w)]),
@@ -5194,6 +5202,33 @@ const threadView = (page) => page.evaluate((asked) => {
 const luminance = (rgb) => { const [r, g, b] = rgb.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 const contrastRatio = (a, b) => { const [hi, lo] = [luminance(rgbOf(a)), luminance(rgbOf(b))].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+// The lines a row of «Lo que se te pidió» draws: one when whole; cut, its two ends less each one next to another stop row.
+const threadLines = (r) => (!r.cut ? 1 : 2 - (r.prevStop ? 1 : 0) - (r.nextStop ? 1 : 0));
+// Row i of «Lo que se te pidió» scrolled to the middle of the screen, and its thread's and disc's boxes there.
+const threadRowInView = (page, i) => page.evaluate((i) => {
+  const li = document.querySelectorAll('[aria-labelledby="asked-title"] ul.rows > li.row')[i];
+  if (!li) return null;
+  li.scrollIntoView({ block: "center" });
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, der: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height }; };
+  return { li: box(li), thread: box(li.querySelector(":scope > .thread")), disc: box(li.querySelector(".thread-disc")) };
+}, i);
+// How many pixels of a box of the screen are the colour rgb (within 3 per channel).
+async function pixelsOf(page, clip, rgb) {
+  const png = await page.screenshot({ clip });
+  return page.evaluate(async ({ b64, rgb }) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width; canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, img.width, img.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - rgb[0]) <= 3 && Math.abs(d[i + 1] - rgb[1]) <= 3 && Math.abs(d[i + 2] - rgb[2]) <= 3) n += 1;
+    return n;
+  }, { b64: png.toString("base64"), rgb });
+}
 
 async function threadChecks(browser, base, html) {
   const openAt = async (backend, hash, ready, { width = 1440, height = 900, scheme = "light" } = {}) => {
@@ -5226,23 +5261,41 @@ async function threadChecks(browser, base, html) {
       rows.every((r) => (isStop(r) ? r.cut && r.disc && r.stop && r.bg === view.stop : !r.cut && !r.disc && !r.stop && r.bg === "rgba(0, 0, 0, 0)")),
       `${detail} · --stop ${view.stop}`);
     check(`${tag}: the line is --thread, 2 px, and holds 3:1 on the page and on the stop tint`, rows.length === 4 &&
-      rows.every((r) => r.lines.length === (r.cut ? 2 : 1) && r.lines.every(([c, w]) => c === view.thread && w === 2)) && contrastRatio(view.thread, view.bg) >= 3 && contrastRatio(view.thread, view.stop) >= 3,
+      rows.every((r) => r.lines.length === threadLines(r) && r.lines.every(([c, w]) => c === view.thread && w === 2)) && contrastRatio(view.thread, view.bg) >= 3 && contrastRatio(view.thread, view.stop) >= 3,
       JSON.stringify({ thread: view.thread, bg: view.bg, stop: view.stop, onBg: contrastRatio(view.thread, view.bg).toFixed(2),
         onStop: contrastRatio(view.thread, view.stop).toFixed(2), lines: rows.map((r) => r.lines) }));
-    // What a person sees: the line's colour at a whole row's middle, the disc's violet inside a stop row's disc.
-    const whole = rows.find((r) => !isStop(r) && r.thread);
-    const stopRow = rows.find((r) => isStop(r) && r.disc);
-    if (whole && whole.thread.bottom <= (width === 320 ? PHONE.height : 900)) {
-      const cx = whole.thread.x + whole.thread.w / 2;
-      const px = await rowPixels(page, Math.round(whole.thread.top + whole.thread.h / 2), [Math.floor(cx - 1), Math.floor(cx)]);
-      check(`${tag}: the thread is painted down a whole row`, px.some((p) => sameColour(p, rgbOf(view.thread))), JSON.stringify({ px, thread: view.thread }));
+    // What a person sees: the line's colour at a whole row's middle, the disc's violet inside a stop row's disc. Each row is
+    // scrolled to the middle of the screen first, so on a phone a row under the fold is read too (none is skipped).
+    const wholeAt = rows.findIndex((r) => !isStop(r) && r.thread);
+    const stopAt = rows.findIndex((r) => isStop(r) && r.disc);
+    const whole = wholeAt >= 0 ? await threadRowInView(page, wholeAt) : null;
+    const wholePx = whole && whole.thread ? await rowPixels(page, Math.round(whole.thread.top + whole.thread.h / 2),
+      [Math.floor(whole.thread.x + whole.thread.w / 2 - 1), Math.floor(whole.thread.x + whole.thread.w / 2)]) : [];
+    check(`${tag}: the thread is painted down a whole row`, wholePx.some((p) => sameColour(p, rgbOf(view.thread))), JSON.stringify({ px: wholePx, thread: view.thread }));
+    const stopRow = stopAt >= 0 ? await threadRowInView(page, stopAt) : null;
+    const discPx = stopRow && stopRow.disc ? await rowPixels(page, Math.round(stopRow.disc.top + stopRow.disc.h / 2 + 2), [Math.round(stopRow.disc.x + stopRow.disc.w / 2 + 4)]) : [];
+    check(`${tag}: the disc is painted in --signal on the stop row`, discPx.length === 1 && sameColour(discPx[0], rgbOf(view.signal)), JSON.stringify({ px: discPx, signal: view.signal }));
+    // Two stop rows in a row («Por empezar», then «En curso»): the first keeps its upper end and knot, the second its lower
+    // ones, and between their discs, across the whole track, nothing of the thread is painted (an open cut, not a wiggle).
+    const firstStop = rows.findIndex((r, i) => isStop(r) && rows[i + 1] && isStop(rows[i + 1]));
+    const pair = firstStop >= 0 ? [rows[firstStop], rows[firstStop + 1]] : null;
+    check(`${tag}: two stop rows in a row: no end and no knot drawn between their discs, the outer ends kept`, pair &&
+      pair[0].ends.upper && pair[0].knots.upper && !pair[0].ends.lower && !pair[0].knots.lower &&
+      !pair[1].ends.upper && !pair[1].knots.upper && pair[1].ends.lower && pair[1].knots.lower, JSON.stringify(pair && pair.map((r) => [r.state, r.ends, r.knots])));
+    if (pair) {
+      const second = await threadRowInView(page, firstStop + 1);
+      const first = await page.evaluate((i) => { const d = document.querySelectorAll('[aria-labelledby="asked-title"] ul.rows > li.row')[i].querySelector(".thread-disc").getBoundingClientRect();
+        return { bottom: d.bottom }; }, firstStop);
+      const clip = second && second.disc && { x: Math.floor(second.thread.x), y: Math.ceil(first.bottom) + 1, width: Math.ceil(second.thread.w),
+        height: Math.floor(second.disc.top) - Math.ceil(first.bottom) - 2 };
+      const painted = clip && clip.height > 0 ? await pixelsOf(page, clip, rgbOf(view.thread)) : null;
+      check(`${tag}: two stop rows in a row: the track between their discs is left open`, painted === 0, JSON.stringify({ clip, painted }));
     }
-    if (stopRow && stopRow.disc.bottom <= (width === 320 ? PHONE.height : 900)) {
-      const px = await rowPixels(page, Math.round(stopRow.disc.top + stopRow.disc.h / 2 + 2), [Math.round(stopRow.disc.x + stopRow.disc.w / 2 + 4)]);
-      check(`${tag}: the disc is painted in --signal on the stop row`, sameColour(px[0], rgbOf(view.signal)), JSON.stringify({ px, signal: view.signal }));
-    }
-    check(`${tag}: the thread stays in its track, left of every row's text`, rows.length === 4 && rows.every((r) => r.thread && r.thread.x >= r.li.x - 1 &&
-      r.thread.der <= r.li.x + r.track + 1 && r.title.x >= r.thread.der - 1 && r.status.x >= r.thread.der - 1), JSON.stringify(rows.map((r) => [r.thread, r.track, r.title && r.title.x])));
+    // The track is the row's first column: 24 px below 672, 36 px from 672; the thread never leaves it.
+    const trackW = width >= 672 ? 36 : 24;
+    check(`${tag}: the thread stays in its ${trackW} px track, left of every row's text`, rows.length === 4 && rows.every((r) => r.thread && r.trackW === trackW &&
+      r.thread.x >= r.li.x - 1 && r.thread.der <= r.li.x + r.trackW + 1 && r.title.x >= r.thread.der - 1 && r.status.x >= r.thread.der - 1),
+      JSON.stringify(rows.map((r) => [r.thread, r.trackW, r.title && r.title.x])));
     if (width === 320) {
       check(`${tag}: no horizontal scroll`, view.scroll);
       check(`${tag}: a two-line project name and the thread: the title band ends at ${PHONE_FRAME_MAX} px or less`, view.band !== null && view.band <= PHONE_FRAME_MAX, String(view.band));
@@ -5266,8 +5319,8 @@ async function threadChecks(browser, base, html) {
     const rows = view.rows || [];
     check(`${tag}: every row's state still shows in words`, rows.length === 4 && rows.every((r) => r.statusShown && r.status.w > 0 && r.status.der <= view.vw &&
       Object.values(THREAD_STATES).includes(r.state)), JSON.stringify(rows.map((r) => [r.state, r.status, r.statusColour])));
-    check(`${tag}: the thread takes no width beyond its column`, rows.length === 4 && rows.every((r) => r.thread && r.thread.x >= r.li.x - 1 &&
-      r.thread.der <= r.li.x + r.track + 1 && r.title.x >= r.thread.der - 1), JSON.stringify(rows.map((r) => [r.thread, r.track])));
+    check(`${tag}: the thread takes no width beyond its column`, rows.length === 4 && rows.every((r) => r.thread && r.trackW === (width >= 672 ? 36 : 24) &&
+      r.thread.x >= r.li.x - 1 && r.thread.der <= r.li.x + r.trackW + 1 && r.title.x >= r.thread.der - 1), JSON.stringify(rows.map((r) => [r.thread, r.trackW])));
     check(`${tag}: no horizontal scroll`, view.scroll);
     await context.close();
   }
@@ -5281,6 +5334,18 @@ async function threadChecks(browser, base, html) {
     check("thread all sent: one whole thread down every row, no cut, no disc, no stop tint", rows.length > 0 &&
       rows.every((r) => r.threads === 1 && !r.cut && !r.disc && !r.stop && ["Enviada", "Recibida"].includes(r.state)) &&
       (await page.$$(".thread--cut, .thread-disc, .row--stop")).length === 0, JSON.stringify(rows.map((r) => [r.state, r.cut, r.disc, r.stop])));
+    await context.close();
+  }
+
+  // One stop row alone (the list puts what waits first, so stop rows are always together): it is cut with both its ends and
+  // both its knots.
+  {
+    const backend = threadBackend(html, { [IDS.questions]: "pending", [IDS.flow]: "submitted", [IDS.demo]: "submitted", [IDS.replaced]: "received" });
+    const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows);
+    const rows = (await threadView(page)).rows || [];
+    const stops = rows.filter(isStop);
+    check("thread one stop row: it draws both ends and both knots", rows.length === 4 && stops.length === 1 && stops.every((r) => !r.prevStop && !r.nextStop &&
+      r.ends.upper && r.ends.lower && r.knots.upper && r.knots.lower && r.lines.length === 2), JSON.stringify(rows.map((r) => [r.state, r.ends, r.knots])));
     await context.close();
   }
 

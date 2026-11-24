@@ -43,8 +43,9 @@ h1, h2, h3 { text-wrap: balance; }
 .masthead .brand svg { stroke: var(--signal-on-shell); }
 .masthead :focus-visible { outline-color: var(--signal-on-shell); }
 .masthead-actions { display: flex; gap: var(--space-2); }
-/* «Salir» is a quiet outlined button on the shell: its words in the shell's text colour, a muted border, no fill. */
-.masthead .button--secondary { color: var(--on-shell); border-color: var(--on-shell-muted); }
+/* «Salir» is a quiet outlined button on the shell: its words in the shell's text colour, no fill, and a border half way
+   between the shell's muted text and the shell, so it never outweighs the brand; hovered, the border takes the words' colour. */
+.masthead .button--secondary { color: var(--on-shell); border-color: color-mix(in srgb, var(--on-shell-muted) 50%, var(--shell)); }
 @media (hover: hover) { .masthead .button--secondary:hover { border-color: var(--on-shell); } }
 
 main { padding-block: var(--space-6) var(--space-7); }
@@ -62,7 +63,7 @@ main { padding-block: var(--space-6) var(--space-7); }
 .body { margin-top: var(--space-between-blocks); }
 
 .section + .section { margin-top: var(--space-between-blocks); }
-.section h2 { font-size: var(--text-body); font-weight: 600; line-height: 1.4; margin-bottom: var(--space-3); }
+.section h2 { font-size: var(--text-section); font-weight: 600; line-height: 1.3; margin-bottom: var(--space-3); }
 .section p { max-width: var(--measure-text); }
 
 /* Sections side by side share the width equally; below 672px they stack. */
@@ -196,10 +197,16 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
   border-width: 2px 0 0 2px; border-top-left-radius: var(--space-2); }
 /* The knots, one at each curled end. */
 .thread--cut {
-  background:
-    radial-gradient(circle at calc(50% - var(--space-2) + 1px) calc(50% - var(--space-4) - 1px), var(--thread) 2.5px, transparent 3px),
-    radial-gradient(circle at calc(50% + var(--space-2) - 1px) calc(50% + var(--space-4) + 1px), var(--thread) 2.5px, transparent 3px);
+  --knot-upper: radial-gradient(circle at calc(50% - var(--space-2) + 1px) calc(50% - var(--space-4) - 1px), var(--thread) 2.5px, transparent 3px);
+  --knot-lower: radial-gradient(circle at calc(50% + var(--space-2) - 1px) calc(50% + var(--space-4) + 1px), var(--thread) 2.5px, transparent 3px);
+  background: var(--knot-upper), var(--knot-lower);
 }
+/* Two stop rows in a row: between their discs the thread stays open, no end drawn on either side (the lower end and its knot
+   of the first, the upper end and its knot of the next), so the gap reads as one cut and not as a wiggle. */
+.rows--thread > .row:has(> .row--stop):has(+ .row > .row--stop) > .thread--cut { --knot-lower: none; }
+.rows--thread > .row:has(> .row--stop):has(+ .row > .row--stop) > .thread--cut::after { display: none; }
+.rows--thread > .row:has(> .row--stop) + .row:has(> .row--stop) > .thread--cut { --knot-upper: none; }
+.rows--thread > .row:has(> .row--stop) + .row:has(> .row--stop) > .thread--cut::before { display: none; }
 .thread-disc { position: absolute; top: 50%; left: 50%; width: calc(var(--space-4) + var(--space-1)); height: calc(var(--space-4) + var(--space-1)); translate: -50% -50%; }
 .thread-disc circle { fill: var(--signal); }
 .thread-disc-mark { stroke: var(--on-signal); }
@@ -271,13 +278,18 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .decision-row, .decision-head, .decision-body { display: grid; gap: var(--space-2); }
 .decision-title { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; }
 .decision-title:focus { outline: none; } /* it takes the focus after a reload of the section; it is not a control */
-.decision-mark { font-size: var(--text-small); font-weight: 600; }
+/* A point's mark: «Cambió desde tu respuesta» and «Ya lo confirmaste» in quiet muted text; «Nuevo» a tag, the signal on its
+   tint, as wide as its word. */
+.decision-mark { justify-self: start; align-self: start; color: var(--muted); font-size: var(--text-small); font-weight: 600; }
+.decision-mark--new { padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: var(--soft); color: var(--signal); }
 .decision-answered { color: var(--muted); font-size: var(--text-small); }
 .decision-form { margin-top: var(--space-2); }
 /* A point already answered on this version folds its form: the answer line says what she said, and «Cambiar respuesta» (the
    base's secondary button, a 48 px target) opens the form again in its place. */
 .decision-change { margin-top: var(--space-2); }
-.choices { display: flex; flex-wrap: wrap; column-gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
+/* Below 672 the four choices are two columns, two rows, so «No sé» never sits alone on a line. */
+.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
+@media (min-width: 672px) { .choices { display: flex; flex-wrap: wrap; } }
 /* Each choice is a row, as the pieces' options (preguntas.template.html): the whole 44 px row is what you touch and what
    shows the focus (FUN-18, FUN-16); the real radio lies over it, invisible, so a click anywhere chooses and the keyboard
    moves through the group; the mark is drawn. */
@@ -419,6 +431,7 @@ main.context-back .page-head h1 { font-size: var(--text-body); letter-spacing: n
 .back-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--muted); font-weight: 600; text-decoration: none; }
 .piece-bar .back-link { justify-self: start; }
 @media (hover: hover) { .back-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; } }
+.back-link-arrow { flex: none; width: var(--space-4); height: var(--space-4); }
 .back-link-long { display: none; }
 .back-link-short { white-space: nowrap; }
 .piece-heading { display: contents; font-size: var(--text-body); line-height: 1.3; }
