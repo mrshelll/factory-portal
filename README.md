@@ -335,8 +335,8 @@ one line, title · state · date (the data line) · chevron, the state and the d
 down the list. A row that opens something ends with a chevron (muted; `--signal` on a stop row of the thread). In
 «Lo que se te pidió» only a stop row's title is in `--signal`; the others read in `--ink` (the chevron and the hover
 underline still say they open). On home, «N por responder» is in `--signal` and bold, apart from «Eres responsable».
-The states of the person's rows and the owner's entries are **pills** with their dot inside (the portal's own tints, each
-4.5:1 or more in light and dark): «En curso» violet (`#2F25C9` on `#E4E1FF`), «Por empezar», «La abrió» and
+The states of the person's rows and the owner's entries are **pills** with their dot inside (the brand's `--pill-*`
+tints, shared with the pieces, each 4.5:1 or more in light and dark): «En curso» violet (`#2F25C9` on `#E4E1FF`), «Por empezar», «La abrió» and
 «Reemplazada» grey (`#4A5272` on `#EEF0F6`), «Enviada» and «Recibida» green (`#17663B` on `#E6F4EC`); under forced colours
 they keep a border. The «Decisiones» points sit inside one hairline panel (1 px `--line`, `--radius`, `--sheet`), each
 point's send the primary (violet) button, the proposal form under it, «¿Falta algo?» a bold 16 px heading one step under

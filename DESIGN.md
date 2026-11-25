@@ -172,7 +172,7 @@ ninben is named for 亻, the stroke «person» that turned «to move» into jido
 
 Density is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, a bold page title that leads, text kept to a reading measure. Violet is reserved for what can be touched (actions, links) and for what waits for the person (the stop rows, «N por responder», the «En curso» pill on the person's own list); it never decorates. Every state is said in words inside its pill; the tint and the dot only repeat it.
 
-**Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the 14/16/20/24 text steps, the spacing scale, the page margin and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. The portal's own tokens live in `css/portal.css`: the reading column, the page title's display size, the shell wordmark's sizes, the three state pills and the thread's two colours.
+**Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the 14/16/20/24 text steps, the spacing scale, the page margin and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. The reading column and the three state pills are brand tokens too (`--reading-column`, `--pill-*`), shared with the pieces. The portal's own tokens live in `css/portal.css`: the page title's display size, the shell wordmark's sizes and the thread's two colours.
 
 **Accessibility is the floor.** No sideways scroll and nothing cut from 320 to 1440 px, 48 px controls and 44 px link targets, a visible focus ring on everything that can be touched, axe clean in light and dark, AA text in both schemes and a legible forced-colours rendering. The portal's browser tests measure these; a change that breaks one is a defect, not a design choice.
 
@@ -195,7 +195,7 @@ Indigo and undyed cotton: an indigo-tinted neutral ramp, one violet signal, gree
 ### Secondary
 - **Aizome Shell** (`shell`): the top bar, painted to the window's edges. Text on it is white (`on-shell`); «Entraste como …» takes **Faded Indigo** (`on-shell-muted`), and «Salir»'s border sits halfway between Faded Indigo and the shell.
 - **Thread Indigo** (`thread`, portal-owned): the 2 px thread and its knots. **Stop Wash** (`stop`, portal-owned): the tint of a row where the thread is cut.
-- **State pills** (portal-owned): **Running Violet** words on **Running Wash** (`pill-run` on `pill-run-bg`) for «En curso» on the person's own list; **Slate** on **Slate Wash** (`pill-todo` on `pill-todo-bg`) for «Por empezar», «La abrió», «Reemplazada», and for «En curso» on the owner's progress list, where nothing waits for the owner; **Sent Green** on **Green Wash** (`pill-sent` on `pill-sent-bg`) for «Enviada» and «Recibida». Every pair is 4.5:1 or more.
+- **State pills** (brand tokens, shared with the pieces): **Running Violet** words on **Running Wash** (`pill-run` on `pill-run-bg`) for «En curso» on the person's own list; **Slate** on **Slate Wash** (`pill-todo` on `pill-todo-bg`) for «Por empezar», «La abrió», «Reemplazada», and for «En curso» on the owner's progress list, where nothing waits for the owner; **Sent Green** on **Green Wash** (`pill-sent` on `pill-sent-bg`) for «Enviada» and «Recibida». Every pair is 4.5:1 or more.
 
 ### Tertiary
 - **Received Green** (`ok`): the dots of «Enviada» (ring) and «Recibida» (fill), and a notice that went well. Never an action colour.
@@ -207,12 +207,12 @@ Indigo and undyed cotton: an indigo-tinted neutral ramp, one violet signal, gree
 - **Faded Ink** (`muted`): meta lines, hints, the way back, field borders, the default chevron, «Eres responsable».
 - **Hairline** (`line`): rules between rows, the panel's border, notices; the disabled button's fill. The brand also defines **Strong Hairline** (`line-strong`), which the portal does not use.
 
-Dark scheme (same roles; brand values from the source, portal values derived in `css/portal.css`): bg #0F1424, sheet #151B2E, ink #E6E9F2, muted #A3ABC4, line #2A3250, signal #8E88FF, shell #1B2547 (lighter than the ground so the bar still reads as a band), ok #6FBF7A, error #FF8A80; thread #8C98C8, stop #1C1A3A; pills #C4BEFF on #2C2866, #C1C7DA on #232A40, #8BD39A on #133022.
+Dark scheme (same roles; brand values from the source, the pills included; portal values derived in `css/portal.css`): bg #0F1424, sheet #151B2E, ink #E6E9F2, muted #A3ABC4, line #2A3250, signal #8E88FF, shell #1B2547 (lighter than the ground so the bar still reads as a band), ok #6FBF7A, error #FF8A80; thread #8C98C8, stop #1C1A3A; pills #C4BEFF on #2C2866, #C1C7DA on #232A40, #8BD39A on #133022.
 
 ### Named Rules
 **The One Meaning Rule.** Violet means «you can touch this» or «this waits for you». A notice is never violet; nothing decorative is violet; the only violet state is «En curso» on the person's own list. On the owner's progress list another person's «En curso» waits for nobody looking at it, so it takes the slate pill.
 
-**The Single Source Rule.** Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced. The portal sets its own tokens only in `css/portal.css`: the reading column, the display size, the shell wordmark, the pills and the thread.
+**The Single Source Rule.** Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced; the reading column and the pills are among them. The portal sets its own tokens only in `css/portal.css`: the display size, the shell wordmark and the thread.
 
 **The Words In The Pill Rule.** A state is always said in words inside its pill; the tint and the dot repeat it. Hollow grey ring «Por empezar», ink half-fill «La abrió», ink ring «En curso», green ring «Enviada», green fill «Recibida», struck grey ring «Reemplazada». The portal never uses the base's ink-filled dot: inside the pieces it means «Con observaciones».
 

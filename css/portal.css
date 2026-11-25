@@ -2,11 +2,12 @@
    from the ninben brand, loaded before this file and copied from the factory by scripts/sync-brand.mjs: brand/ninben.css
    (colours, light and dark; the radius; the fonts) and brand/ninben-components.css (the text sizes, the 4/8-based
    spacing scale, the frame and the shared components: notices, fields, buttons, actions, rows and status, and the brand
-   mark). Nothing here sets a brand token. The composition follows the approved sketch (working material kept locally,
+   mark). Nothing here sets a brand token: the reading column (--reading-column) and the state pills' tints (--pill-*) are
+   brand tokens too, shared with the pieces. The composition follows the approved sketch (working material kept locally,
    not in the repo): the shell across the window, the content in a centred reading
-   column. The portal's own tokens are set here: the reading column and the page title's display size (below), the
-   thread's two colours (with the thread). */
-:root { --reading-column: 60rem; --text-display: var(--text-title); --brand-shell-text: 19px; --brand-shell-mark: 22px; }
+   column. The portal's own tokens are set here: the page title's display size and the shell wordmark's sizes (below),
+   the thread's two colours (with the thread). */
+:root { --text-display: var(--text-title); --brand-shell-text: 19px; --brand-shell-mark: 22px; }
 @media (min-width: 672px) { :root { --text-display: 32px; } }
 
 html { -webkit-text-size-adjust: 100%; }
@@ -198,19 +199,7 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
    «Pidió un cambio», so along the owner's path one colour keeps one meaning. */
 /* The states are pills, as in the sketch, each tint with its words at 4.5:1 or more in both schemes, the dot kept inside:
    «En curso» violet on the person's own list (grey on the owner's), «Por empezar» (and «La abrió», «Reemplazada») grey, «Enviada» and «Recibida» green. The tints and
-   their words are the portal's own. */
-:root {
-  --pill-run: #2F25C9; --pill-run-bg: #E4E1FF;
-  --pill-todo: #4A5272; --pill-todo-bg: #EEF0F6;
-  --pill-sent: #17663B; --pill-sent-bg: #E6F4EC;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --pill-run: #C4BEFF; --pill-run-bg: #2C2866;
-    --pill-todo: #C1C7DA; --pill-todo-bg: #232A40;
-    --pill-sent: #8BD39A; --pill-sent-bg: #133022;
-  }
-}
+   their words are the brand's --pill-* tokens (brand/ninben.css, light and dark), the same the pieces use. */
 :is(.row-link, .owner-piece .row-item) > .status {
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);

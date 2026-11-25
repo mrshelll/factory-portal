@@ -162,7 +162,7 @@
         "displayName": "Running Violet",
         "canonical": "#2F25C9",
         "dark": "#C4BEFF",
-        "source": "portal",
+        "source": "factory design-system/assets/brand/ninben.css",
         "tonalRamp": [
           "#191736",
           "#25215E",
@@ -179,7 +179,7 @@
         "displayName": "Running Wash",
         "canonical": "#E4E1FF",
         "dark": "#2C2866",
-        "source": "portal",
+        "source": "factory design-system/assets/brand/ninben.css",
         "tonalRamp": [
           "#15103C",
           "#1C136C",
@@ -196,7 +196,7 @@
         "displayName": "Slate",
         "canonical": "#4A5272",
         "dark": "#C1C7DA",
-        "source": "portal",
+        "source": "factory design-system/assets/brand/ninben.css",
         "tonalRamp": [
           "#22232B",
           "#363A49",
@@ -213,7 +213,7 @@
         "displayName": "Slate Wash",
         "canonical": "#EEF0F6",
         "dark": "#232A40",
-        "source": "portal",
+        "source": "factory design-system/assets/brand/ninben.css",
         "tonalRamp": [
           "#1F232D",
           "#32394D",
@@ -230,7 +230,7 @@
         "displayName": "Sent Green",
         "canonical": "#17663B",
         "dark": "#8BD39A",
-        "source": "portal",
+        "source": "factory design-system/assets/brand/ninben.css",
         "tonalRamp": [
           "#183425",
           "#245C3D",
@@ -247,7 +247,7 @@
         "displayName": "Green Wash",
         "canonical": "#E6F4EC",
         "dark": "#133022",
-        "source": "portal",
+        "source": "factory design-system/assets/brand/ninben.css",
         "tonalRamp": [
           "#1E2F25",
           "#2E513D",
@@ -475,16 +475,9 @@
     "constraints": {
       "source": "Brand tokens, fonts, logo and shared components are a generated copy (scripts/sync-brand.mjs) of software-factory/design-system/assets/brand/, which is authoritative. The portal's own tokens live only in css/portal.css.",
       "portalOwnTokens": [
-        "reading-column",
         "text-display",
         "brand-shell-text",
         "brand-shell-mark",
-        "pill-run",
-        "pill-run-bg",
-        "pill-todo",
-        "pill-todo-bg",
-        "pill-sent",
-        "pill-sent-bg",
         "thread",
         "stop",
         "thread-track",
@@ -585,7 +578,7 @@
   ],
   "narrative": {
     "northStar": "The Loom That Stops",
-    "overview": "ninben is named for 亻, the stroke «person» that turned «to move» into jidoka: the loom stops by itself when a thread breaks, and a person decides. The portal is that stop. An aizome-indigo shell runs across the window; under it, a white undyed-cotton page holds one centred reading column. Inside it, one thread runs down the list of what was asked of the signed-in person and breaks exactly where the factory waits for them, with the violet 亻 disc sitting in the gap. Everything else is calm and exact: hairline rules and one hairline panel, small radii, soft state pills, one family, no texture, no fabric imagery, no motion beyond standard hover and focus.\n\nDensity is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, a bold page title that leads, text kept to a reading measure. Violet is reserved for what can be touched (actions, links) and for what waits for the person (the stop rows, «N por responder», the «En curso» pill on the person's own list); it never decorates. Every state is said in words inside its pill; the tint and the dot only repeat it.\n\n**Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the 14/16/20/24 text steps, the spacing scale, the page margin and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. The portal's own tokens live in `css/portal.css`: the reading column, the page title's display size, the shell wordmark's sizes, the three state pills and the thread's two colours.\n\n**Accessibility is the floor.** No sideways scroll and nothing cut from 320 to 1440 px, 48 px controls and 44 px link targets, a visible focus ring on everything that can be touched, axe clean in light and dark, AA text in both schemes and a legible forced-colours rendering. The portal's browser tests measure these; a change that breaks one is a defect, not a design choice.",
+    "overview": "ninben is named for 亻, the stroke «person» that turned «to move» into jidoka: the loom stops by itself when a thread breaks, and a person decides. The portal is that stop. An aizome-indigo shell runs across the window; under it, a white undyed-cotton page holds one centred reading column. Inside it, one thread runs down the list of what was asked of the signed-in person and breaks exactly where the factory waits for them, with the violet 亻 disc sitting in the gap. Everything else is calm and exact: hairline rules and one hairline panel, small radii, soft state pills, one family, no texture, no fabric imagery, no motion beyond standard hover and focus.\n\nDensity is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, a bold page title that leads, text kept to a reading measure. Violet is reserved for what can be touched (actions, links) and for what waits for the person (the stop rows, «N por responder», the «En curso» pill on the person's own list); it never decorates. Every state is said in words inside its pill; the tint and the dot only repeat it.\n\n**Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the 14/16/20/24 text steps, the spacing scale, the page margin and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. The reading column and the three state pills are brand tokens too (`--reading-column`, `--pill-*`), shared with the pieces. The portal's own tokens live in `css/portal.css`: the page title's display size, the shell wordmark's sizes and the thread's two colours.\n\n**Accessibility is the floor.** No sideways scroll and nothing cut from 320 to 1440 px, 48 px controls and 44 px link targets, a visible focus ring on everything that can be touched, axe clean in light and dark, AA text in both schemes and a legible forced-colours rendering. The portal's browser tests measure these; a change that breaks one is a defect, not a design choice.",
     "keyCharacteristics": [
       "Indigo shell across the window over a white cotton page; content in a centred reading column of at most 60rem; light and dark from the same roles.",
       "One accent, violet, meaning «you can touch this» or «this waits for you».",
@@ -602,7 +595,7 @@
       },
       {
         "name": "The Single Source Rule",
-        "body": "Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced. The portal sets its own tokens only in `css/portal.css`: the reading column, the display size, the shell wordmark, the pills and the thread.",
+        "body": "Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced; the reading column and the pills are among them. The portal sets its own tokens only in `css/portal.css`: the display size, the shell wordmark and the thread.",
         "section": "colors"
       },
       {
