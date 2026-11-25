@@ -35,7 +35,18 @@
   --on-shell: #FFFFFF;
   --on-shell-muted: #B6BED9;
   --signal-on-shell: #A8A2FF;
+  /* A state's pill (the portal's «Words In The Pill»): its words on its tint, 4.5:1 or more in both schemes. Violet
+     «En curso» (run), grey to start (todo), green once sent or done (sent). */
+  --pill-run: #2F25C9;
+  --pill-run-bg: #E4E1FF;
+  --pill-todo: #4A5272;
+  --pill-todo-bg: #EEF0F6;
+  --pill-sent: #17663B;
+  --pill-sent-bg: #E6F4EC;
   --radius: 4px;
+  /* The portal's reading column: under its shell, the portal centres everything in it, and a piece hosted in the portal
+     centres its own content in the same column, so their edges line up (ninben-components.css, R11). */
+  --reading-column: 60rem;
   --font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -58,5 +69,11 @@
     --on-shell: #FFFFFF;
     --on-shell-muted: #A9B1CC;
     --signal-on-shell: #A8A2FF;
+    --pill-run: #C4BEFF;
+    --pill-run-bg: #2C2866;
+    --pill-todo: #C1C7DA;
+    --pill-todo-bg: #232A40;
+    --pill-sent: #8BD39A;
+    --pill-sent-bg: #133022;
   }
 }

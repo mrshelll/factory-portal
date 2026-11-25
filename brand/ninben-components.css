@@ -184,11 +184,32 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 .rows { list-style: none; padding: 0; border-top: 1px solid var(--line); }
 .row { border-bottom: 1px solid var(--line); }
 
-.status { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-small); white-space: nowrap; }
-/* The state is said in words; the dot only repeats it: hollow grey to start, ink while active, ok once done. */
-.status-dot { width: 10px; height: 10px; border: 2px solid var(--dot, var(--muted)); border-radius: var(--radius-pill); background: var(--dot-fill, transparent); }
-.status--active .status-dot { --dot: var(--ink); --dot-fill: var(--ink); }
+/* A state is a pill, as in the portal (DESIGN.md «Words In The Pill»): the words inside a tinted pill, and the dot only
+   repeats them. Grey tint and hollow grey ring to start; violet tint and an ink ring while in progress; green tint, a
+   green ring once sent and a green fill once done. The ink-filled dot (.status--active, on the grey tint) is a verdict
+   that is not «waiting» («Cambio pedido», «Con observaciones»); the portal never draws a state with it. Only a state is
+   a .status: «Guardado» is not one (.saved-state, FUN-40). With forced colours the tints go and the border stays. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--pill-todo-bg);
+  color: var(--pill-todo);
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.status-dot { flex: none; width: 10px; height: 10px; border: 2px solid var(--dot, var(--muted)); border-radius: var(--radius-pill); background: var(--dot-fill, transparent); }
+.status--in-progress { background: var(--pill-run-bg); color: var(--pill-run); }
+.status--in-progress .status-dot { --dot: var(--ink); }
+.status--done, .status--sent { background: var(--pill-sent-bg); color: var(--pill-sent); }
+.status--sent .status-dot { --dot: var(--ok); }
 .status--done .status-dot { --dot: var(--ok); --dot-fill: var(--ok); }
+.status--active .status-dot { --dot: var(--ink); --dot-fill: var(--ink); }
+@media (forced-colors: active) { .status { border: 1px solid CanvasText; } }
 
 /* ---- pieces ------------------------------------------------------------------------------ */
 
@@ -233,8 +254,9 @@ input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="
 :where(.piece) .more summary span { text-decoration: underline; text-underline-offset: 3px; }
 :where(.piece) .more summary svg { flex: none; width: var(--space-4); height: var(--space-4); }
 :where(.piece) .more[open] summary svg { transform: rotate(90deg); }
-/* Inside the portal the iframe is the portal's frame box: <main> takes the page margin and the frame in it no longer
-   pads, so every block, the frame too, starts on the portal brand's left edge (MAR-13). Only a sheet in the portal
-   carries data-factory-host. */
+/* Inside the portal the iframe keeps the portal's frame width, and the portal puts its «Volver» and the piece's title band
+   in its reading column, centred, with the page margin around it. So <main> takes the page margin and the frame in it no
+   longer pads and centres in that same column (R11): the piece's edges line up with the band above it. Only a sheet in
+   the portal carries data-factory-host; a sheet opened on its own keeps the whole frame. */
 html[data-factory-host="portal"] main { padding-inline: var(--margin-page); }
-html[data-factory-host="portal"] main > .frame { padding-inline: 0; }
+html[data-factory-host="portal"] main > .frame { max-width: var(--reading-column); margin-inline: auto; padding-inline: 0; }
