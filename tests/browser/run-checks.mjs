@@ -37,6 +37,10 @@
 // reading column, the page title's display size, «Entraste como …» in the shell, the rows' chevrons and the «Decisiones»
 // panel.
 //
+// With --questions and --demo, an approval sheet as published before R13 (legacyApprovalChecks, ruling R15): the bridge
+// leaves its frame wide, so «Computador» at 1440 keeps each desktop screen at 0.6 of its size or more, and nothing scrolls
+// sideways at 320; a sheet as emitted now lines up with the band at 1440.
+//
 // With --questions, the piece screen on a phone too (phoneFrameChecks), at 320 x 640: in Chromium, and in WebKit when
 // playwright-core has its build installed (otherwise a NOTE line says it did not run).
 
@@ -1081,6 +1085,72 @@ function legacyColumnPiece(html) {
     throw new Error("legacyColumnPiece: the piece does not carry the brand's centred frame rule and --reading-column once each");
   }
   return html.replace(rule, 'html[data-factory-host="portal"] main > .frame { padding-inline: 0; }').replace(token, "");
+}
+
+// An approval sheet as the factory published it before R11 and R13: legacyColumnPiece, and without the one-column layout
+// R13 gave «Computador» from 1056 px, so that mode keeps its two columns (2fr/1fr). Throws if the block is not there once.
+function legacyApprovalSheet(html) {
+  const r13 = /@media \(min-width: 1056px\) \{\s*\.layout\.layout--one-column \{[^}]*\}\s*\.layout--one-column \.side \{[^}]*\}\s*\.layout--one-column \.progress-now--after \{[^}]*\}\s*\}/g;
+  const piece = legacyColumnPiece(html);
+  if ((piece.match(r13) || []).length !== 1) throw new Error("legacyApprovalSheet: the sheet does not carry R13's one-column block once");
+  return piece.replace(r13, "");
+}
+
+// Ruling R15: the bridge does not centre an approval sheet published before R11. Its «Computador» mode keeps two columns
+// from 1056 px (no R13), so in a 60rem frame each desktop screen would shrink to about 0.43 of its size, unreadable; it
+// stays at the frame's width (about 0.63) until it is resent, misaligned with the band. A fresh sheet centres itself.
+async function legacyApprovalChecks(browser, base, html, demoHtml) {
+  const legacy = legacyApprovalSheet(demoHtml);
+  const open = async (sheet, width) => {
+    const backend = newBackend(html, null, sheet);
+    const context = await mockedContext(browser, { backend, width, height: width < 672 ? 640 : 900, locale: "es-CO" });
+    const page = await context.newPage();
+    await page.goto(`${base}/#/piece/${IDS.demo}`, { waitUntil: "networkidle" });
+    const frame = await appSheet(page);
+    if (frame) await frame.evaluate(() => document.fonts.ready);
+    return { context, page, frame };
+  };
+  const measure = (frame) => frame.evaluate(() => {
+    const scales = [...document.querySelectorAll(".screen-frame iframe")].map((f) => {
+      const t = f.style.transform; const m = /scale\(([\d.]+)\)/.exec(t || ""); return m ? Number(m[1]) : 1; });
+    const layout = document.querySelector(".layout"), r = document.querySelector("main > .frame")?.getBoundingClientRect();
+    return { scales, columns: layout ? getComputedStyle(layout).gridTemplateColumns.split(" ").length : 0, frame: r ? { x: r.left, w: r.width } : null,
+      token: getComputedStyle(document.documentElement).getPropertyValue("--reading-column").trim(),
+      fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth };
+  });
+  const computer = async (frame) => {
+    await frame.getByRole("button", { name: "Computador", exact: true }).click();
+    await waitFor(async () => (await frame.evaluate(() => [...document.querySelectorAll(".screen-frame iframe")].every((f) => f.style.width === "1440px"))) || null, 5000);
+  };
+
+  {
+    const tag = "approval sheet published before R13 1440px «Computador»";
+    const { context, page, frame } = await open(legacy, 1440);
+    if (frame) await computer(frame);
+    const m = frame && await measure(frame);
+    await context.close();
+    check(`${tag}: its frame is not narrowed to the reading column, so each desktop screen stays at 0.6 of its size or more`,
+      m && m.token === "" && m.columns === 2 && m.scales.length > 0 && Math.min(...m.scales) >= 0.6, JSON.stringify(m));
+  }
+  {
+    const tag = "approval sheet published before R13 320px";
+    const { context, page, frame } = await open(legacy, 320);
+    const m = frame && await measure(frame);
+    const scroll = await noHorizontalScroll(page);
+    await context.close();
+    check(`${tag}: nothing scrolls sideways, neither the screen nor the sheet`, m && m.token === "" && m.fits && scroll, JSON.stringify({ ...m, scroll }));
+  }
+  {
+    const tag = "approval sheet as emitted now 1440px";
+    const { context, page, frame } = await open(demoHtml, 1440);
+    const m = frame && await measure(frame);
+    const band = await page.evaluate(() => { const b = document.querySelector(".piece-bar")?.getBoundingClientRect(); return b ? { x: b.left, w: b.width } : null; });
+    const iframeX = await page.evaluate(() => document.querySelector("iframe.piece-frame").getBoundingClientRect().left);
+    await context.close();
+    const near = (a, b) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 1;
+    check(`${tag}: the sheet's content starts on the band's edge and is as wide as the reading column`,
+      m && m.frame && band && near(iframeX + m.frame.x, band.x) && near(m.frame.w, band.w), JSON.stringify({ band, iframeX, frame: m && m.frame }));
+  }
 }
 
 async function compositionChecks(browser, base, html) {
@@ -5661,6 +5731,7 @@ try {
   if (args.questions) await brandShellChecks(browser, base, read(args.questions));
   if (args.questions) await threadChecks(browser, base, read(args.questions));
   if (args.questions) await compositionChecks(browser, base, read(args.questions));
+  if (args.questions && args.demo) await legacyApprovalChecks(browser, base, read(args.questions), read(args.demo));
   if (args.questions) await finishBatchChecks(browser, base, read(args.questions));
   if (args.questions) await mockedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await sessionEndDraftChecks(browser, base, read(args.questions));

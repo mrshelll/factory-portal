@@ -604,20 +604,24 @@ export function buildBridgeScript({ parentOrigin, kind, storage, nonce, host, su
 // whole piece and the piece grew with every height the portal gave it: screens with an endless empty space under them.
 // The sheets the factory emits since then carry these same two rules; this keeps the ones published before right without
 // sending them again. It goes before the piece's own styles, so a newer sheet's equal rule wins.
+const SCREEN_FRAME_STYLE = 'html[data-factory-host="portal"] .screen-frame{--screen-height:45rem}'
+  + '@media (max-width:671.98px){html[data-factory-host="portal"] .screen-frame{--screen-height:25rem}}';
 // Likewise, the pieces the factory published before its brand change of 2026-11-25 (R11) keep their frame at the iframe's
 // whole width in the portal (`main > .frame { padding-inline: 0 }`), so at 1440 px their content starts at x=24 while the
-// portal's «Volver» and title band sit in the centred reading column, at x=240. The last rule centres their frame in that
+// portal's «Volver» and title band sit in the centred reading column, at x=240. This rule centres their frame in that
 // same column. It is a literal 60rem because those pieces carry no --reading-column token; the pieces emitted since then
 // carry `max-width: var(--reading-column); margin-inline: auto` with that token at 60rem, the same values, and win.
-const SCREEN_FRAME_STYLE = '<style>html[data-factory-host="portal"] .screen-frame{--screen-height:45rem}'
-  + '@media (max-width:671.98px){html[data-factory-host="portal"] .screen-frame{--screen-height:25rem}}'
-  + 'html[data-factory-host="portal"] main>.frame{max-width:60rem;margin-inline:auto}</style>';
+// Not for an approval sheet (demo_review, ruling R15): one published before R13 keeps two columns in «Computador» from
+// 1056 px, so in a 60rem frame each desktop screen would shrink from about 0.63 of its size to 0.43, unreadable. It stays
+// wide, misaligned with the band, until it is resent; a sheet emitted since then centres itself.
+const LEGACY_COLUMN_STYLE = 'html[data-factory-host="portal"] main>.frame{max-width:60rem;margin-inline:auto}';
+const injectedStyle = (kind) => `<style>${SCREEN_FRAME_STYLE}${kind === "demo_review" ? "" : LEGACY_COLUMN_STYLE}</style>`;
 
 // Inserts the bridge as the first thing inside <head>. Without <head>, a <head> is created right
 // after <html> or the doctype; the doctype must stay first or the piece falls into quirks mode.
 export function injectBridge(html, config) {
   const source = typeof html === "string" ? html : "";
-  const script = buildBridgeScript(config) + SCREEN_FRAME_STYLE;
+  const script = buildBridgeScript(config) + injectedStyle(config && config.kind);
   const head = /<head(?:\s[^>]*)?>/i.exec(source);
   if (head) {
     const at = head.index + head[0].length;

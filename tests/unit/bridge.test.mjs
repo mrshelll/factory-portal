@@ -52,6 +52,18 @@ test("injectBridge centres the frame of pieces published before the factory did 
   assert.ok(out.lastIndexOf("</style>", at) < out.lastIndexOf("<style>", at), "inside the injected style element");
 });
 
+test("injectBridge leaves an approval sheet's frame wide (R15): no column rule for demo_review, the screen heights kept", () => {
+  const html = '<!doctype html><html><head><style>.layout { display: grid; }</style></head><body></body></html>';
+  const column = "main>.frame{max-width:60rem";
+  const sheet = injectBridge(html, { ...config, kind: "demo_review" });
+  assert.ok(!sheet.includes(column), "an old approval sheet keeps its two columns and a readable «Computador» preview");
+  assert.ok(sheet.includes('html[data-factory-host="portal"] .screen-frame{--screen-height:45rem}'), "its screen heights still fixed");
+  assert.ok(sheet.includes('{html[data-factory-host="portal"] .screen-frame{--screen-height:25rem}}'), "and the phone's");
+  for (const kind of ["questions", "flow_review"]) {
+    assert.ok(injectBridge(html, { ...config, kind }).includes(column), `${kind} still gets the column`);
+  }
+});
+
 test("injectBridge handles <head> with attributes and does not confuse <header>", () => {
   const html = '<!DOCTYPE html><html><header>x</header><HEAD data-a="1"><title>t</title></HEAD><body></body></html>';
   const out = injectBridge(html, config);

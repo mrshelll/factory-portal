@@ -610,7 +610,7 @@
       },
       {
         "name": "The Reading Column Rule",
-        "body": "Under the shell, content never runs wider than 60rem, centred, the piece screen's frame band included. Only the embedded piece's iframe spans the full window width (the factory measures it so), and the piece centres its own content in the same column; for a piece published before that, the bridge does it.",
+        "body": "Under the shell, content never runs wider than 60rem, centred, the piece screen's frame band included. Only the embedded piece's iframe spans the full window width (the factory measures it so), and the piece centres its own content in the same column; for a piece published before that, the bridge does it, except an old approval sheet, which stays wide so its screens stay readable.",
         "section": "layout"
       },
       {

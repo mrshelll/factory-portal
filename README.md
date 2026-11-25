@@ -94,7 +94,8 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    width the factory's `piece-host.mjs` measures its pieces at), and the factory's pieces, inside the portal, centre their
    content in the same reading column as «← Volver» and the title band (at most 60rem, with the page margin around it), so
    its edges line up with the band's; they keep their reading measure. The pieces published before the factory did this
-   (2026-11-25) get the centring from the bridge (see **Size and scrolling**). The piece does
+   (2026-11-25) get the centring from the bridge (see **Size and scrolling**), except an approval sheet, which stays at
+   the frame's width until it is resent. The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
    which the piece shows on its own sent screen, and says nothing until the person changes something.
    Only when the server has a send that the piece's saved draft cannot show (the draft was last saved
@@ -242,7 +243,10 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   (`main > .frame`) in a literal 60rem column: the pieces published before 2026-11-25 kept their frame at the iframe's
   whole width, so their content started at the frame's margin (x=24 at 1440 px) while the band sits in the reading
   column (x=240); they carry no `--reading-column` token, hence the literal. Being before the piece's own styles, a
-  newer piece's equal rule wins, with the same values. The portal gives the iframe exactly
+  newer piece's equal rule wins, with the same values. An approval sheet (`demo_review`) does not get this rule (ruling
+  R15): one published before the factory's R13 keeps two columns in «Computador» from 1056 px, so in a 60rem frame each
+  desktop screen would shrink from about 0.63 of its size to 0.43, unreadable. It stays wide, misaligned with the band,
+  until it is resent; a sheet emitted since then centres itself. The portal gives the iframe exactly
   that height and nothing else (no minimum of the screen's): the guard counts on it. The piece's scrolling becomes
   `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, in px from the piece's top:
   `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call
@@ -522,7 +526,10 @@ piece's own content (its `main > .frame`, inside the iframe) on that same edge a
 published before 2026-11-25 (the fresh one put back to the old frame rule, without `--reading-column`) lined up the
 same at 1024 and 1440 px through the bridge, and with no sideways scroll at 320; every row of «Lo que se te pidió» ending with a hidden chevron, in `--signal` only on a stop row, and
 from 1056 px reading title · state · date · chevron on one line; the «Decisiones» points inside one panel of 1 px
-`--line`, `--radius` and `--sheet`), the finish review's second batch (`finishBatchChecks`: each point's send the primary
+`--line`, `--radius` and `--sheet`), with `--demo` an approval sheet as published before R13 (`legacyApprovalChecks`: the fresh sheet put back to the old
+frame rule, without `--reading-column` and without R13's one column; the bridge leaves it wide, so in «Computador» at 1440
+px each desktop screen stays at 0.6 of its size or more, and nothing scrolls sideways at 320; the sheet as emitted now
+lines up with the band at 1440), the finish review's second batch (`finishBatchChecks`: each point's send the primary
 button; the states as pills with their dot, the sketch's colours in light and 4.5:1 in dark, «Por empezar» and «En
 curso» told apart, at 390 and 1440 px; only a stop row's title in `--signal`; home's «N por responder» in `--signal` and
 «Eres responsable» in `--muted`; the owner's state in the 9rem column on one x; «¿Falta algo?» 16 px bold under the 20 px
