@@ -39,6 +39,19 @@ test("injectBridge fixes the screen frame's height of demo sheets published befo
   assert.ok(out.includes('@media (max-width:671.98px){html[data-factory-host="portal"] .screen-frame{--screen-height:25rem}}'), "and the phone's");
 });
 
+test("injectBridge centres the frame of pieces published before the factory did (old rule, no --reading-column) in the portal's 60rem column", () => {
+  const old = 'html[data-factory-host="portal"] main > .frame { padding-inline: 0; }';
+  const html = `<!doctype html><html><head><style>:root { --space-4: 16px; }\n${old}</style></head><body><main><div class="frame"></div></main></body></html>`;
+  const out = injectBridge(html, config);
+  const rule = 'html[data-factory-host="portal"] main>.frame{max-width:60rem;margin-inline:auto}';
+  const at = out.indexOf(rule);
+  assert.ok(at !== -1, "the literal 60rem column, since old pieces carry no --reading-column");
+  assert.equal(out.split(rule).length, 2, "once");
+  assert.ok(at > out.indexOf("</script>"), "after the bridge, which marks <html> as in the portal");
+  assert.ok(at < out.indexOf("<style>:root"), "before the piece's own styles: a newer piece's equal rule wins");
+  assert.ok(out.lastIndexOf("</style>", at) < out.lastIndexOf("<style>", at), "inside the injected style element");
+});
+
 test("injectBridge handles <head> with attributes and does not confuse <header>", () => {
   const html = '<!DOCTYPE html><html><header>x</header><HEAD data-a="1"><title>t</title></HEAD><body></body></html>';
   const out = injectBridge(html, config);

@@ -1071,6 +1071,18 @@ async function brandShellChecks(browser, base, html) {
 // 672, 24 px below); «Entraste como …» is in the shell, beside «Salir» from 672 and on its own line under the brand below;
 // a row of «Lo que se te pidió» reads at a glance from 1056, title · state · date · chevron on one line, its chevron in
 // --signal on a stop row; and the «Decisiones» points sit inside one hairline panel (1 px --line, --radius, --sheet).
+// A piece as the factory published it before the brand centred a portal-hosted piece in the reading column (R11): the
+// fresh piece with its frame rule put back to the old one and without the --reading-column token. Throws if the fresh
+// piece no longer has what is replaced, so the check never runs on an unchanged piece.
+function legacyColumnPiece(html) {
+  const rule = /html\[data-factory-host="portal"\] main > \.frame \{ max-width: var\(--reading-column\); margin-inline: auto; padding-inline: 0; \}/g;
+  const token = /^\s*--reading-column:\s*60rem;\s*$\n?/gm;
+  if ((html.match(rule) || []).length !== 1 || (html.match(token) || []).length !== 1) {
+    throw new Error("legacyColumnPiece: the piece does not carry the brand's centred frame rule and --reading-column once each");
+  }
+  return html.replace(rule, 'html[data-factory-host="portal"] main > .frame { padding-inline: 0; }').replace(token, "");
+}
+
 async function compositionChecks(browser, base, html) {
   const open = async (backend, hash, ready, { width, scheme = "light" }) => {
     const context = await mockedContext(browser, { backend, width, height: width < 672 ? 640 : 900, locale: "es-CO" });
@@ -1170,6 +1182,30 @@ async function compositionChecks(browser, base, html) {
         b.colour === b.ink && !b.cut && (!longTitle || (b.text === longTitle && (width >= 672 || b.title.h >= 2 * b.lineHeight - 1))),
         JSON.stringify({ size: b.size, weight: b.weight, colour: b.colour, ink: b.ink, cut: b.cut, h: b.title && b.title.h, lineHeight: b.lineHeight }));
     }
+  }
+
+  // A piece published before the brand centred it (R11) carries the old portal rule and no --reading-column: the bridge
+  // centres its frame in the same 60rem column (bridge.js SCREEN_FRAME_STYLE), so its content lines up with the band too.
+  const legacy = legacyColumnPiece(html);
+  for (const width of [320, 1024, 1440]) {
+    const tag = `composition published piece without the reading column ${width}px`;
+    const col = await projectColumn(width);
+    const b = newBackend(legacy); b.pieces[0].title = TITLE_AT_MAX;
+    const { context, page } = await open(b, `#/piece/${IDS.questions}`, "h1.piece-title", { width });
+    const piece = await waitFor(async () => { const f = pieceFrame(page);
+      return f && (await f.evaluate(() => Boolean(document.querySelector("main > .frame"))).catch(() => false)) ? f : null; }, 10000);
+    const inner = piece && await piece.evaluate(() => {
+      const r = document.querySelector("main > .frame").getBoundingClientRect();
+      return { x: r.left, w: r.width, token: getComputedStyle(document.documentElement).getPropertyValue("--reading-column").trim(),
+        fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth };
+    });
+    const iframeX = await page.evaluate(() => document.querySelector("iframe.piece-frame").getBoundingClientRect().left);
+    const scroll = await noHorizontalScroll(page);
+    await context.close();
+    const detail = JSON.stringify({ column: col, iframeX, inner, scroll });
+    if (width === 320) check(`${tag}: nothing scrolls sideways, neither the screen nor the piece`, inner && inner.token === "" && inner.fits && scroll, detail);
+    else check(`${tag}: the piece's content starts on the band's edge and is as wide as the reading column`,
+      inner && inner.token === "" && col && near(iframeX + inner.x, col.x) && near(inner.w, col.w), detail);
   }
 
   // «Entraste como …» in the shell, never again in the title band.
