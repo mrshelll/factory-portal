@@ -1117,6 +1117,53 @@ async function compositionChecks(browser, base, html) {
     await context.close();
   }
 
+  // The piece screen's frame band in the project page's reading column (ruling R11 of 2026-11-24): «← Volver», the title band
+  // and the rule above the piece start on the same left edge as the project page's content, and the band and the rule are
+  // as wide as that column, at 320, 672, 1056 and 1440, on the person's screen and on the owner's read-only one. The
+  // iframe stays outside the column (pieceWidthChecks holds its width). The piece's title is a heading of the screen:
+  // 20 px below 672 and 24 px from 672, bold, in the ink; with TITLE_MAX characters it wraps, whole, never cut.
+  const projectColumn = async (width) => {
+    const { context, page } = await open(threadBackend(html), `#/project/${IDS.project}`, '[aria-labelledby="asked-title"] .row-link', { width });
+    const col = await page.evaluate(() => { const r = document.querySelector("main [data-rol=marco]")?.getBoundingClientRect(); return r ? { x: r.left, w: r.width } : null; });
+    await context.close();
+    return col;
+  };
+  const pieceBand = (page) => page.evaluate(() => {
+    const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, w: r.width, h: r.height }; };
+    const main = document.querySelector(".piece-main"), title = document.querySelector("h1.piece-title");
+    const rule = main && getComputedStyle(main, "::before"), mr = main && main.getBoundingClientRect();
+    const probe = document.createElement("span"); probe.style.color = "var(--ink)"; document.body.append(probe);
+    const ink = getComputedStyle(probe).color; probe.remove();
+    const ts = title && getComputedStyle(title);
+    return { back: box(document.querySelector(".back-link")), bar: box(document.querySelector(".piece-bar")), title: box(title),
+      rule: rule && rule.borderTopStyle !== "none" ? { x: mr.left + parseFloat(rule.marginLeft), w: parseFloat(rule.width) } : null,
+      size: ts && ts.fontSize, weight: ts && Number(ts.fontWeight), colour: ts && ts.color, ink, lineHeight: ts && parseFloat(ts.lineHeight),
+      cut: Boolean(ts) && (ts.textOverflow === "ellipsis" || ["hidden", "clip"].includes(ts.overflowX) || ts.whiteSpace === "nowrap" ||
+        (ts.webkitLineClamp && ts.webkitLineClamp !== "none") || title.scrollWidth > title.clientWidth + 1 || title.scrollHeight > title.clientHeight + 1),
+      text: title && title.textContent };
+  });
+  const pieceScreensInColumn = [
+    ["piece screen", () => { const b = newBackend(html); b.pieces[0].title = TITLE_AT_MAX; return b; }, `#/piece/${IDS.questions}`, TITLE_AT_MAX],
+    ["owner piece screen", () => ownerViewBackend(html, null, null, {}), ownerHref(IDS.ownedProject, OWNED.questions, PEOPLE.luis), null],
+  ];
+  for (const width of [320, 672, 1056, 1440]) {
+    const col = await projectColumn(width);
+    for (const [what, backend, hash, longTitle] of pieceScreensInColumn) {
+      const tag = `composition ${what} ${width}px`;
+      const { context, page } = await open(backend(), hash, "h1.piece-title", { width });
+      await waitFor(async () => (await page.$("iframe.piece-frame")) !== null, 10000);
+      const b = await pieceBand(page);
+      await context.close();
+      check(`${tag}: «Volver», the title band and the rule above the piece start on the project page's content edge, the band and the rule as wide as its column`,
+        col && b.back && b.bar && b.title && b.rule && near(b.back.x, col.x) && near(b.bar.x, col.x) && near(b.title.x, col.x) && near(b.rule.x, col.x) &&
+        near(b.bar.w, col.w) && near(b.rule.w, col.w), JSON.stringify({ column: col, back: b.back, bar: b.bar, title: b.title, rule: b.rule }));
+      const size = width >= 672 ? "24px" : "20px";
+      check(`${tag}: the piece's title is a heading of the screen, ${size}, bold, in the ink, never cut`, b.size === size && b.weight === 700 &&
+        b.colour === b.ink && !b.cut && (!longTitle || (b.text === longTitle && (width >= 672 || b.title.h >= 2 * b.lineHeight - 1))),
+        JSON.stringify({ size: b.size, weight: b.weight, colour: b.colour, ink: b.ink, cut: b.cut, h: b.title && b.title.h, lineHeight: b.lineHeight }));
+    }
+  }
+
   // «Entraste como …» in the shell, never again in the title band.
   for (const [what, backend, hash, ready] of screens.slice(0, 2)) for (const scheme of ["light", "dark"]) for (const width of [320, 672, 1440]) {
     const tag = `composition ${what} ${width}px ${scheme}`;

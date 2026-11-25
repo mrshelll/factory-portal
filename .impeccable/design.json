@@ -411,7 +411,11 @@
       },
       "item-title": {
         "displayName": "Item title",
-        "purpose": "Row, point and piece titles."
+        "purpose": "Row and point titles."
+      },
+      "piece-title": {
+        "displayName": "Piece title",
+        "purpose": "The piece screen's h1: 24 px from 672, 20 px below, 700, ink; it wraps, never truncated."
       },
       "body": {
         "displayName": "Body",
@@ -613,7 +617,7 @@
       },
       {
         "name": "The Reading Column Rule",
-        "body": "Under the shell, content never runs wider than 60rem, centred; only an embedded piece takes the full frame.",
+        "body": "Under the shell, content never runs wider than 60rem, centred, the piece screen's frame band included. Only the embedded piece's iframe spans the full window width (the factory measures it so), and the piece centres its own content in the same column.",
         "section": "layout"
       },
       {

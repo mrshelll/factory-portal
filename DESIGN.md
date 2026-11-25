@@ -47,6 +47,12 @@ typography:
     fontSize: "16px"
     fontWeight: 600
     lineHeight: 1.4
+  piece-title:
+    fontFamily: "Figtree, system-ui, sans-serif"
+    fontSize: "24px"
+    fontWeight: 700
+    lineHeight: 1.25
+    letterSpacing: "-0.02em"
   body:
     fontFamily: "Figtree, system-ui, sans-serif"
     fontSize: "16px"
@@ -222,7 +228,8 @@ Dark scheme (same roles; brand values from the source, portal values derived in 
 - **Display** (700, 32px from 672 px and 24px below, 1.2, -0.025em): the page's h1, so it leads above the 20 px sections.
 - **Section** (600, 20px, 1.3): a section's h2 («Lo que se te pidió», «Decisiones»).
 - **Subheading** (700, 16px, 1.4): a heading inside a section, such as «¿Falta algo?» under «Decisiones»; its field label stays 400 so it is the form's one bold line.
-- **Item title** (600, 16px, 1.4): a row's title, a point's title, a piece's title in its bar.
+- **Item title** (600, 16px, 1.4): a row's title, a point's title.
+- **Piece title** (700, 24px from 672 px and 20px below, 1.25, -0.02em, Indigo Ink): the piece screen's h1, the heading of its title band; it wraps and is never truncated.
 - **Body** (400, 16px, 1.5): running text at the 40rem measure; inputs never below 16 px; choice words.
 - **Small** (400 or 600, 14px): meta lines, pill words, hints, the «Nuevo» tag, «Entraste como …», field errors.
 - **Brand** (600, 19px, line-height 1, -0.02em, lowercase «ninben»): only on the shell, beside a 22 px 亻, so «Salir» never outweighs it.
@@ -234,12 +241,12 @@ Running text wraps «pretty» and headings «balance».
 
 ## Layout
 
-Mobile first, tiers at 672 px and 1056 px. The shell spans the window; its content (wordmark left; «Entraste como …» and «Salir» right) sits on the page margin (16 px below 672, 24 px from 672). Below 672 «Entraste como …» drops to its own line under the wordmark and «Salir». Under the shell everything sits in one centred **reading column** of at most 60rem; main pads 16 px (32 px from 672) above and 48 px below; blocks are 32 px apart; running text keeps the 40rem measure and forms the 440 px form measure. The piece screen is the exception: the embedded piece takes the full page frame, and its iframe takes the height the piece posts, so the page scrolls, never the piece. Nothing is fixed or sticky.
+Mobile first, tiers at 672 px and 1056 px. The shell spans the window; its content (wordmark left; «Entraste como …» and «Salir» right) sits on the page margin (16 px below 672, 24 px from 672). Below 672 «Entraste como …» drops to its own line under the wordmark and «Salir». Under the shell everything sits in one centred **reading column** of at most 60rem; main pads 16 px (32 px from 672) above and 48 px below; blocks are 32 px apart; running text keeps the 40rem measure and forms the 440 px form measure. The piece screen keeps the column too: its frame band — the way back, the title band, its notices and the rule under them — sits in the same centred column, on the project page's left edge at every width, so moving from a project to a piece nothing jumps. Only the embedded piece's iframe takes the full window width (up to the frame), because the factory measures its pieces at that width, and the piece centres its own content in the same column. The iframe takes the height the piece posts, so the page scrolls, never the piece. Nothing is fixed or sticky.
 
 Lists are rows between hairlines, each row a whole link ending in a 16 px chevron. Below 672 a row stacks (title, meta, pill); from 672 the pill sits on the title's line; from 1056 a row is four columns — title · state (fixed 9rem) · meta (up to 20rem) · chevron — so pills fall on the same x down every list. The owner's progress entries use the same 9rem state column (from 672) and leave the chevron column empty. Sections side by side share the width equally from 672.
 
 ### Named Rules
-**The Reading Column Rule.** Under the shell, content never runs wider than 60rem, centred; only an embedded piece takes the full frame.
+**The Reading Column Rule.** Under the shell, content never runs wider than 60rem, centred, the piece screen's frame band included. Only the embedded piece's iframe spans the full window width (the factory measures it so), and the piece centres its own content in the same column.
 
 **The Same Column Rule.** From 1056 px every list's state lives in the 9rem column, so states line up down the screen.
 
