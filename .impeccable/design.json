@@ -534,7 +534,7 @@
       "name": "State Pill",
       "kind": "chip",
       "refersTo": "status-pill-run",
-      "description": "A state in words inside a soft pill with its 10 px dot: violet in progress, indigo-grey not started, green sent and received.",
+      "description": "A state in words inside a soft pill with its 10 px dot: violet in progress on the person's own list (slate on the owner's progress list), indigo-grey not started, green sent and received.",
       "html": "<span class=\"ds-status\"><span class=\"ds-dot\"></span>Por empezar</span> <span class=\"ds-status ds-status--progress\"><span class=\"ds-dot\"></span>En curso</span> <span class=\"ds-status ds-status--sent\"><span class=\"ds-dot\"></span>Enviada</span> <span class=\"ds-status ds-status--done\"><span class=\"ds-dot\"></span>Recibida</span>",
       "css": ".ds-status{font-family: var(--font-sans);display:inline-flex;align-items:center;gap:8px;margin-right:8px;padding:4px 12px;border-radius:999px;background:var(--pill-todo-bg,#EEF0F6);color:var(--pill-todo,#4A5272);font-size:14px;font-weight:600;line-height:1.2;white-space:nowrap}.ds-dot{width:10px;height:10px;border:2px solid var(--muted);border-radius:999px;box-sizing:border-box}.ds-status--progress{background:var(--pill-run-bg,#E4E1FF);color:var(--pill-run,#2F25C9)}.ds-status--progress .ds-dot{border-color:var(--ink)}.ds-status--sent,.ds-status--done{background:var(--pill-sent-bg,#E6F4EC);color:var(--pill-sent,#17663B)}.ds-status--sent .ds-dot{border-color:var(--ok)}.ds-status--done .ds-dot{border-color:var(--ok);background:var(--ok)}"
     },
@@ -586,7 +586,7 @@
       "Indigo shell across the window over a white cotton page; content in a centred reading column of at most 60rem; light and dark from the same roles.",
       "One accent, violet, meaning «you can touch this» or «this waits for you».",
       "The thread: the portal's only signature, drawn on one list only.",
-      "States as soft pills with their words and dot: violet in progress, indigo-grey not started, green sent.",
+      "States as soft pills with their words and dot: violet in progress (on the person's own list), indigo-grey not started, green sent.",
       "Flat: hairline rules, one hairline panel and tinted rows; no shadows for depth.",
       "One family (Figtree, 400/600/700); JetBrains Mono only for the sign-in code."
     ],
@@ -640,7 +640,7 @@
       "**Don't** edit `brand/ninben.css` or `brand/ninben-components.css` in the portal, or set a brand token in `css/portal.css`.",
       "**Don't** use shadows for elevation, coloured side stripes on notices, or texture or fabric imagery.",
       "**Don't** use the ink-filled status dot in the portal, or carry a state by colour alone.",
-      "**Don't** make a state other than «En curso» violet, or a notice violet.",
+      "**Don't** make a state other than «En curso» on the person's own list violet, or a notice violet.",
       "**Don't** draw the thread on lists about other people (the owner's progress list) or animate it.",
       "**Don't** add a second type family; JetBrains Mono is only for typed figures."
     ]

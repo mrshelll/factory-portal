@@ -194,7 +194,7 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
    draws a state with the base's ink-filled dot (.status--active): inside the pieces that dot means «Con observaciones» or
    «Pidió un cambio», so along the owner's path one colour keeps one meaning. */
 /* The states are pills, as in the sketch, each tint with its words at 4.5:1 or more in both schemes, the dot kept inside:
-   «En curso» violet, «Por empezar» (and «La abrió», «Reemplazada») grey, «Enviada» and «Recibida» green. The tints and
+   «En curso» violet on the person's own list (grey on the owner's), «Por empezar» (and «La abrió», «Reemplazada») grey, «Enviada» and «Recibida» green. The tints and
    their words are the portal's own. */
 :root {
   --pill-run: #2F25C9; --pill-run-bg: #E4E1FF;
