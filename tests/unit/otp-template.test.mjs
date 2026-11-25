@@ -73,3 +73,10 @@ test("its colours are the brand's light ones (brand/ninben.css), so the email fo
   assert.match(body, new RegExp(`background-color:\\s*${tokens.bg}`, "i"));
   assert.match(body, new RegExp(`(^|[;\\s"])color:\\s*${tokens.ink}`, "i"));
 });
+
+test("the body is plain ASCII, accents as HTML entities, so it reads the same whatever charset the viewer assumes", () => {
+  // The template is a fragment with no <meta charset>: opened on its own (or by a viewer that guesses Latin-1) a raw «ó»
+  // shows as «Ã³». An entity is the same letter in every reader.
+  assert.doesNotMatch(body, /[^\x00-\x7F]/);
+  assert.match(body, /c&oacute;digo/);
+});
