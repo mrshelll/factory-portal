@@ -91,8 +91,10 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    announced to screen readers by the screen's status region; it is not a notice, and nothing floats or stays fixed
    for it. The
    iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it: the
-   width the factory's `piece-host.mjs` measures its pieces at), and the factory's pieces, inside the portal, start their
-   content at the frame's margin (16 px, 24 px from 672 px), keeping their reading measure. The piece does
+   width the factory's `piece-host.mjs` measures its pieces at), and the factory's pieces, inside the portal, centre their
+   content in the same reading column as «← Volver» and the title band (at most 60rem, with the page margin around it), so
+   its edges line up with the band's; they keep their reading measure. The pieces published before the factory did this
+   (2026-11-25) get the centring from the bridge (see **Size and scrolling**). The piece does
    not show its own brand bar there (see **Host** below); the save line does not repeat the send date,
    which the piece shows on its own sent screen, and says nothing until the person changes something.
    Only when the server has a send that the piece's saved draft cannot show (the draft was last saved
@@ -236,7 +238,11 @@ The piece runs in an opaque origin, so it cannot see the portal's storage or ses
   until its fix of 2026-11-22 (each screen's frame was `80vh`; on a phone `min(60svh, 34rem)`), and its
   screens showed an endless empty space under them. Its newer sheets give that frame a fixed height in
   the portal (45rem; 25rem below 672 px); the bridge injects the same two rules, as a `<style>` right
-  after its script, for the sheets published before. The portal gives the iframe exactly
+  after its script, for the sheets published before. That `<style>` also centres a portal-hosted piece's frame
+  (`main > .frame`) in a literal 60rem column: the pieces published before 2026-11-25 kept their frame at the iframe's
+  whole width, so their content started at the frame's margin (x=24 at 1440 px) while the band sits in the reading
+  column (x=240); they carry no `--reading-column` token, hence the literal. Being before the piece's own styles, a
+  newer piece's equal rule wins, with the same values. The portal gives the iframe exactly
   that height and nothing else (no minimum of the screen's): the guard counts on it. The piece's scrolling becomes
   `{ type: "factory:scroll", top, bottom?, ifNeeded? }`, in px from the piece's top:
   `window.scrollTo` / `window.scroll` (numbers or options, when they ask for a top; the pieces call
@@ -510,7 +516,11 @@ only «Decisiones»; `thread-*.png`), the composition of the approved sketch (`c
 content of home, a project's page, the owner's page and the owner's point of «Decisiones» in a centred column no wider
 than 60rem under a wider shell; the page title in `--text-display`, 24 px at 320 and 32 px at 1440; «Entraste como …» in
 the shell, beside «Salir» at 672 and 1440 px and under the brand at 320, 4.5:1 on the shell, light and dark, and not
-in the title band; every row of «Lo que se te pidió» ending with a hidden chevron, in `--signal` only on a stop row, and
+in the title band; on the piece screen and the owner's read-only one, at 320, 672, 1056 and 1440 px, «← Volver», the
+title band and the rule above the piece on the project page's content edge, the piece's title 20/24 px and bold, and the
+piece's own content (its `main > .frame`, inside the iframe) on that same edge and as wide as the column; a piece as
+published before 2026-11-25 (the fresh one put back to the old frame rule, without `--reading-column`) lined up the
+same at 1024 and 1440 px through the bridge, and with no sideways scroll at 320; every row of «Lo que se te pidió» ending with a hidden chevron, in `--signal` only on a stop row, and
 from 1056 px reading title · state · date · chevron on one line; the «Decisiones» points inside one panel of 1 px
 `--line`, `--radius` and `--sheet`), the finish review's second batch (`finishBatchChecks`: each point's send the primary
 button; the states as pills with their dot, the sketch's colours in light and 4.5:1 in dark, «Por empezar» and «En
