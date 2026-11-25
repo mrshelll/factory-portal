@@ -5157,8 +5157,8 @@ async function ownerDecisionsChecks(browser, base, html) {
 
 // The thread (spec 2026-11-24 «Hilo de jidoka», «The thread»): a line down the left of «Lo que se te pidió» on a project's
 // page, and nowhere else. It is whole at «Enviada» and «Recibida» (a replaced version that was sent reads «Recibida») and cut
-// at «Por empezar» and «En curso», where the factory waits for the person: two curled ends and the violet 亻 disc, the row
-// tinted --stop. It is decoration: aria-hidden, outside the row's link (its accessible name does not change), and each row
+// at «Por empezar» and «En curso», where the factory waits for the person: the violet 亻 disc beside the title's first line,
+// a curled end only toward a whole neighbour row, the row tinted --stop. It is decoration: aria-hidden, outside the row's link (its accessible name does not change), and each row
 // keeps its state in words and its mark. Not on home, the owner's «Avance de lo que compartiste», the piece, a project with
 // only «Decisiones». At 320 px, light and dark, with a two-line project name and a piece title of TITLE_MAX characters, the
 // page does not scroll sideways, the title band ends at 160 px or less and every row's state shows; under forced colours
@@ -5184,16 +5184,25 @@ const threadView = (page) => page.evaluate((asked) => {
     const link = li.querySelector(":scope > .row-link"), mine = [...li.querySelectorAll(".thread")], status = link && link.querySelector(".status");
     const thread = li.querySelector(":scope > .thread"), disc = li.querySelector(".thread-disc"), cs = link && getComputedStyle(link);
     // The line: down the track whole; cut, the upper end's right border and the lower end's left one, each only when drawn
-    // (two stop rows in a row leave the thread open between their discs: no end on either side).
+    // (only toward a neighbour row that is whole: none above the list's first row, below its last, nor between two stops).
     const upper = thread && getComputedStyle(thread, "::before"), lower = thread && getComputedStyle(thread, "::after");
     const cutLine = Boolean(thread && thread.classList.contains("thread--cut"));
     const ends = cutLine ? { upper: upper.display !== "none", lower: lower.display !== "none" } : null;
     const knots = cutLine ? { upper: getComputedStyle(thread).getPropertyValue("--knot-upper").trim() !== "none",
       lower: getComputedStyle(thread).getPropertyValue("--knot-lower").trim() !== "none" } : null;
+    // The centre of the title's first line: its first text fragment's box (the glyphs' box sits in the middle of the line,
+    // the half-leading being the same above and below).
+    const titleEl = link && link.querySelector(".row-title");
+    const firstLine = (() => { if (!titleEl || !titleEl.firstChild) return null; const range = document.createRange(); range.selectNodeContents(titleEl);
+      const r = range.getClientRects()[0]; return r ? (r.top + r.bottom) / 2 : null; })();
     const sides = !thread ? [] : cutLine ? [ends.upper ? [upper.borderRightColor, upper.borderRightWidth] : null, ends.lower ? [lower.borderLeftColor, lower.borderLeftWidth] : null].filter(Boolean)
       : [[upper.borderLeftColor, upper.borderLeftWidth]];
     return { state: status ? status.textContent.trim() : null, threads: mine.length, direct: Boolean(thread), ends, knots,
       prevStop: stopAt(li.previousElementSibling), nextStop: stopAt(li.nextElementSibling),
+      first: !li.previousElementSibling, last: !li.nextElementSibling,
+      knotPaint: Boolean(thread) && getComputedStyle(thread).backgroundImage.includes("gradient"),
+      titleLineMid: firstLine, titleLines: titleEl ? Math.round(titleEl.getBoundingClientRect().height / parseFloat(getComputedStyle(titleEl).lineHeight)) : null,
+      discMid: disc ? (disc.getBoundingClientRect().top + disc.getBoundingClientRect().bottom) / 2 : null,
       trackW: parseFloat(getComputedStyle(li).gridTemplateColumns),
       hidden: mine.length > 0 && mine.every((t) => t.getAttribute("aria-hidden") === "true"), inLink: Boolean(link && link.querySelector(".thread")),
       cut: Boolean(li.querySelector(".thread--cut")), disc: Boolean(disc), stop: Boolean(link && link.classList.contains("row--stop")),
@@ -5212,8 +5221,14 @@ const threadView = (page) => page.evaluate((asked) => {
 const luminance = (rgb) => { const [r, g, b] = rgb.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 const contrastRatio = (a, b) => { const [hi, lo] = [luminance(rgbOf(a)), luminance(rgbOf(b))].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
-// The lines a row of «Lo que se te pidió» draws: one when whole; cut, its two ends less each one next to another stop row.
-const threadLines = (r) => (!r.cut ? 1 : 2 - (r.prevStop ? 1 : 0) - (r.nextStop ? 1 : 0));
+// The ends a cut row of «Lo que se te pidió» draws: one on each side where the thread goes on, toward a neighbour row that
+// is whole; none above the list's first row, below its last, nor toward another stop row.
+const threadEnds = (r) => ({ upper: !r.first && !r.prevStop, lower: !r.last && !r.nextStop });
+// The lines a row draws: one when whole; cut, one per end it draws.
+const threadLines = (r) => (!r.cut ? 1 : Number(threadEnds(r).upper) + Number(threadEnds(r).lower));
+// A cut row draws exactly the ends (and the knots) threadEnds says.
+const endsAsExpected = (r) => { const e = threadEnds(r); return r.cut && r.ends.upper === e.upper && r.ends.lower === e.lower &&
+  r.knots.upper === e.upper && r.knots.lower === e.lower && r.knotPaint === (e.upper || e.lower) && r.lines.length === threadLines(r); };
 // Row i of «Lo que se te pidió» scrolled to the middle of the screen, and its thread's and disc's boxes there.
 const threadRowInView = (page, i) => page.evaluate((i) => {
   const li = document.querySelectorAll('[aria-labelledby="asked-title"] ul.rows > li.row')[i];
@@ -5285,13 +5300,18 @@ async function threadChecks(browser, base, html) {
     const stopRow = stopAt >= 0 ? await threadRowInView(page, stopAt) : null;
     const discPx = stopRow && stopRow.disc ? await rowPixels(page, Math.round(stopRow.disc.top + stopRow.disc.h / 2 + 2), [Math.round(stopRow.disc.x + stopRow.disc.w / 2 + 4)]) : [];
     check(`${tag}: the disc is painted in --signal on the stop row`, discPx.length === 1 && sameColour(discPx[0], rgbOf(view.signal)), JSON.stringify({ px: discPx, signal: view.signal }));
-    // Two stop rows in a row («Por empezar», then «En curso»): the first keeps its upper end and knot, the second its lower
-    // ones, and between their discs, across the whole track, nothing of the thread is painted (an open cut, not a wiggle).
+    // Two stop rows in a row («Por empezar», then «En curso»), first in the list as what waits always is: no end and no knot
+    // between their discs, none above the first (the list's first row: the thread does not go on above it), and the
+    // second's lower end and knot kept, toward the whole row under it; between their discs, across the whole track, nothing
+    // of the thread is painted (an open cut, not a wiggle).
     const firstStop = rows.findIndex((r, i) => isStop(r) && rows[i + 1] && isStop(rows[i + 1]));
     const pair = firstStop >= 0 ? [rows[firstStop], rows[firstStop + 1]] : null;
-    check(`${tag}: two stop rows in a row: no end and no knot drawn between their discs, the outer ends kept`, pair &&
-      pair[0].ends.upper && pair[0].knots.upper && !pair[0].ends.lower && !pair[0].knots.lower &&
-      !pair[1].ends.upper && !pair[1].knots.upper && pair[1].ends.lower && pair[1].knots.lower, JSON.stringify(pair && pair.map((r) => [r.state, r.ends, r.knots])));
+    check(`${tag}: two stop rows first in the list: no end and no knot between their discs nor above the first, the lower end kept toward the whole row`,
+      pair && firstStop === 0 && !pair[0].ends.upper && !pair[0].knots.upper && !pair[0].ends.lower && !pair[0].knots.lower &&
+      !pair[1].ends.upper && !pair[1].knots.upper && pair[1].ends.lower && pair[1].knots.lower && pair.every(endsAsExpected),
+      JSON.stringify(pair && pair.map((r) => [r.state, r.ends, r.knots, r.knotPaint])));
+    check(`${tag}: a cut end (with its knot) only where the thread goes on, toward a whole neighbour row`, rows.length === 4 &&
+      rows.filter((r) => r.cut).every(endsAsExpected), JSON.stringify(rows.map((r) => [r.state, r.first, r.last, r.ends, r.knots, r.knotPaint])));
     if (pair) {
       const second = await threadRowInView(page, firstStop + 1);
       const first = await page.evaluate((i) => { const d = document.querySelectorAll('[aria-labelledby="asked-title"] ul.rows > li.row')[i].querySelector(".thread-disc").getBoundingClientRect();
@@ -5346,15 +5366,55 @@ async function threadChecks(browser, base, html) {
     await context.close();
   }
 
-  // One stop row alone (the list puts what waits first, so stop rows are always together): it is cut with both its ends and
-  // both its knots.
+  // One stop row alone, first in the list (the list puts what waits first): nothing above it, where the thread does not go
+  // on; its lower end and knot toward the whole rows under it.
   {
     const backend = threadBackend(html, { [IDS.questions]: "pending", [IDS.flow]: "submitted", [IDS.demo]: "submitted", [IDS.replaced]: "received" });
     const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows);
     const rows = (await threadView(page)).rows || [];
     const stops = rows.filter(isStop);
-    check("thread one stop row: it draws both ends and both knots", rows.length === 4 && stops.length === 1 && stops.every((r) => !r.prevStop && !r.nextStop &&
-      r.ends.upper && r.ends.lower && r.knots.upper && r.knots.lower && r.lines.length === 2), JSON.stringify(rows.map((r) => [r.state, r.ends, r.knots])));
+    check("thread one stop row first: no end and no knot above it, its lower end and knot kept", rows.length === 4 && stops.length === 1 &&
+      rows[0] === stops[0] && stops.every((r) => !r.ends.upper && !r.knots.upper && r.ends.lower && r.knots.lower && endsAsExpected(r)),
+      JSON.stringify(rows.map((r) => [r.state, r.ends, r.knots, r.knotPaint])));
+    // A stop between two whole rows (the list does not order it so today, so the rows are moved in the page): it keeps both
+    // its ends and both its knots, as the cut has always been drawn.
+    const moved = await page.evaluate(() => { const lis = [...document.querySelectorAll('[aria-labelledby="asked-title"] ul.rows > li.row')];
+      if (lis.length !== 4) return false; lis[0].parentElement.insertBefore(lis[0], lis[2]); return true; });
+    const after = (await threadView(page)).rows || [];
+    const middle = after[1];
+    check("thread a stop between two whole rows: both ends and both knots", moved && after.length === 4 && middle && isStop(middle) &&
+      !isStop(after[0]) && !isStop(after[2]) && middle.ends.upper && middle.ends.lower && middle.knots.upper && middle.knots.lower && endsAsExpected(middle),
+      JSON.stringify(after.map((r) => [r.state, r.ends, r.knots])));
+    await context.close();
+  }
+
+  // Everything waits: only the discs, one per row, and no line anywhere (no end, no knot, nothing whole), at 1440 and 390.
+  for (const width of [1440, 390]) {
+    const backend = threadBackend(html, { [IDS.questions]: "pending", [IDS.flow]: "in_progress", [IDS.demo]: "pending", [IDS.replaced]: "in_progress" });
+    const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows, { width, height: width < 672 ? PHONE.height : 900 });
+    const rows = (await threadView(page)).rows || [];
+    await page.screenshot({ path: join(outDir, `thread-all-waiting-${width}.png`), fullPage: true });
+    check(`thread all waiting ${width}px: one disc per row and no line, no end, no knot`, rows.length === 4 && rows.every((r) => isStop(r) && r.cut && r.disc &&
+      !r.ends.upper && !r.ends.lower && !r.knots.upper && !r.knots.lower && !r.knotPaint && r.lines.length === 0),
+      JSON.stringify(rows.map((r) => [r.state, r.disc, r.ends, r.knots, r.knotPaint, r.lines])));
+    await context.close();
+  }
+
+  // The disc beside the row's title: its centre within 2 px of the centre of the title's first line, on a phone (390, the
+  // row stacked: title, meta, state) and at 1440, light, dark and forced colours, with a title of TITLE_MAX characters
+  // on the first stop row (it wraps: the disc stays on its first line).
+  for (const width of [390, 1440]) for (const scheme of ["light", "dark", "forced"]) {
+    const tag = `thread disc ${width}px ${scheme}`;
+    const backend = threadBackend(html);
+    backend.pieces[0].title = TITLE_AT_MAX;
+    const { context, page } = await openAt(backend, `#/project/${IDS.project}`, ownRows,
+      { width, height: width < 672 ? PHONE.height : 900, scheme: scheme === "forced" ? "light" : scheme });
+    if (scheme === "forced") { await page.emulateMedia({ forcedColors: "active" }); await sleep(200); }
+    const rows = ((await threadView(page)).rows || []).filter((r) => r.disc);
+    check(`${tag}: the disc's centre is within 2 px of the centre of its title's first line`, rows.length === 2 &&
+      rows.every((r) => typeof r.discMid === "number" && typeof r.titleLineMid === "number" && Math.abs(r.discMid - r.titleLineMid) <= 2) &&
+      (width !== 390 || rows.some((r) => r.titleText === TITLE_AT_MAX && r.titleLines >= 2)),
+      JSON.stringify(rows.map((r) => [r.state, r.titleLines, r.discMid && r.discMid.toFixed(1), r.titleLineMid && r.titleLineMid.toFixed(1)])));
     await context.close();
   }
 

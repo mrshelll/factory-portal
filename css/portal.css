@@ -184,6 +184,9 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
   .row-link > .row-main { display: contents; }
   .row-link .row-title { grid-area: title; }
   .row-link .row-meta { grid-area: meta; }
+  /* On the thread's list the title keeps to the row's top, so the 亻 disc (level with its first line) stays beside it even
+     when the state or the date line is the row's tallest part. */
+  .rows--thread .row-link .row-title { align-self: start; }
 }
 /* What decides on a home row (left to answer, all sent, the owner), on the row's right as a list's state. */
 .row-aside { color: var(--muted); font-size: var(--text-small); }
@@ -229,9 +232,9 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
 
 /* The thread (spec 2026-11-24 «Hilo de jidoka»), only on «Lo que se te pidió» (app.js threadOf): a 2 px line in a track down
    the list's left, through every row and the rules between them, whole beside an item that was sent. Where the factory waits
-   for the person («Por empezar», «En curso») it is cut: its two ends curl away, each with a knot, and the violet 亻 disc sits
-   in the gap; that row takes the stop tint. The row keeps its state in words and its mark (COM-13): the thread is drawing,
-   hidden from assistive technology. The track is the row's first column (the li is a grid, track · content, and its link
+   for the person («Por empezar», «En curso») it is cut: the violet 亻 disc sits in the gap, beside the row's title, and
+   that row takes the stop tint; an end curls away, with a knot, only on a side where the thread goes on (below). The row
+   keeps its state in words and its mark (COM-13): the thread is drawing, hidden from assistive technology. The track is the row's first column (the li is a grid, track · content, and its link
    spans both, so the tint runs under the thread and the row starts at the list's edge with the thread); the link's text
    starts after it, on the spacing scale: the track 24 px and the text at 32 below 672, the track 36 px and the text at 48
    from 672 (the disc 8 px from the track's edges, then 20 px of air). The row's text keeps the reading measure after it.
@@ -245,27 +248,32 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
 /* From 672 a row is one line: a stop row takes a step more above and below, so the cut has room to read as a cut. */
 @media (min-width: 672px) { .rows--thread > .row > .row-link.row--stop { padding-block: var(--space-5); } }
 .thread { grid-area: 1 / 1; position: relative; pointer-events: none; }
+/* Where the cut is: level with the middle of the title's first line, at every width (the row's top padding, a step more on
+   a stop row from 672, and half the body's 1.5 line), so the disc sits beside the title and not at the row's middle. */
+.thread--cut { --thread-mid: calc(var(--space-4) + var(--text-body) * 0.75); }
+@media (min-width: 672px) { .thread--cut { --thread-mid: calc(var(--space-5) + var(--text-body) * 0.75); } }
 .thread::before, .thread--cut::after { content: ""; position: absolute; border: 0 solid var(--thread); }
 /* Whole: one line down the track's middle, over the row's bottom rule so it meets the next row's. */
 .thread::before { inset-block: 0 -1px; left: calc(50% - 1px); border-left-width: 2px; }
 /* Cut: the upper end curls to the left and the lower one to the right, a short quarter turn each, clear of the 20 px disc. */
-.thread--cut::before { inset-block: 0 calc(50% + var(--space-4)); left: auto; right: calc(50% - 1px); width: var(--space-2);
+.thread--cut::before { inset-block: 0 calc(100% - var(--thread-mid) + var(--space-4)); left: auto; right: calc(50% - 1px); width: var(--space-2);
   border-width: 0 2px 2px 0; border-bottom-right-radius: var(--space-2); }
-.thread--cut::after { inset-block: calc(50% + var(--space-4)) -1px; left: calc(50% - 1px); width: var(--space-2);
+.thread--cut::after { inset-block: calc(var(--thread-mid) + var(--space-4)) -1px; left: calc(50% - 1px); width: var(--space-2);
   border-width: 2px 0 0 2px; border-top-left-radius: var(--space-2); }
-/* The knots, one at each curled end. */
-.thread--cut {
-  --knot-upper: radial-gradient(circle at calc(50% - var(--space-2) + 1px) calc(50% - var(--space-4) - 1px), var(--thread) 2.5px, transparent 3px);
-  --knot-lower: radial-gradient(circle at calc(50% + var(--space-2) - 1px) calc(50% + var(--space-4) + 1px), var(--thread) 2.5px, transparent 3px);
-  background: var(--knot-upper), var(--knot-lower);
+/* An end, and its knot, is drawn only on a side where the thread goes on: toward a neighbour row that is whole (its thread
+   not cut). Above a stop that opens the list, below one that closes it, and between two stops nothing is drawn, so a cut
+   never shows a loose hook and a list where everything waits shows only its discs. */
+.thread--cut { --knot-upper: none; --knot-lower: none; background: var(--knot-upper), var(--knot-lower); }
+.thread--cut::before, .thread--cut::after { display: none; }
+.rows--thread > .row:has(> .thread:not(.thread--cut)) + .row > .thread--cut {
+  --knot-upper: radial-gradient(circle at calc(50% - var(--space-2) + 1px) calc(var(--thread-mid) - var(--space-4) - 1px), var(--thread) 2.5px, transparent 3px);
 }
-/* Two stop rows in a row: between their discs the thread stays open, no end drawn on either side (the lower end and its knot
-   of the first, the upper end and its knot of the next), so the gap reads as one cut and not as a wiggle. */
-.rows--thread > .row:has(> .row--stop):has(+ .row > .row--stop) > .thread--cut { --knot-lower: none; }
-.rows--thread > .row:has(> .row--stop):has(+ .row > .row--stop) > .thread--cut::after { display: none; }
-.rows--thread > .row:has(> .row--stop) + .row:has(> .row--stop) > .thread--cut { --knot-upper: none; }
-.rows--thread > .row:has(> .row--stop) + .row:has(> .row--stop) > .thread--cut::before { display: none; }
-.thread-disc { position: absolute; top: 50%; left: 50%; width: calc(var(--space-4) + var(--space-1)); height: calc(var(--space-4) + var(--space-1)); translate: -50% -50%; }
+.rows--thread > .row:has(> .thread:not(.thread--cut)) + .row > .thread--cut::before { display: block; }
+.rows--thread > .row:has(+ .row > .thread:not(.thread--cut)) > .thread--cut {
+  --knot-lower: radial-gradient(circle at calc(50% + var(--space-2) - 1px) calc(var(--thread-mid) + var(--space-4) + 1px), var(--thread) 2.5px, transparent 3px);
+}
+.rows--thread > .row:has(+ .row > .thread:not(.thread--cut)) > .thread--cut::after { display: block; }
+.thread-disc { position: absolute; top: var(--thread-mid); left: 50%; width: calc(var(--space-4) + var(--space-1)); height: calc(var(--space-4) + var(--space-1)); translate: -50% -50%; }
 .thread-disc circle { fill: var(--signal); }
 .thread-disc-mark { stroke: var(--on-signal); }
 /* With the system's forced colours (a contrast theme) the tint and the knots go; the line, as a border, takes the system's
