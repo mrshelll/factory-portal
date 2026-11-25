@@ -1272,9 +1272,14 @@ async function finishBatchChecks(browser, base, html) {
   for (const scheme of ["light", "dark"]) {
     const { context, page } = await open(ownerBackend(html), `#/project/${IDS.ownedProject}`, ".owner-piece .row-item", { width: 1440, scheme });
     const pills = await pillsOf(page, ".owner-piece .row-item > .status");
-    check(`finish: owner's project ${scheme}: each state is a pill with its dot, 4.5:1 on its tint`, pills.length > 0 &&
+    // Nothing on this list waits for the owner, so «En curso» takes the slate pill here (One Meaning): violet stays for the
+    // person's own list.
+    const ownerPill = (word) => PILLS_LIGHT[word === "En curso" ? "Por empezar" : word];
+    check(`finish: owner's project ${scheme}: each state is a pill with its dot, 4.5:1 on its tint; «En curso» is not violet`, pills.length > 0 &&
+      pills.some((p) => p.word === "En curso") &&
       pills.every((p) => p.bg !== "rgba(0, 0, 0, 0)" && contrastRatio(p.color, p.bg) >= 4.5 && p.dot &&
-        (scheme !== "light" || !PILLS_LIGHT[p.word] || (p.color === PILLS_LIGHT[p.word][0] && p.bg === PILLS_LIGHT[p.word][1]))),
+        (scheme !== "light" || !ownerPill(p.word) || (p.color === ownerPill(p.word)[0] && p.bg === ownerPill(p.word)[1])) &&
+        (p.word !== "En curso" || p.bg === pills.find((q) => q.word !== "En curso" && !/Enviada|Recibida/.test(q.word))?.bg)),
       JSON.stringify(pills.map((p) => [p.word, p.color, p.bg])));
     const cols = await page.$$eval(".owner-piece .row-item", (els) => els.map((el) => {
       const r = el.getBoundingClientRect(), s = el.querySelector(":scope > .status").getBoundingClientRect();

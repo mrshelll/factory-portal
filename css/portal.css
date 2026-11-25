@@ -216,7 +216,9 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
   font-weight: 600;
   line-height: 1.2;
 }
-:is(.row-link, .owner-piece .row-item) > .status--in-progress { background: var(--pill-run-bg); color: var(--pill-run); }
+/* Violet «En curso» only where it waits for the reader (One Meaning); on the owner's progress list it keeps the slate pill.
+   Two classes, to weigh as much as the :is() rule above. */
+.row-link > .status.status--in-progress { background: var(--pill-run-bg); color: var(--pill-run); }
 :is(.row-link, .owner-piece .row-item) > :is(.status--sent, .status--done) { background: var(--pill-sent-bg); color: var(--pill-sent); }
 /* With forced colours the tints go: the pill keeps a border so it still reads as one. */
 @media (forced-colors: active) { :is(.row-link, .owner-piece .row-item) > .status { border: 1px solid CanvasText; } }

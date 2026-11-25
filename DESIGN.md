@@ -164,7 +164,7 @@ components:
 
 ninben is named for 亻, the stroke «person» that turned «to move» into jidoka: the loom stops by itself when a thread breaks, and a person decides. The portal is that stop. An aizome-indigo shell runs across the window; under it, a white undyed-cotton page holds one centred reading column. Inside it, one thread runs down the list of what was asked of the signed-in person and breaks exactly where the factory waits for them, with the violet 亻 disc sitting in the gap. Everything else is calm and exact: hairline rules and one hairline panel, small radii, soft state pills, one family, no texture, no fabric imagery, no motion beyond standard hover and focus.
 
-Density is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, a bold page title that leads, text kept to a reading measure. Violet is reserved for what can be touched (actions, links) and for what waits for the person (the stop rows, «N por responder», the «En curso» pill); it never decorates. Every state is said in words inside its pill; the tint and the dot only repeat it.
+Density is that of a working list, not a dashboard: rows of 56 px or more, a 32 px gap between blocks, a bold page title that leads, text kept to a reading measure. Violet is reserved for what can be touched (actions, links) and for what waits for the person (the stop rows, «N por responder», the «En curso» pill on the person's own list); it never decorates. Every state is said in words inside its pill; the tint and the dot only repeat it.
 
 **Tokens are not this project's to invent.** `brand/ninben.css`, `brand/ninben-components.css`, `brand/logo.svg` and `brand/fonts/` are a generated copy (by `scripts/sync-brand.mjs`) of the single source in the factory repo, `software-factory/design-system/assets/brand/`, shared with the factory's pieces. That source is authoritative for every brand token: colours (light and dark), radius, fonts, the 14/16/20/24 text steps, the spacing scale, the page margin and the shared components. Change a brand token there and sync; never edit the copy in `brand/`. The portal's own tokens live in `css/portal.css`: the reading column, the page title's display size, the shell wordmark's sizes, the three state pills and the thread's two colours.
 
@@ -174,7 +174,7 @@ Density is that of a working list, not a dashboard: rows of 56 px or more, a 32 
 - Indigo shell across the window over a white cotton page; content in a centred reading column of at most 60rem; light and dark from the same roles.
 - One accent, violet, meaning «you can touch this» or «this waits for you».
 - The thread: the portal's only signature, drawn on one list only.
-- States as soft pills with their words and dot: violet in progress, indigo-grey not started, green sent.
+- States as soft pills with their words and dot: violet in progress (on the person's own list), indigo-grey not started, green sent.
 - Flat: hairline rules, one hairline panel and tinted rows; no shadows for depth.
 - One family (Figtree, 400/600/700); JetBrains Mono only for the sign-in code.
 
@@ -189,7 +189,7 @@ Indigo and undyed cotton: an indigo-tinted neutral ramp, one violet signal, gree
 ### Secondary
 - **Aizome Shell** (`shell`): the top bar, painted to the window's edges. Text on it is white (`on-shell`); «Entraste como …» takes **Faded Indigo** (`on-shell-muted`), and «Salir»'s border sits halfway between Faded Indigo and the shell.
 - **Thread Indigo** (`thread`, portal-owned): the 2 px thread and its knots. **Stop Wash** (`stop`, portal-owned): the tint of a row where the thread is cut.
-- **State pills** (portal-owned): **Running Violet** words on **Running Wash** (`pill-run` on `pill-run-bg`) for «En curso»; **Slate** on **Slate Wash** (`pill-todo` on `pill-todo-bg`) for «Por empezar», «La abrió», «Reemplazada»; **Sent Green** on **Green Wash** (`pill-sent` on `pill-sent-bg`) for «Enviada» and «Recibida». Every pair is 4.5:1 or more.
+- **State pills** (portal-owned): **Running Violet** words on **Running Wash** (`pill-run` on `pill-run-bg`) for «En curso» on the person's own list; **Slate** on **Slate Wash** (`pill-todo` on `pill-todo-bg`) for «Por empezar», «La abrió», «Reemplazada», and for «En curso» on the owner's progress list, where nothing waits for the owner; **Sent Green** on **Green Wash** (`pill-sent` on `pill-sent-bg`) for «Enviada» and «Recibida». Every pair is 4.5:1 or more.
 
 ### Tertiary
 - **Received Green** (`ok`): the dots of «Enviada» (ring) and «Recibida» (fill), and a notice that went well. Never an action colour.
@@ -204,7 +204,7 @@ Indigo and undyed cotton: an indigo-tinted neutral ramp, one violet signal, gree
 Dark scheme (same roles; brand values from the source, portal values derived in `css/portal.css`): bg #0F1424, sheet #151B2E, ink #E6E9F2, muted #A3ABC4, line #2A3250, signal #8E88FF, shell #1B2547 (lighter than the ground so the bar still reads as a band), ok #6FBF7A, error #FF8A80; thread #8C98C8, stop #1C1A3A; pills #C4BEFF on #2C2866, #C1C7DA on #232A40, #8BD39A on #133022.
 
 ### Named Rules
-**The One Meaning Rule.** Violet means «you can touch this» or «this waits for you». A notice is never violet; nothing decorative is violet; the only violet state is «En curso».
+**The One Meaning Rule.** Violet means «you can touch this» or «this waits for you». A notice is never violet; nothing decorative is violet; the only violet state is «En curso» on the person's own list. On the owner's progress list another person's «En curso» waits for nobody looking at it, so it takes the slate pill.
 
 **The Single Source Rule.** Brand tokens are edited only in the factory's `design-system/assets/brand/` and synced. The portal sets its own tokens only in `css/portal.css`: the reading column, the display size, the shell wordmark, the pills and the thread.
 
@@ -305,6 +305,6 @@ Drawn only on «Lo que se te pidió», the list of what was asked of the signed-
 - **Don't** edit `brand/ninben.css` or `brand/ninben-components.css` in the portal, or set a brand token in `css/portal.css`.
 - **Don't** use shadows for elevation, coloured side stripes on notices, or texture or fabric imagery.
 - **Don't** use the ink-filled status dot in the portal, or carry a state by colour alone.
-- **Don't** make a state other than «En curso» violet, or a notice violet.
+- **Don't** make a state other than «En curso» on the person's own list violet, or a notice violet.
 - **Don't** draw the thread on lists about other people (the owner's progress list) or animate it.
 - **Don't** add a second type family; JetBrains Mono is only for typed figures.
