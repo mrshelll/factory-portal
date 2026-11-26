@@ -11,6 +11,13 @@
 @media (min-width: 672px) { :root { --text-display: 32px; } }
 
 html { -webkit-text-size-adjust: 100%; }
+/* The scrollbar's space is always taken (spec 2026-11-26 «Shared parts stay put», P1): with classic, always-visible
+   scrollbars a short screen had none and a long one 15 px, so every centred part (the reading column, and the masthead's
+   content past 1440 px) moved 7.5 px between screens, and opening a piece passed through a frame without one.
+   `scrollbar-gutter: stable` was measured first and left a 15 px strip of the page at the right end of the shell on a short
+   screen (the gutter shows the page; the shell's spread shadow stops at the scrolling box), so the track is always shown
+   instead: the shell reaches it, as on any long page. With overlay scrollbars (phones, macOS by default) nothing changes. */
+html { overflow-y: scroll; }
 p, h1, h2, ol, ul { margin: 0; }
 /* The parts of the page the browser draws take the brand too: a selection in the signal's tint, the caret in the signal. */
 ::selection { background: var(--soft); color: var(--ink); }

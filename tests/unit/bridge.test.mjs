@@ -64,6 +64,19 @@ test("injectBridge leaves an approval sheet's frame wide (R15): no column rule f
   }
 });
 
+test("injectBridge hides the piece's own scrollbar for every kind: the portal sizes the iframe to the piece", () => {
+  const html = '<!doctype html><html><head><style>html { color: red; }</style></head><body></body></html>';
+  const rule = 'html[data-factory-host="portal"]{scrollbar-width:none}';
+  for (const kind of ["questions", "flow_review", "demo_review", undefined]) {
+    const out = injectBridge(html, { ...config, kind });
+    const at = out.indexOf(rule);
+    assert.ok(at !== -1, `${kind}: the piece's root draws no scrollbar of its own`);
+    assert.equal(out.split(rule).length, 2, `${kind}: once`);
+    assert.ok(at > out.indexOf("</script>") && at < out.indexOf("<style>html { color"), `${kind}: in the injected style, before the piece's own`);
+    assert.ok(out.lastIndexOf("</style>", at) < out.lastIndexOf("<style>", at), `${kind}: inside the injected style element`);
+  }
+});
+
 test("injectBridge handles <head> with attributes and does not confuse <header>", () => {
   const html = '<!DOCTYPE html><html><header>x</header><HEAD data-a="1"><title>t</title></HEAD><body></body></html>';
   const out = injectBridge(html, config);

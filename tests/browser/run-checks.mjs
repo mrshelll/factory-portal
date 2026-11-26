@@ -41,6 +41,12 @@
 // leaves its frame wide, so «Computador» at 1440 keeps each desktop screen at 0.6 of its size or more, and nothing scrolls
 // sideways at 320; a sheet as emitted now lines up with the band at 1440.
 //
+// With --questions and --demo, the shared parts stay put (stabilityChecks, spec 2026-11-26), in a second Chrome with classic
+// scrollbars (launched without --hide-scrollbars), at 1288 and 1600: sampled on every frame (sampleAnchors) while the owner
+// opens «Ver lo que recibió» and goes back, the back link, the title and (at 1600) the brand never change x; «Computador»
+// and «Celular» in the current approval sheet shift no part of the sheet's column; the sheet shows no scrollbar of its own;
+// and on a short home the shell reaches the window's edge or the scrollbar's track.
+//
 // With --questions, the piece screen on a phone too (phoneFrameChecks), at 320 x 640: in Chromium, and in WebKit when
 // playwright-core has its build installed (otherwise a NOTE line says it did not run).
 
@@ -5714,6 +5720,156 @@ async function pieceWidthChecks(browser, base, html, factory) {
   }
 }
 
+// The shared parts' boxes, sampled on every animation frame for `ms` (the first sample at once, so a caller can start it
+// and then click): [{ t, anchors: { [name]: { x, y, h, font } } }] (x, y in the window's coordinates, font the computed
+// font-size), an anchor absent (or without a box) left out of that sample. The anchors are the elements marked data-ancla="<name>"; a name no element carries yet falls back to its selector
+// (marca: the masthead's brand, volver: the back link, titulo: the page's or the piece's h1).
+const ANCHOR_FALLBACKS = { marca: ".masthead .brand", volver: ".back-link", titulo: "h1" };
+function sampleAnchors(page, ms) {
+  return page.evaluate(([duration, fallbacks]) => new Promise((done) => {
+    const samples = [];
+    const start = performance.now();
+    const visible = (el) => { const b = el.getBoundingClientRect(); return b.width || b.height ? el : null; };
+    const sample = () => {
+      const found = {};
+      for (const el of document.querySelectorAll("[data-ancla]")) {
+        const name = el.getAttribute("data-ancla");
+        if (!found[name] && visible(el)) found[name] = el;
+      }
+      for (const [name, selector] of Object.entries(fallbacks)) {
+        if (found[name] || document.querySelector(`[data-ancla="${name}"]`)) continue;
+        const el = [...document.querySelectorAll(selector)].find(visible);
+        if (el) found[name] = el;
+      }
+      const anchors = {};
+      for (const [name, el] of Object.entries(found)) {
+        const b = el.getBoundingClientRect();
+        anchors[name] = { x: +b.left.toFixed(1), y: +b.top.toFixed(1), h: +b.height.toFixed(1), font: getComputedStyle(el).fontSize };
+      }
+      samples.push({ t: +(performance.now() - start).toFixed(1), anchors });
+    };
+    const tick = () => { sample(); if (performance.now() - start < duration) requestAnimationFrame(tick); else done(samples); };
+    sample();
+    requestAnimationFrame(tick);
+  }), [ms, ANCHOR_FALLBACKS]);
+}
+// Every x one anchor took across the samples it is present in.
+const anchorXs = (samples, name) => samples.map((s) => s.anchors[name]).filter(Boolean).map((a) => a.x);
+const spread = (values) => (values.length ? Math.max(...values) - Math.min(...values) : 0);
+
+// In every frame (the portal, the piece and its screens): the layout shifts, each with whether it moved the sheet's column
+// (`main > .frame`, the part of an approval sheet that must stay put while a toggle reflows what is inside it).
+const LAYOUT_SHIFTS = () => {
+  window.__layoutShifts = [];
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        const sources = e.sources || [];
+        window.__layoutShifts.push({ t: +e.startTime.toFixed(1), value: +e.value.toFixed(5),
+          column: sources.some((s) => s.node && s.node.nodeType === 1 && s.node.matches("main > .frame")),
+          sources: sources.map((s) => `${s.node && s.node.nodeType === 1 ? s.node.tagName.toLowerCase() + (s.node.className ? "." + String(s.node.className).trim().split(/\s+/).join(".") : "") : "#text"} `
+            + `${Math.round(s.previousRect.x)},${Math.round(s.previousRect.y)} → ${Math.round(s.currentRect.x)},${Math.round(s.currentRect.y)}`) });
+      }
+    }).observe({ type: "layout-shift", buffered: true });
+  } catch { /* no layout-shift entries in this engine */ }
+};
+
+// Spec 2026-11-26 «Shared parts stay put» (P1, P2), in a Chrome with classic, always-visible scrollbars (the browser passed
+// in is launched without --hide-scrollbars), at 1288 and 1600 px: a short screen has no scrollbar and a long one a 15 px
+// one, so without the space reserved every centred part moved 7.5 px between them, and opening a piece passed through a
+// state without scrollbar. Sampled on every frame while the owner opens «Ver lo que recibió» from the owner's project page
+// (with 300 ms of network, as a real one) and goes back, the back link and the title never change x, nor the brand at 1600
+// (where the masthead's content, centred in a 1440 px frame, moves with the scrollbar). On the person's piece screen,
+// «Computador» and «Celular» in the current approval sheet record no layout shift over 0.01 that moves the sheet's column
+// (the sheet grew past its iframe for a moment and showed its own scrollbar: 0.059), and the sheet's root has
+// scrollbar-width: none (bridge.js). On home with no projects (a short screen) the shell runs to the window's right edge,
+// or to the scrollbar's track when the browser draws one: no strip of the page between them (pixel read).
+async function stabilityChecks(browser, base, html, demoHtml) {
+  const RECEIVED = ownerReceived(IDS.ownedProject, OWNED.demo, PEOPLE.luis);
+  const NETWORK_MS = 300;
+  const LIGHT_SHELL = [31, 42, 78];
+  const open = async (backend, width, latency = 0) => {
+    const context = await mockedContext(browser, { backend, width, height: width === 1288 ? 760 : 900, locale: "es-CO" });
+    await context.addInitScript(LAYOUT_SHIFTS);
+    if (latency) await context.route((url) => url.hostname === SUPABASE_HOST, async (route) => { await sleep(latency); await route.fallback(); });
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: "light" });
+    return { context, page };
+  };
+  for (const width of [1288, 1600]) {
+    const tag = `stability ${width}px (classic scrollbars)`;
+    {
+      const { context, page } = await open(ownerViewBackend(html, null, demoHtml, {}), width, NETWORK_MS);
+      await page.goto(`${base}/#/project/${IDS.ownedProject}`, { waitUntil: "load" });
+      const ready = await page.waitForSelector(`a[href="${RECEIVED}"]`, { timeout: 10000 }).then(() => true).catch(() => false);
+      await page.evaluate(() => document.fonts.ready);
+      await sleep(300);
+      const bar = await page.evaluate(() => ({ bar: innerWidth - document.documentElement.clientWidth, long: document.documentElement.scrollHeight > innerHeight }));
+      check(`${tag}: the owner's project page is long and shows the browser's 15 px scrollbar (so the checks below mean something)`,
+        ready && bar.long && bar.bar === 15, JSON.stringify(bar));
+      const opening = sampleAnchors(page, 2500);
+      await page.locator(`a[href="${RECEIVED}"]`).first().click().catch(() => {});
+      const there = Boolean(await ownerFrame(page));
+      const toPiece = await opening;
+      await page.evaluate(() => scrollTo(0, 0));
+      const closing = sampleAnchors(page, 2500);
+      await page.locator(".back-link").first().click().catch(() => {});
+      const back = await page.waitForSelector(`a[href="${RECEIVED}"]`, { timeout: 10000 }).then(() => true).catch(() => false);
+      const toProject = await closing;
+      await context.close();
+      const samples = [...toPiece, ...toProject];
+      const reached = there && back && toPiece.length > 30 && toProject.length > 30;
+      const moving = `the owner's project page → «Ver lo que recibió» → back, sampled on every frame`;
+      for (const [name, label] of [["volver", "the back link"], ["titulo", "the title"], ...(width === 1600 ? [["marca", "the brand"]] : [])]) {
+        const xs = anchorXs(samples, name);
+        check(`${tag}: ${moving}: ${label} never changes x`, reached && xs.length > 0 && spread(xs) <= 1,
+          JSON.stringify({ reached, samples: samples.length, xs: [...new Set(xs)] }));
+      }
+    }
+    {
+      const { context, page } = await open(newBackend(html, null, demoHtml), width);
+      await page.goto(`${base}/#/piece/${IDS.demo}`, { waitUntil: "networkidle" });
+      const frame = await appSheet(page);
+      if (frame) await frame.evaluate(() => document.fonts.ready);
+      await sleep(500);
+      const before = frame ? await frame.evaluate(() => window.__layoutShifts.length).catch(() => 0) : 0;
+      const modes = [];
+      for (const [name, screenWidth] of [["Computador", "1440px"], ["Celular", null]]) {
+        if (!frame) break;
+        const button = frame.getByRole("button", { name, exact: true });
+        const clicked = await button.click({ timeout: 3000 }).then(() => true).catch(() => false);
+        if (screenWidth) await waitFor(async () => (await frame.evaluate((w) => [...document.querySelectorAll(".screen-frame iframe")].every((f) => f.style.width === w), screenWidth)) || null, 5000);
+        await sleep(1000);
+        modes.push({ name, clicked });
+      }
+      const shifts = frame ? await frame.evaluate((i) => window.__layoutShifts.slice(i), before).catch(() => null) : null;
+      const root = frame ? await frame.evaluate(() => getComputedStyle(document.documentElement).scrollbarWidth).catch(() => null) : null;
+      await context.close();
+      const moved = (shifts || []).filter((s) => s.column && s.value > 0.01);
+      check(`${tag}: the piece screen, «Computador» then «Celular» in the current approval sheet: no layout shift over 0.01 moves the sheet's column`,
+        frame && modes.length === 2 && modes.every((m) => m.clicked) && shifts && moved.length === 0, JSON.stringify({ modes, moved, all: shifts }));
+      check(`${tag}: the piece screen: the sheet's root has scrollbar-width: none (the portal sizes the iframe to the piece)`, root === "none", String(root));
+    }
+    {
+      const backend = newBackend(html);
+      backend.members = [];
+      const { context, page } = await open(backend, width);
+      await page.goto(`${base}/`, { waitUntil: "networkidle" });
+      const empty = await page.waitForSelector(".empty", { timeout: 10000 }).then(() => true).catch(() => false);
+      await page.evaluate(() => document.fonts.ready);
+      const d = await page.evaluate(() => ({ inner: innerWidth, client: document.documentElement.clientWidth, short: document.documentElement.scrollHeight <= innerHeight,
+        page: getComputedStyle(document.body).backgroundColor }));
+      // Where the browser draws a scrollbar (innerWidth > clientWidth), what is right of clientWidth is its track; the shell
+      // must reach it. The pixel at the window's edge must never be the page's own colour: that is a reserved gutter showing
+      // the page through, the strip that cuts the shell short.
+      const [atClient, atEdge] = await rowPixels(page, 10, [d.client - 2, d.inner - 2]);
+      await context.close();
+      check(`${tag}: home with no projects (short): the shell reaches the window's right edge or the scrollbar's track, no strip of the page between`,
+        empty && d.short && sameColour(atClient, LIGHT_SHELL) && atEdge.join() !== rgbOf(d.page).join(), JSON.stringify({ ...d, atClient, atEdge }));
+    }
+  }
+}
+
 const { chromium, webkit: webkitType } = loadPlaywright();
 const { server, base } = await startServer();
 const browser = await chromium.launch({ executablePath: chromePath(), headless: true });
@@ -5752,6 +5908,11 @@ try {
   if (args.questions && args.demo) await replacedAppChecks(browser, base, read(args.questions), read(args.flow), read(args.demo));
   if (args.questions) await closureChecks(browser, base, read(args.questions));
   if (args.questions && args.factory) await pieceWidthChecks(browser, base, read(args.questions), args.factory);
+  if (args.questions && args.demo) {
+    // Classic, always-visible scrollbars for these checks only: Playwright's default --hide-scrollbars gives them no width.
+    const classic = await chromium.launch({ executablePath: chromePath(), headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
+    try { await stabilityChecks(classic, base, read(args.questions), read(args.demo)); } finally { await classic.close(); }
+  }
   await screenAxeChecks(browser);
   await screenFitChecks(browser);
 } finally {

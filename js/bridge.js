@@ -615,7 +615,11 @@ const SCREEN_FRAME_STYLE = 'html[data-factory-host="portal"] .screen-frame{--scr
 // 1056 px, so in a 60rem frame each desktop screen would shrink from about 0.63 of its size to 0.43, unreadable. It stays
 // wide, misaligned with the band, until it is resent; a sheet emitted since then centres itself.
 const LEGACY_COLUMN_STYLE = 'html[data-factory-host="portal"] main>.frame{max-width:60rem;margin-inline:auto}';
-const injectedStyle = (kind) => `<style>${SCREEN_FRAME_STYLE}${kind === "demo_review" ? "" : LEGACY_COLUMN_STYLE}</style>`;
+// Every kind: the host sizes the iframe to the piece, so the piece's own scrollbar is only ever a transient that shifts
+// its content (an approval sheet's «Computador» grew it past the iframe for a moment: 7.5 px sideways and back). The piece
+// stays scrollable, only the bar is not drawn, so a lost height message still leaves its content reachable.
+const NO_OWN_SCROLLBAR_STYLE = 'html[data-factory-host="portal"]{scrollbar-width:none}';
+const injectedStyle = (kind) => `<style>${SCREEN_FRAME_STYLE}${NO_OWN_SCROLLBAR_STYLE}${kind === "demo_review" ? "" : LEGACY_COLUMN_STYLE}</style>`;
 
 // Inserts the bridge as the first thing inside <head>. Without <head>, a <head> is created right
 // after <html> or the doctype; the doctype must stay first or the piece falls into quirks mode.
