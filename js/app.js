@@ -75,20 +75,21 @@ function visuallyHiddenStatus() {
 }
 
 // The masthead with the ninben brand, the same on every screen (the piece screen included, where it is a
-// <div> inside the screen's single <header>).
+// <div> inside the screen's single <header>). It and the brand are anchors (data-ancla): shared parts that stay put from one
+// screen to the next (spec 2026-11-26 «Shared parts stay put», tests/browser/run-checks.mjs sharedHeadChecks).
 function masthead(headerActions = [], tag = "header") {
   // The brand is a link home, on every screen after signing in (the logo is the way to «Tus proyectos»); on home itself it is
   // the current page. On the sign-in screens there is no home to go to, so it is the mark alone: tapping it would only wipe
   // the code being typed.
   const mark = [logo(), h("span", {}, t("brand"))];
   const brand = state.view === "sign-in"
-    ? h("div", { class: "brand", "data-rol": "marca-producto" }, mark)
-    : h("a", { class: "brand", "data-rol": "marca-producto", href: "#/", "aria-label": t("brandHome"),
+    ? h("div", { class: "brand", "data-rol": "marca-producto", "data-ancla": "marca" }, mark)
+    : h("a", { class: "brand", "data-rol": "marca-producto", "data-ancla": "marca", href: "#/", "aria-label": t("brandHome"),
       "aria-current": ["", "#", "#/"].includes(location.hash) ? "page" : null }, mark);
-  // Who is signed in, in the shell next to «Salir» (on a phone on its own line under the brand: portal.css): on the screens
-  // that carry «Salir», never on sign-in nor on the piece screen.
+  // Who is signed in, in the shell next to «Salir» (on a phone on its own line under the brand: portal.css): on every screen
+  // that carries «Salir» (all of them after signing in, the piece screen too), never on sign-in.
   const email = headerActions.length && state.view !== "sign-in" ? state.session?.user?.email : null;
-  return h(tag, { class: "masthead" },
+  return h(tag, { class: "masthead", "data-ancla": "barra" },
     brand,
     email ? h("p", { class: "masthead-who" }, t("signedInAs", { email })) : null,
     headerActions.length ? h("div", { class: "masthead-actions" }, headerActions) : null);
@@ -98,7 +99,7 @@ function masthead(headerActions = [], tag = "header") {
 // name says where. Below 672 px the link reads «← Volver», one line whatever the destination's name, and its name still
 // says where («Volver a {project}»); from 672 it shows the destination (portal.css).
 function backLink({ href, text, label }) {
-  return h("a", { class: "back-link", href, "aria-label": label }, backArrow(),
+  return h("a", { class: "back-link", "data-ancla": "volver", href, "aria-label": label }, backArrow(),
     h("span", { class: "back-link-long" }, text), h("span", { class: "back-link-short" }, t("backShort")));
 }
 const homeBack = () => ({ href: "#/", text: t("backToProjects"), label: t("backToProjectsLabel") });
@@ -116,7 +117,7 @@ function frameLayout({ title, meta = [], headerActions = [], back = null }) {
       h("div", { "data-rol": "marco" },
         back ? h("p", { class: "page-context" }, backLink(back)) : null,
         h("div", { class: "page-head" },
-          h("h1", {}, title),
+          h("h1", { "data-ancla": "titulo" }, title),
           meta.filter(Boolean).map((line) => h("p", { class: "page-meta" }, line))),
         notices, body, live))));
   return { notices, body, live };
@@ -1261,27 +1262,28 @@ function saverFor(pieceId) {
   return state.savers.get(pieceId);
 }
 
-// The frame of the piece screen: the same masthead as every screen, then the way back (to the piece's project, or home
-// until it is known) and the title band on the same left edge, the notices, and the piece below (it drops its own brand
-// bar in the portal). The line next to the title (whether the draft was saved; on the owner's screen «Lo que envió … el …»)
-// goes beside «Volver» on a phone (portal.css), so the title band stays short with a title of two lines.
-function pieceLayout(titleText, back = homeBack()) {
+// The frame of the piece screen: the same masthead as every screen («Entraste como …» and «Salir» included: headerActions),
+// then the same head as a project's page, in the reading column: the way back (to the piece's project, or home until it is
+// known), the title in the page title's type and, as the head's data line, the piece's status (whether the draft was saved;
+// on the owner's screen «Lo que envió … el …»). Then the notices, and the piece below (it drops its own brand bar in the
+// portal). Spec 2026-11-26 «Shared parts stay put» P3: going from a project to a piece nothing shared moves.
+function pieceLayout(titleText, back = homeBack(), headerActions = []) {
   // A notice that stays for the whole visit (a replaced version); the zone below takes the passing ones.
   const pinned = h("div", { class: "notices", "data-rol": "aviso-fijo" });
   const notices = h("div", { class: "notices", "data-rol": "avisos" });
-  const title = h("h1", { class: "piece-title" }, titleText);
-  const status = h("p", { class: "piece-status" });
+  const title = h("h1", { class: "piece-title", "data-ancla": "titulo" }, titleText);
+  // Hidden until the screen knows it has a line to show there (an open piece's save line, the owner's «Lo que envió …»).
+  const status = h("p", { class: "page-meta piece-status", hidden: true });
   const main = h("main", { id: "main", class: "piece-main", "data-rol": "cuerpo" });
   const live = visuallyHiddenStatus();
   main.append(live);
   replaceChildren(root, h("div", { class: "piece-layout" },
     h("div", { class: "frame", "data-rol": "marco" },
       h("header", {},
-        masthead([], "div"),
+        masthead(headerActions, "div"),
         h("div", { class: "piece-bar" },
-          backLink(back),
-          // The space parts the title and the save line on one line, and goes at a line break (portal.css).
-          h("div", { class: "piece-heading" }, title, " ", status))),
+          h("p", { class: "page-context" }, backLink(back)),
+          h("div", { class: "page-head" }, title, status))),
       pinned, notices),
     main));
   return { pinned, notices, title, status, main, live };
@@ -1431,6 +1433,9 @@ function showClosedPanel({ pinned, notices, live, context, pieceId, viewId, late
       failure, button), h("div", { class: "secondary-actions" }, cancel));
     form = input;
     input.focus();
+    // Focusing leaves a field that is partly on screen where it is (on a short phone, under the page head, its lower edge
+    // can fall past the window): bring all of it into view.
+    input.scrollIntoView({ block: "nearest" });
   }
 
   const why = context.closed === "received"
@@ -1455,8 +1460,15 @@ async function showPiece(pieceId, viewId) {
     state.statusListeners.delete(pieceId);
     if (frame) { await frame.flush(LEAVE_FLUSH_MS); frame.destroy(); }
   };
+  // «Salir» in the masthead, as on every screen: it signs out through this screen's notices (an unsaved draft asks there).
+  // The piece first hands over a change it has not posted yet (as on leaving the screen), so a change made just before is
+  // saved rather than taken for one that cannot be.
+  const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: async () => {
+    if (frame) await frame.flush(LEAVE_FLUSH_MS);
+    signOut(layout.notices);
+  } }, t("signOut"));
   setTitle(t("opening"));
-  let layout = pieceLayout(t("opening"));
+  let layout = pieceLayout(t("opening"), homeBack(), [signOutButton()]);
   // A save of this piece may still be in flight; let it land before reading the server copy.
   if (state.savers.has(pieceId)) await Promise.race([state.savers.get(pieceId).idle(), sleep(REOPEN_SAVE_WAIT_MS)]);
   if (viewId !== state.viewId) return;
@@ -1488,7 +1500,7 @@ async function showPiece(pieceId, viewId) {
   const projectName = project && (project.name || project.slug);
   layout = pieceLayout(pieceTitle, projectName
     ? { href: projectHref(piece.project_id), text: projectName, label: t("backTo", { name: projectName }) }
-    : homeBack());
+    : homeBack(), [signOutButton()]);
   // «La abrió»: an open piece records that the person opened it here (the server keeps the first time). Not awaited,
   // and it never throws: the piece opens whatever happens to that call.
   if (context.closed === null) markPieceOpened(supabase, pieceId);
@@ -1543,8 +1555,10 @@ async function showPiece(pieceId, viewId) {
       : saveStatus !== "idle" ? t({ saving: "saving", saved: savedKey, error: "saveError" }[saveStatus]) : "";
     const sent = sendUnshown ? t("sentAt", { date: formatDate(state.lang, lastSubmittedAt, { withTime: true }) }) : "";
     const text = [line, sent].filter(Boolean).join(" · ");
+    // On an open piece the line stays shown, empty while there is nothing to say: it keeps its room (portal.css), so the
+    // piece does not move when it starts saying something. A closed piece never says anything there.
     status.textContent = text;
-    status.hidden = !text;
+    status.hidden = Boolean(closed) && !text;
   }
   state.statusListeners.set(pieceId, (next) => {
     // "saved" or "error" after a draft that fit: the newest change is no longer too large.
@@ -1640,8 +1654,10 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId, mode = "
   state.view = receivedMode ? "owner-received" : "owner-piece";
   let frame = null;
   state.cleanup = () => { if (frame) { frame.destroy(); frame = null; } };
+  // «Salir» in the masthead, as on every screen (nothing of the owner's is saved here, so it signs out at once).
+  const signOutButton = () => h("button", { type: "button", class: "button button--secondary", onclick: () => signOut(layout.notices) }, t("signOut"));
   setTitle(t("opening"));
-  let layout = pieceLayout(t("opening"));
+  let layout = pieceLayout(t("opening"), homeBack(), [signOutButton()]);
 
   let context;
   try {
@@ -1669,7 +1685,8 @@ async function showOwnerPiece({ projectId, pieceId, memberId }, viewId, mode = "
   const projectName = project && (project.name || project.slug);
   layout = pieceLayout(pieceTitle, projectName
     ? { href: projectHref(projectId), text: projectName, label: t("backTo", { name: projectName }) }
-    : homeBack());
+    : homeBack(), [signOutButton()]);
+  layout.status.hidden = false;
   if (receivedMode) {
     layout.status.textContent = member.display_name ? t("ownerReceivedBy", { name: member.display_name }) : t("ownerReceivedByNoName");
     showNotice(layout.notices, { tone: "info", text: t("ownerReceivedNotice"), dismissible: false });

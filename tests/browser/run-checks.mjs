@@ -141,6 +141,17 @@ function check(name, condition, detail = "") {
   console.log(`${condition ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// As a person does before going back from a piece they scrolled through: scroll to the top and wait until the page has
+// not moved for 400 ms (at most 3 s). After a send the piece has the focus and the page shows its sent screen, below the
+// head; a click aimed at «Volver» off screen then never reached the portal.
+const toTop = async (page) => {
+  await page.evaluate(() => scrollTo(0, 0));
+  return waitFor(async () => {
+    const before = await page.evaluate(() => scrollY);
+    await sleep(400);
+    return (before === 0 && (await page.evaluate(() => scrollY)) === 0) || null;
+  }, 3000);
+};
 async function waitFor(fn, timeout = 5000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -1209,8 +1220,9 @@ async function compositionChecks(browser, base, html) {
   // and the rule above the piece start on the same left edge as the project page's content, and the band and the rule are
   // as wide as that column, at 320, 672, 1056 and 1440, on the person's screen and on the owner's read-only one. The
   // iframe stays outside the column (pieceWidthChecks holds its width), and the piece centres its own content (its main > .frame)
-  // in the same column, so that content starts on the band's edge and is as wide as the column. The piece's title is a heading of the screen:
-  // 20 px below 672 and 24 px from 672, bold, in the ink; with TITLE_MAX characters it wraps, whole, never cut.
+  // in the same column, so that content starts on the band's edge and is as wide as the column. The piece's title is the page
+  // title, as on every screen (spec 2026-11-26 P3): --text-display, 24 px below 672 and 32 px from 672, bold, in the ink; with
+  // TITLE_MAX characters it wraps, whole, never cut.
   const projectColumn = async (width) => {
     const { context, page } = await open(threadBackend(html), `#/project/${IDS.project}`, '[aria-labelledby="asked-title"] .row-link', { width });
     const col = await page.evaluate(() => { const r = document.querySelector("main [data-rol=marco]")?.getBoundingClientRect(); return r ? { x: r.left, w: r.width } : null; });
@@ -1253,8 +1265,8 @@ async function compositionChecks(browser, base, html) {
       check(`${tag}: «Volver», the title band and the rule above the piece start on the project page's content edge, the band and the rule as wide as its column`,
         col && b.back && b.bar && b.title && b.rule && near(b.back.x, col.x) && near(b.bar.x, col.x) && near(b.title.x, col.x) && near(b.rule.x, col.x) &&
         near(b.bar.w, col.w) && near(b.rule.w, col.w), JSON.stringify({ column: col, back: b.back, bar: b.bar, title: b.title, rule: b.rule }));
-      const size = width >= 672 ? "24px" : "20px";
-      check(`${tag}: the piece's title is a heading of the screen, ${size}, bold, in the ink, never cut`, b.size === size && b.weight === 700 &&
+      const size = width >= 672 ? "32px" : "24px";
+      check(`${tag}: the piece's title is the page title, --text-display ${size}, bold, in the ink, never cut`, b.size === size && b.weight === 700 &&
         b.colour === b.ink && !b.cut && (!longTitle || (b.text === longTitle && (width >= 672 || b.title.h >= 2 * b.lineHeight - 1))),
         JSON.stringify({ size: b.size, weight: b.weight, colour: b.colour, ink: b.ink, cut: b.cut, h: b.title && b.title.h, lineHeight: b.lineHeight }));
     }
@@ -1614,6 +1626,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
 
   // Back to the project: the list reflects the new status; reopen restores from the server draft.
+  await toTop(page);
   await page.click(".back-link");
   await page.waitForSelector('.row-link[href^="#/piece/"]', { timeout: 10000 });
   const rows = await page.$$eval(".row", (els) => els.map((e) => e.textContent));
@@ -1642,7 +1655,8 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   backend.logoutFails = true;
   await pieceFrame(page).evaluate(() => responder("q-001", "no_se"));
   await page.click(".back-link");
-  await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 });
+  // The piece screen has «Salir» too: wait for the project page itself before signing out from it.
+  await page.waitForSelector('.page-head h1:text-is("Portal de prueba")', { timeout: 10000 });
   await page.click(".masthead .button--secondary");
   const askOut = await waitFor(async () => page.evaluate(() => {
     const n = document.querySelector("[data-rol=avisos] .notice");
@@ -5722,27 +5736,18 @@ async function pieceWidthChecks(browser, base, html, factory) {
 
 // The shared parts' boxes, sampled on every animation frame for `ms` (the first sample at once, so a caller can start it
 // and then click): [{ t, anchors: { [name]: { x, y, h, font } } }] (x, y in the window's coordinates, font the computed
-// font-size), an anchor absent (or without a box) left out of that sample. The anchors are the elements marked data-ancla="<name>"; a name no element carries yet falls back to its selector
-// (marca: the masthead's brand, volver: the back link, titulo: the page's or the piece's h1).
-const ANCHOR_FALLBACKS = { marca: ".masthead .brand", volver: ".back-link", titulo: "h1" };
+// font-size), an anchor absent (or without a box) left out of that sample. The anchors are the elements marked
+// data-ancla="<name>" (app.js: barra the masthead, marca its brand, volver the back link, titulo the page's or the piece's h1).
 function sampleAnchors(page, ms) {
-  return page.evaluate(([duration, fallbacks]) => new Promise((done) => {
+  return page.evaluate((duration) => new Promise((done) => {
     const samples = [];
     const start = performance.now();
     const visible = (el) => { const b = el.getBoundingClientRect(); return b.width || b.height ? el : null; };
     const sample = () => {
-      const found = {};
+      const anchors = {};
       for (const el of document.querySelectorAll("[data-ancla]")) {
         const name = el.getAttribute("data-ancla");
-        if (!found[name] && visible(el)) found[name] = el;
-      }
-      for (const [name, selector] of Object.entries(fallbacks)) {
-        if (found[name] || document.querySelector(`[data-ancla="${name}"]`)) continue;
-        const el = [...document.querySelectorAll(selector)].find(visible);
-        if (el) found[name] = el;
-      }
-      const anchors = {};
-      for (const [name, el] of Object.entries(found)) {
+        if (anchors[name] || !visible(el)) continue;
         const b = el.getBoundingClientRect();
         anchors[name] = { x: +b.left.toFixed(1), y: +b.top.toFixed(1), h: +b.height.toFixed(1), font: getComputedStyle(el).fontSize };
       }
@@ -5751,7 +5756,7 @@ function sampleAnchors(page, ms) {
     const tick = () => { sample(); if (performance.now() - start < duration) requestAnimationFrame(tick); else done(samples); };
     sample();
     requestAnimationFrame(tick);
-  }), [ms, ANCHOR_FALLBACKS]);
+  }), ms);
 }
 // Every x one anchor took across the samples it is present in.
 const anchorXs = (samples, name) => samples.map((s) => s.anchors[name]).filter(Boolean).map((a) => a.x);
@@ -5788,12 +5793,12 @@ async function stabilityChecks(browser, base, html, demoHtml) {
   const RECEIVED = ownerReceived(IDS.ownedProject, OWNED.demo, PEOPLE.luis);
   const NETWORK_MS = 300;
   const LIGHT_SHELL = [31, 42, 78];
-  const open = async (backend, width, latency = 0) => {
+  const open = async (backend, width, latency = 0, scheme = "light") => {
     const context = await mockedContext(browser, { backend, width, height: width === 1288 ? 760 : 900, locale: "es-CO" });
     await context.addInitScript(LAYOUT_SHIFTS);
     if (latency) await context.route((url) => url.hostname === SUPABASE_HOST, async (route) => { await sleep(latency); await route.fallback(); });
     const page = await context.newPage();
-    await page.emulateMedia({ colorScheme: "light" });
+    await page.emulateMedia({ colorScheme: scheme });
     return { context, page };
   };
   for (const width of [1288, 1600]) {
@@ -5838,22 +5843,26 @@ async function stabilityChecks(browser, base, html, demoHtml) {
         if (!frame) break;
         const button = frame.getByRole("button", { name, exact: true });
         const clicked = await button.click({ timeout: 3000 }).then(() => true).catch(() => false);
-        if (screenWidth) await waitFor(async () => (await frame.evaluate((w) => [...document.querySelectorAll(".screen-frame iframe")].every((f) => f.style.width === w), screenWidth)) || null, 5000);
+        // The toggle must have done something: «Computador» sets every screen's iframe to 1440 px, «Celular» puts it back.
+        const switched = Boolean(await waitFor(async () => (await frame.evaluate((w) => {
+          const frames = [...document.querySelectorAll(".screen-frame iframe")];
+          return frames.length > 0 && frames.every((f) => (w ? f.style.width === w : f.style.width !== "1440px"));
+        }, screenWidth).catch(() => false)) || null, 5000));
         await sleep(1000);
-        modes.push({ name, clicked });
+        modes.push({ name, clicked, switched });
       }
       const shifts = frame ? await frame.evaluate((i) => window.__layoutShifts.slice(i), before).catch(() => null) : null;
       const root = frame ? await frame.evaluate(() => getComputedStyle(document.documentElement).scrollbarWidth).catch(() => null) : null;
       await context.close();
       const moved = (shifts || []).filter((s) => s.column && s.value > 0.01);
       check(`${tag}: the piece screen, «Computador» then «Celular» in the current approval sheet: no layout shift over 0.01 moves the sheet's column`,
-        frame && modes.length === 2 && modes.every((m) => m.clicked) && shifts && moved.length === 0, JSON.stringify({ modes, moved, all: shifts }));
+        frame && modes.length === 2 && modes.every((m) => m.clicked && m.switched) && shifts && moved.length === 0, JSON.stringify({ modes, moved, all: shifts }));
       check(`${tag}: the piece screen: the sheet's root has scrollbar-width: none (the portal sizes the iframe to the piece)`, root === "none", String(root));
     }
-    {
+    for (const scheme of ["light", "dark"]) {
       const backend = newBackend(html);
       backend.members = [];
-      const { context, page } = await open(backend, width);
+      const { context, page } = await open(backend, width, 0, scheme);
       await page.goto(`${base}/`, { waitUntil: "networkidle" });
       const empty = await page.waitForSelector(".empty", { timeout: 10000 }).then(() => true).catch(() => false);
       await page.evaluate(() => document.fonts.ready);
@@ -5864,8 +5873,120 @@ async function stabilityChecks(browser, base, html, demoHtml) {
       // the page through, the strip that cuts the shell short.
       const [atClient, atEdge] = await rowPixels(page, 10, [d.client - 2, d.inner - 2]);
       await context.close();
-      check(`${tag}: home with no projects (short): the shell reaches the window's right edge or the scrollbar's track, no strip of the page between`,
-        empty && d.short && sameColour(atClient, LIGHT_SHELL) && atEdge.join() !== rgbOf(d.page).join(), JSON.stringify({ ...d, atClient, atEdge }));
+      check(`${tag}: home with no projects (short), ${scheme}: the shell reaches the window's right edge or the scrollbar's track, no strip of the page between`,
+        empty && d.short && sameColour(atClient, scheme === "dark" ? rgbOf(DARK_SHELL) : LIGHT_SHELL) && atEdge.join() !== rgbOf(d.page).join(),
+        JSON.stringify({ ...d, atClient, atEdge }));
+    }
+  }
+}
+
+// Spec 2026-11-26 «Shared parts stay put» (P3-P5): every signed-in screen has the same masthead (the brand, «Entraste como …»,
+// «Salir») and the same page head («←» and the title in the page title's type). In the same classic-scrollbar Chrome, at 390,
+// 1288, 1440 and 1600 px, light, the settled boxes of the four anchors (data-ancla: barra the masthead, marca the brand link,
+// volver the back link, titulo the page's or the piece's h1) are equal across home, a person's project page, the owner's
+// project page, the person's «Decisiones», the owner's point of «Decisiones», a person's piece and the owner's «Ver lo que
+// recibió»: within 1 px in x, y and height, and the same computed font-size (width is never compared: the title's text sets
+// it). The back link and the title are compared among the screens with a back link (all but home); home's title, with no
+// back link above it, starts where «←» starts on the others, in the same font-size as their titles (controller's ruling,
+// 2026-11-26: the first thing under the masthead starts at the same y on every screen; home's layout stays). The piece
+// screens show «Entraste como …» and «Salir»; the first save line does not move the piece; «Salir» right after a change on
+// a piece saves it first, and «Salir» signs out from the owner's rehearsal of a piece.
+async function sharedHeadChecks(browser, base, html) {
+  const ANCHORS = ["barra", "marca", "volver", "titulo"];
+  // A title that fits one line at 390 px, so the title's height compares the head and not its words (a two-line title is
+  // taller and has not moved). The fixtures' own titles wrap there: the point's and the person's piece's.
+  const ONE_LINE = "Viajes";
+  const pieceReady = (page) => waitFor(async () => { const f = pieceFrame(page); return f && (await f.evaluate(() => typeof respondidas === "function").catch(() => false)) ? f : null; }, 10000);
+  const screens = [
+    { name: "home", backend: () => newBackend(html), hash: "", ready: ".row-link" },
+    { name: "a person's project page", backend: () => threadBackend(html), hash: `#/project/${IDS.project}`, ready: '[aria-labelledby="asked-title"] .row-link' },
+    { name: "the owner's project page", backend: () => ownerBackend(html), hash: `#/project/${IDS.ownedProject}`, ready: ".owner-piece .row-item" },
+    { name: "the person's «Decisiones»", backend: () => decisionsBackend(html), hash: `#/project/${IDS.project}`, ready: ".decision" },
+    { name: "the owner's point of «Decisiones»", hash: `#/project/${IDS.ownedProject}/decisions/${OKEY.trips}`, ready: ".owner-answer",
+      backend: () => { const b = ownerDecisionsBackend(html); b.decisions[IDS.ownedProject].points.find((p) => p.key === OKEY.trips).title = ONE_LINE; return b; } },
+    { name: "a person's piece", hash: `#/piece/${IDS.questions}`, piece: true,
+      backend: () => { const b = newBackend(html); b.pieces.find((p) => p.id === IDS.questions).title = ONE_LINE; return b; } },
+    { name: "the owner's «Ver lo que recibió»", backend: () => ownerViewBackend(html, null, null, {}), hash: ownerReceived(IDS.ownedProject, OWNED.questions, PEOPLE.luis), piece: true },
+  ];
+  const near = (values) => values.length > 0 && spread(values) <= 1;
+  for (const width of [390, 1288, 1440, 1600]) {
+    const tag = `shared head ${width}px (classic scrollbars)`;
+    const boxes = {};
+    for (const screen of screens) {
+      const backend = screen.backend();
+      const context = await mockedContext(browser, { backend, width, height: width < 672 ? 844 : width === 1288 ? 760 : 900, locale: "es-CO" });
+      const page = await context.newPage();
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.goto(`${base}/${screen.hash}`, { waitUntil: "networkidle" });
+      const ready = screen.piece ? Boolean(await pieceReady(page)) : await page.waitForSelector(screen.ready, { timeout: 10000 }).then(() => true).catch(() => false);
+      await page.evaluate(() => document.fonts.ready);
+      await sleep(300);
+      const samples = await sampleAnchors(page, 200);
+      boxes[screen.name] = ready ? samples[samples.length - 1].anchors : {};
+      if (screen.piece) {
+        const head = await page.evaluate(() => {
+          const shell = document.querySelector('[data-ancla="barra"]');
+          const shown = (el) => Boolean(el) && el.getClientRects().length > 0;
+          const who = shell && shell.querySelector(".masthead-who");
+          const out = shell ? [...shell.querySelectorAll("button")].filter(shown).map((b) => b.textContent.trim()) : [];
+          return { who: shown(who) ? who.textContent : null, out };
+        });
+        check(`${tag}: ${screen.name}: the masthead says «Entraste como ${USER.email}» and has «Salir», as every screen's`,
+          ready && head.who === `Entraste como ${USER.email}` && head.out.length === 1 && head.out[0] === "Salir", JSON.stringify({ ready, ...head }));
+      }
+      if (screen.piece && !screen.hash.endsWith("/received")) {
+        // The status line keeps its room: the person's first change makes it say «Guardando…» / «Guardado» without moving
+        // the piece (under their finger on a phone).
+        const frame = pieceFrame(page);
+        const pieceTop = () => page.evaluate(() => { const f = document.querySelector("iframe.piece-frame"); return f ? +(f.getBoundingClientRect().top + scrollY).toFixed(1) : null; });
+        const before = await pieceTop();
+        if (frame) await frame.evaluate(() => responder("q-001", "si")).catch(() => {});
+        const said = await waitFor(async () => (await page.textContent(".piece-status").catch(() => "")).trim() || null, 5000);
+        const after = await pieceTop();
+        check(`${tag}: ${screen.name}: the first change's save line shows without moving the piece`, ready && said && before !== null && Math.abs(after - before) <= 1,
+          JSON.stringify({ said, before, after }));
+      }
+      if (screen.piece && !screen.hash.endsWith("/received") && width === 1440) {
+        // «Salir» right after a change on the piece: the change is saved first (the piece hands it over), then the session ends.
+        const frame = pieceFrame(page);
+        if (frame) await frame.evaluate(() => responder("q-002", "si")).catch(() => {});
+        await page.locator('[data-ancla="barra"] button', { hasText: "Salir" }).first().click({ timeout: 3000 }).catch(() => {});
+        const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k) } : null), STORAGE_KEY), 10000);
+        const saved = backend.drafts.some((d) => JSON.stringify(d).includes("q-002"));
+        check(`${tag}: ${screen.name}: «Salir» right after a change saves it, then lands on a clean sign-in screen`, out && !out.session && saved,
+          JSON.stringify({ out, drafts: backend.drafts.length, saved }));
+      }
+      if (screen.piece && screen.hash.endsWith("/received") && width === 1440) {
+        // «Salir» from the owner's rehearsal: nothing to save there, so it signs out at once and lands on sign-in.
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(String(e)));
+        await page.locator('[data-ancla="barra"] button', { hasText: "Salir" }).first().click({ timeout: 3000 }).catch(() => {});
+        const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k), hash: location.hash } : null), STORAGE_KEY), 10000);
+        check(`${tag}: ${screen.name}: «Salir» signs out from the rehearsal and lands on a clean sign-in screen`, out && !out.session && errors.length === 0,
+          JSON.stringify({ out, errors }));
+      }
+      await context.close();
+    }
+    for (const name of ANCHORS) {
+      // The way back and the title are compared among the screens with a way back (all but home); home's title is below.
+      const where = screens.filter((s) => !["volver", "titulo"].includes(name) || s.name !== "home").map((s) => s.name);
+      const found = where.map((w) => [w, boxes[w][name] || null]);
+      const present = found.filter(([, b]) => b).map(([, b]) => b);
+      const fonts = new Set(present.map((b) => b.font));
+      check(`${tag}: «${name}» is on ${where.length === screens.length ? "every screen" : "every screen but home"} at the same x, y and height (±1 px), in the same font-size`,
+        present.length === where.length && near(present.map((b) => b.x)) && near(present.map((b) => b.y)) && near(present.map((b) => b.h)) && fonts.size === 1,
+        JSON.stringify(Object.fromEntries(found)));
+    }
+    // Home has no way back: its title is the first thing under the masthead, so it starts where «←» starts on the other
+    // screens (±1 px in x and y), in the other titles' font-size.
+    {
+      const home = boxes.home.titulo || null;
+      const others = screens.filter((s) => s.name !== "home");
+      const backs = others.map((s) => boxes[s.name].volver).filter(Boolean);
+      const titleFonts = new Set(others.map((s) => boxes[s.name].titulo).filter(Boolean).map((b) => b.font));
+      check(`${tag}: home's title (no way back above it) starts where «←» starts on the other screens, in the same font-size as their titles`,
+        home && backs.length === others.length && near([home.x, ...backs.map((b) => b.x)]) && near([home.y, ...backs.map((b) => b.y)]) &&
+        titleFonts.size === 1 && titleFonts.has(home.font), JSON.stringify({ home, backs: backs.map(({ x, y }) => ({ x, y })), fonts: [...titleFonts] }));
     }
   }
 }
@@ -5911,7 +6032,10 @@ try {
   if (args.questions && args.demo) {
     // Classic, always-visible scrollbars for these checks only: Playwright's default --hide-scrollbars gives them no width.
     const classic = await chromium.launch({ executablePath: chromePath(), headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
-    try { await stabilityChecks(classic, base, read(args.questions), read(args.demo)); } finally { await classic.close(); }
+    try {
+      await stabilityChecks(classic, base, read(args.questions), read(args.demo));
+      await sharedHeadChecks(classic, base, read(args.questions));
+    } finally { await classic.close(); }
   }
   await screenAxeChecks(browser);
   await screenFitChecks(browser);

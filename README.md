@@ -70,13 +70,14 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    (no `allow-same-origin`) through `srcdoc`, with a bridge script injected first in its `<head>`.
    The popup flags let a piece open a `target="_blank"` link as a normal tab. (The demo sheet used to open its
    prototype that way; it now shows each key screen inside itself, in a nested iframe with `sandbox="allow-scripts"`
-   on a `blob:` URL.) The screen keeps the portal's frame: the same masthead with the ninben brand as every
-   screen, then the way back to the piece's project («← <project name>»; «← Tus proyectos» when its name cannot be
-   read) and the piece's title with its save line («Guardando…», «Guardado»). On a phone (below 672 px) the band takes
-   little of the screen, with nothing cut: the way back reads «← Volver», one line, and its accessible name says where
-   («Volver a <project>»); the title is never cut; and the line next to the title, the save line («Guardando…»,
-   «Guardado») or on the owner's screen «Lo que envió … el …», goes in the row of «← Volver», on its right, in small
-   text (a failed save wraps there). From 672 px the line goes under the title. The brand in the masthead is a link to
+   on a `blob:` URL.) The screen keeps the portal's frame and the same head as every screen (see **Shared parts stay
+   put** below): the same masthead with the ninben brand, «Entraste como …» and «Salir» (which signs out from the
+   piece too, saving a change still on its way first), then, where a project's page has them, the way back to the
+   piece's project («← <project name>»; «← Tus proyectos» when its name cannot be read), the piece's title in the page
+   title's type, and its status as the head's data line: the save line («Guardando…», «Guardado») or on the owner's
+   screen «Lo que envió … el …». The data line keeps its room while it says nothing, so the first «Guardando…» never
+   pushes the piece down. On a phone (below 672 px) the way back reads «← Volver», one line, and its accessible name
+   says where («Volver a <project>»); the title is never cut. The piece starts one block's gap under the head. The brand in the masthead is a link to
    home («Tus proyectos», named «ninben, ir a Tus proyectos», `aria-current="page"` on home itself). Every screen with a
    way back shows it above the title at every width («← Volver» on a phone): a project's page goes home, one point of
    «Decisiones» as the owner reads it goes back to its project; there the point's title is the h1 and its counts go under
@@ -87,7 +88,7 @@ page has none. Sign-in sends a real email, so it needs a real inbox and the Supa
    kept inside the piece's last height, a request with `ifNeeded` scrolls only if its stretch is out of the window
    (the visual viewport, which a phone's keyboard shortens), and the page scrolls at once, so a step's
    `scrollTo(0, 0)` and its title's focus right after it move the page once. A failed save is said on the save line
-   («Sin guardar: …», in the row of «← Volver» on a phone, where it may wrap; under the title from 672 px) and
+   («Sin guardar: …», under the title, where it may wrap) and
    announced to screen readers by the screen's status region; it is not a notice, and nothing floats or stays fixed
    for it. The
    iframe takes the frame's box (margins included, so as wide as the window up to 1440 px, and centred above it: the
@@ -296,6 +297,39 @@ sent with the new session, never shown to it) and are saved when their owner sig
 the page with such a draft still asks for confirmation. Signing out first tries to save pending drafts; if that is not possible
 (offline), the page asks before discarding them. Sign-out always ends on a clean sign-in screen:
 with scope `local`, supabase-js removes the local session even when the network call fails.
+
+## Shared parts stay put
+
+The parts every screen shares do not move from one screen to the next nor while the person uses one (spec 2026-11-26
+«Shared parts stay put» in the factory). They are marked in the markup as anchors (`data-ancla`): the masthead
+(`barra`), its brand link (`marca`), the way back (`volver`) and the page's or the piece's title (`titulo`).
+
+- **The scrollbar's space is always taken** (`html { overflow-y: scroll }` in `css/portal.css`). With classic,
+  always-visible scrollbars (a desktop mouse setup) a short screen had none and a long one a 15 px one, so every centred
+  part moved 7.5 px between them: the reading column at every width, and past 1440 px the masthead's content too (the
+  brand went from x 104 to 96.5 at 1600 px). Opening a piece passed through a frame without a scrollbar, so «←» and the
+  title jumped and came back. `scrollbar-gutter: stable` was measured first: on a short screen it left a 15 px strip
+  of the page at the right end of the indigo shell, so the track is always shown instead. Overlay scrollbars (phones,
+  macOS by default) are unaffected.
+- **A hosted piece draws no scrollbar of its own** (`scrollbar-width: none` on its root, injected by the bridge for
+  every kind): the portal sizes the iframe to the piece, so the piece's own scrollbar was only ever a transient. In an
+  approval sheet «Computador» grew the sheet before the portal grew the iframe, and its content jumped 7.5 px for a
+  moment (a layout shift of 0.059).
+- **One page head.** Every signed-in screen has the same masthead (brand, «Entraste como …», «Salir»; the piece screen
+  too) and the same head: «←» at the same top (on home, which has no way back, the title starts there), the title in
+  the page title's type (24 px on a phone, 32 px from 672 px), the data line under it. The piece screen used to have a compact head of its own (the masthead without
+  «Entraste como …» and «Salir», «←» 28 px higher, a 24/20 px title), so going from a project to a piece moved the
+  way back and the title and changed the title's size; consistency outranks the 28 px it saved on a phone.
+
+Why: WCAG 2.2 SC 3.2.3 Consistent Navigation (AA) asks for repeated navigation in the same relative order across pages
+(https://www.w3.org/WAI/WCAG21/Understanding/consistent-navigation); the same position goes beyond it, and is the
+factory's stricter call. web.dev's Cumulative Layout Shift counts unexpected movement, good at 0.1 or less
+(https://web.dev/articles/cls). MDN on `scrollbar-gutter` and `overflow`: reserving the scrollbar's space keeps content
+from moving when it grows past the window (https://developer.mozilla.org/docs/Web/CSS/scrollbar-gutter,
+https://developer.mozilla.org/docs/Web/CSS/overflow-y).
+
+The checks (`tests/browser/run-checks.mjs`, in a Chrome launched without `--hide-scrollbars`, so it draws classic
+15 px scrollbars; see **Tests**): `stabilityChecks` and `sharedHeadChecks`.
 
 ## Brand
 
@@ -521,7 +555,7 @@ content of home, a project's page, the owner's page and the owner's point of «D
 than 60rem under a wider shell; the page title in `--text-display`, 24 px at 320 and 32 px at 1440; «Entraste como …» in
 the shell, beside «Salir» at 672 and 1440 px and under the brand at 320, 4.5:1 on the shell, light and dark, and not
 in the title band; on the piece screen and the owner's read-only one, at 320, 672, 1056 and 1440 px, «← Volver», the
-title band and the rule above the piece on the project page's content edge, the piece's title 20/24 px and bold, and the
+title band and the rule above the piece on the project page's content edge, the piece's title the page title (24/32 px, bold), and the
 piece's own content (its `main > .frame`, inside the iframe) on that same edge and as wide as the column; a piece as
 published before 2026-11-25 (the fresh one put back to the old frame rule, without `--reading-column`) lined up the
 same at 1024 and 1440 px through the bridge, and with no sideways scroll at 320; every row of «Lo que se te pidió» ending with a hidden chevron, in `--signal` only on a stop row, and
@@ -639,11 +673,29 @@ and open `<screen>.html` in a browser.
 `design-system/assets/piece-host.mjs` says (`widthInPortal`, up to 1440), so the factory measures its pieces inside the
 portal at the width a person sees them (`pieceWidthChecks`).
 
+**Shared parts stay put.** With `--questions` and `--demo`, in a second Chrome launched without `--hide-scrollbars`
+(classic 15 px scrollbars, which Playwright hides by default), light. `stabilityChecks`, at 1288 and 1600 px: the
+owner's project page is long and shows the 15 px scrollbar (so the rest means something); sampled on every frame while
+the owner opens «Ver lo que recibió» (with 300 ms of network) and goes back, the way back and the title never change x,
+nor the brand at 1600; on the person's piece screen, «Computador» and then «Celular» in the current approval sheet (each
+must switch the sheet's screens) record no layout shift over 0.01 that moves the sheet's column, and the sheet's root has
+`scrollbar-width: none`; on home with no projects (short), light and dark, the shell reaches the scrollbar's track with
+no strip of the page between (pixels read off a screenshot). `sharedHeadChecks`, at 390, 1288, 1440 and 1600 px: the
+settled boxes of `barra`, `marca`, `volver` and `titulo` on home, a person's project page, the owner's project page, the
+person's «Decisiones», the owner's point of «Decisiones», a person's piece and the owner's «Ver lo que recibió» are
+within 1 px of each other in x, y and height, in the same font-size (width is never compared; titles that fit one
+line, so the height compares the head and not the words). The way back and the title are compared among the screens
+that have a way back; home has none, so its title, the first thing under the masthead, must start where «←» starts on
+the others, in their titles' font-size. The piece screens show «Entraste como …» and «Salir», and the person's first
+change brings up the save line without moving the piece; at 1440 «Salir» right after a change on the person's piece
+saves it and lands on a clean sign-in, and «Salir» from the owner's rehearsal signs out too. The change-request form
+opened on a 320 × 640 phone is whole in the window (`closureChecks`).
+
 **What is no longer checked.** The factory's retired visual manual no longer binds the portal (spec 2026-11-24,
 «Amendment»), so its frozen frame measure (`tests/fixtures/geometria.mjs`) and the checks that only enforced its layout
 rules are gone: the frame geometry of the twelve screens and the `@media` grid cuts, the frame shared by every screen and
-its page margins, shared left edges (brand, way back, title, the piece's blocks, the empty home's parts), the lists'
-equal columns, the «Decisiones» and owner's answers' three columns, the phone band of 160 px (and the 16 px title it
+its page margins, shared left edges (the piece's blocks, the empty home's parts; the brand, the way back and the title came
+back on 2026-11-26 as anchors: **Shared parts stay put**), the lists' equal columns, the «Decisiones» and owner's answers' three columns, the phone band of 160 px (and the 16 px title it
 forced on the owner's point), the project page without a way back on a phone and the save line's place in the band.
 What stays is accessibility and function: no sideways scroll and nothing cut from 320 to 1440 px (`screenFitChecks`
 on every snapshot, plus the screens' own scroll checks), 44 px targets, visible focus, axe (contrast included) light and

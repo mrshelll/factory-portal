@@ -440,46 +440,31 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
    has the screen. Nothing of the frame is fixed or sticky: on a phone it goes up as the page scrolls. */
 .piece-layout { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 .piece-layout > .frame { flex: none; }
-/* Under the masthead, at every width: «Volver», then the title band (the piece's title and its line: whether the draft
-   was saved, or on the owner's screen «Lo que envió … el …»). The band, its notices and the rule above the piece sit in
-   the reading column, centred, as on a project's page, so going from a project to a piece the left edge stays put; the
-   piece's iframe below keeps the frame's whole width (the factory measures its pieces so) and the piece centres its own
-   content in the same column. On a phone the band takes little of the
-   screen, with nothing cut, so the piece shows early. «← Volver» goes right under the masthead, one line (its name still says where), and the line goes in its row, on
-   its right and in small text, so it never takes a row of its own under the title; the title takes the row below, across
-   the bar. The heading's box gives way to the grid (the title and the line are its items); a longer line (a save that
-   failed, a long name) wraps inside that row and the row grows, nothing is cut. From 672 px «Volver» shows where it goes
-   and the line goes under the title. */
-.piece-bar {
-  max-width: var(--reading-column);
-  margin-inline: auto;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: var(--space-3);
-  padding-block: 0 var(--space-3);
-}
+/* Under the masthead, the same head as every screen's (spec 2026-11-26 «Shared parts stay put», P3): in the reading
+   column, «←» (.page-context) with the main's top padding above it, then the title in the page title's type (.page-head h1:
+   24 px on a phone, 32 px from 672) and the piece's status as the head's data line (.page-meta: whether the draft was saved,
+   or on the owner's screen «Lo que envió … el …»). So going from a project to a piece, the way back and the title stay where
+   they were: consistency outranks the 28 px a compact head saved on a phone. The band, its notices and the rule above the
+   piece sit in the reading column, centred, as on a project's page; the piece's iframe below keeps the frame's whole width
+   (the factory measures its pieces so) and the piece centres its own content in the same column. The piece starts one
+   block's gap under the head (or under its notices). */
+.piece-bar { max-width: var(--reading-column); margin-inline: auto; padding-top: var(--space-4); }
+@media (min-width: 672px) { .piece-bar { padding-top: var(--space-6); } }
+/* On an open piece the status line keeps its room even while it says nothing (empty until the first save; app.js hides it
+   only where it never speaks, as on a closed piece): otherwise its first «Guardando…» would push the piece down a line under
+   the person's finger, at their first change. */
+.piece-status { min-height: calc(var(--text-body) * 1.5); }
 /* The way back is quiet, in the muted text: it is how to leave, not what to do here. Hovered, it takes the text colour. */
 .back-link { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; color: var(--muted); font-weight: 600; text-decoration: none; }
-.piece-bar .back-link { justify-self: start; }
 @media (hover: hover) { .back-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; } }
 .back-link-arrow { flex: none; width: var(--space-4); height: var(--space-4); }
 .back-link-long { display: none; }
 .back-link-short { white-space: nowrap; }
-.piece-heading { display: contents; font-size: var(--text-body); line-height: 1.3; }
-/* The piece's title is the screen's heading: 20 px on a phone, 24 px from 672, bold, in the ink; it wraps, never cut. */
-.piece-title { display: block; grid-area: 2 / 1 / 3 / 3; min-width: 0; color: var(--ink); font-size: var(--text-section); font-weight: 700;
-  line-height: 1.25; letter-spacing: -0.02em; }
-.piece-status { color: var(--muted); font-size: var(--text-small); }
-.piece-status:not([hidden]) { display: block; grid-area: 1 / 2; align-self: center; text-align: end; line-height: 1.15; }
 @media (min-width: 672px) {
-  .piece-bar { grid-template-columns: none; column-gap: 0; row-gap: var(--space-1); justify-items: start; padding-block: var(--space-1) var(--space-3); }
   .back-link-long { display: inline; }
   .back-link-short { display: none; }
-  .piece-heading { display: grid; gap: var(--space-1); min-width: 0; max-width: 100%; }
-  .piece-title { grid-area: auto; font-size: var(--text-title); }
-  .piece-status:not([hidden]) { grid-area: auto; align-self: auto; text-align: start; line-height: inherit; }
 }
-.piece-layout .notices { max-width: var(--reading-column); margin: 0 auto var(--space-3); }
+.piece-layout .notices { max-width: var(--reading-column); margin: var(--space-between-blocks) auto 0; }
 /* A closed piece (received, or a replaced version that was sent): its notices, the earlier change requests and the
    request form, one under the other in the pinned zone; their texts keep the reading measure. */
 .closure { display: grid; gap: var(--space-3); }
@@ -500,7 +485,7 @@ main > [data-rol=marco] { max-width: var(--reading-column); margin-inline: auto;
   flex-direction: column;
   width: 100%;
   max-width: var(--marco-pagina);
-  margin-inline: auto;
+  margin: var(--space-between-blocks) auto 0;
   padding: 0;
 }
 .piece-main::before { content: ""; flex: none; margin-inline: max(var(--margin-page), (100% - var(--reading-column)) / 2);
