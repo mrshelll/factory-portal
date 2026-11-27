@@ -43,9 +43,10 @@
 //
 // With --questions and --demo, the shared parts stay put (stabilityChecks, spec 2026-11-26), in a second Chrome with classic
 // scrollbars (launched without --hide-scrollbars), at 1288 and 1600: sampled on every frame (sampleAnchors) while the owner
-// opens «Ver lo que recibió» and goes back, the back link, the title and (at 1600) the brand never change x; «Computador»
-// and «Celular» in the current approval sheet shift no part of the sheet's column; the sheet shows no scrollbar of its own;
-// and on a short home the shell reaches the window's edge or the scrollbar's track.
+// opens «Ver lo que recibió» and goes back, the back link, the title and (at 1600) the brand never change x, y or font-size;
+// «Computador» and «Celular» in the current approval sheet shift no part of the sheet's column and, sampled on every frame,
+// move none of the portal's four anchors; the sheet shows no scrollbar of its own; and on a short home the shell reaches
+// the window's edge or the scrollbar's track.
 //
 // With --questions, the piece screen on a phone too (phoneFrameChecks), at 320 x 640: in Chromium, and in WebKit when
 // playwright-core has its build installed (otherwise a NOTE line says it did not run).
@@ -1626,7 +1627,7 @@ async function mockedAppChecks(browser, base, html, flowHtml, demoHtml) {
   check("app: no dialogs on the way", dialogs.length === 0, JSON.stringify(dialogs));
 
   // Back to the project: the list reflects the new status; reopen restores from the server draft.
-  await toTop(page);
+  check("app: after the send the page goes back to its top before «Volver» (it stays at scrollY 0 for 400 ms)", Boolean(await toTop(page)));
   await page.click(".back-link");
   await page.waitForSelector('.row-link[href^="#/piece/"]', { timeout: 10000 });
   const rows = await page.$$eval(".row", (els) => els.map((e) => e.textContent));
@@ -2577,7 +2578,8 @@ async function sessionEndDraftRun(browser, base, html, other) {
     check(`${tag}: B opens the same piece and sees none of A's answers`, seenByB && seenByB.answered === 0 && !seenByB.q1 && !seenByB.q3, JSON.stringify(seenByB));
     // B leaves and signs out (nothing unsaved: a clean sign-out); then A signs in again on the tab.
     await page.click(".back-link");
-    await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 });
+    // The piece screen has «Salir» too: wait for the project page itself before signing out from it.
+    await page.waitForSelector(`.page-head h1:text-is("${PROJECT.name}")`, { timeout: 10000 });
     await page.click(".masthead .button--secondary");
     backend.signInAs = USER;
     await signInThroughScreens(page);
@@ -3240,7 +3242,7 @@ async function closureChecks(browser, base, html) {
       await waitFor(() => requestForm(page), 3000);
       await typeRequest(page, "Quiero cambiar la fecha");
       await page.click(".back-link", { timeout: 5000 }).catch(() => {});
-      await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 }).catch(() => {});
+      await page.waitForSelector(`.page-head h1:text-is("${PROJECT.name}")`, { timeout: 10000 }).catch(() => {});
       await page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
       const asked = await waitFor(async () => page.evaluate((text) => {
         const n = document.querySelector("[data-rol=avisos] .notice");
@@ -3257,7 +3259,7 @@ async function closureChecks(browser, base, html) {
       const kept = await waitFor(() => requestForm(page), 3000);
       check(`${tag}: staying keeps the request text`, kept && kept.value === "Quiero cambiar la fecha", JSON.stringify(kept && kept.value));
       await page.click(".back-link", { timeout: 5000 }).catch(() => {});
-      await page.waitForSelector(".masthead .button--secondary", { timeout: 10000 }).catch(() => {});
+      await page.waitForSelector(`.page-head h1:text-is("${PROJECT.name}")`, { timeout: 10000 }).catch(() => {});
       await page.click(".masthead .button--secondary", { timeout: 3000 }).catch(() => {});
       await page.click(`text=${CLOSURE.signOutLose}`, { timeout: 8000 }).catch(() => {});
       const out = await waitFor(async () => page.evaluate((k) => (document.querySelector("#email") ? { session: localStorage.getItem(k) } : null), STORAGE_KEY), 10000);
@@ -5758,9 +5760,18 @@ function sampleAnchors(page, ms) {
     requestAnimationFrame(tick);
   }), ms);
 }
-// Every x one anchor took across the samples it is present in.
-const anchorXs = (samples, name) => samples.map((s) => s.anchors[name]).filter(Boolean).map((a) => a.x);
+// Every value of one key (x, y, h, font) one anchor took across the samples it is present in.
+const anchorValues = (samples, name, key) => samples.map((s) => s.anchors[name]).filter(Boolean).map((a) => a[key]);
 const spread = (values) => (values.length ? Math.max(...values) - Math.min(...values) : 0);
+// Where one anchor went across the samples: its x, y and font-size values (each listed once), and whether it stayed put,
+// x and y within 1 px and one font-size. `moveH` also holds its height within 1 px (a move within one screen; between
+// two screens the height is not compared, a title's words set it).
+function anchorTrack(samples, name, { moveH = false } = {}) {
+  const xs = anchorValues(samples, name, "x"), ys = anchorValues(samples, name, "y"), hs = anchorValues(samples, name, "h");
+  const fonts = [...new Set(anchorValues(samples, name, "font"))];
+  const still = xs.length > 0 && spread(xs) <= 1 && spread(ys) <= 1 && fonts.length === 1 && (!moveH || spread(hs) <= 1);
+  return { still, seen: xs.length, xs: [...new Set(xs)], ys: [...new Set(ys)], fonts, ...(moveH ? { hs: [...new Set(hs)] } : {}) };
+}
 
 // In every frame (the portal, the piece and its screens): the layout shifts, each with whether it moved the sheet's column
 // (`main > .frame`, the part of an approval sheet that must stay put while a toggle reflows what is inside it).
@@ -5783,12 +5794,15 @@ const LAYOUT_SHIFTS = () => {
 // in is launched without --hide-scrollbars), at 1288 and 1600 px: a short screen has no scrollbar and a long one a 15 px
 // one, so without the space reserved every centred part moved 7.5 px between them, and opening a piece passed through a
 // state without scrollbar. Sampled on every frame while the owner opens «Ver lo que recibió» from the owner's project page
-// (with 300 ms of network, as a real one) and goes back, the back link and the title never change x, nor the brand at 1600
-// (where the masthead's content, centred in a 1440 px frame, moves with the scrollbar). On the person's piece screen,
-// «Computador» and «Celular» in the current approval sheet record no layout shift over 0.01 that moves the sheet's column
-// (the sheet grew past its iframe for a moment and showed its own scrollbar: 0.059), and the sheet's root has
-// scrollbar-width: none (bridge.js). On home with no projects (a short screen) the shell runs to the window's right edge,
-// or to the scrollbar's track when the browser draws one: no strip of the page between them (pixel read).
+// (with 300 ms of network, as a real one) and goes back, the back link and the title never change x, y or font-size, nor
+// the brand at 1600 (where the masthead's content, centred in a 1440 px frame, moves with the scrollbar); both clicks are
+// DOM clicks from the page's top (a pointer click scrolls its target into view, which moves every part by itself). On the
+// person's piece screen, «Computador» and «Celular» in the current approval sheet record no layout shift over 0.01 that
+// moves the sheet's column (the sheet grew past its iframe for a moment and showed its own scrollbar: 0.059), move none of
+// the portal's anchors (masthead, brand, back link, title: x, y and height within 1 px, one font-size, sampled on every
+// frame from right before each click), and the sheet's root has scrollbar-width: none (bridge.js). On home with no
+// projects (a short screen) the shell runs to the window's right edge, or to the scrollbar's track when the browser draws
+// one: no strip of the page between them (pixel read).
 async function stabilityChecks(browser, base, html, demoHtml) {
   const RECEIVED = ownerReceived(IDS.ownedProject, OWNED.demo, PEOPLE.luis);
   const NETWORK_MS = 300;
@@ -5812,13 +5826,15 @@ async function stabilityChecks(browser, base, html, demoHtml) {
       const bar = await page.evaluate(() => ({ bar: innerWidth - document.documentElement.clientWidth, long: document.documentElement.scrollHeight > innerHeight }));
       check(`${tag}: the owner's project page is long and shows the browser's 15 px scrollbar (so the checks below mean something)`,
         ready && bar.long && bar.bar === 15, JSON.stringify(bar));
+      await page.evaluate(() => scrollTo(0, 0));
       const opening = sampleAnchors(page, 2500);
-      await page.locator(`a[href="${RECEIVED}"]`).first().click().catch(() => {});
+      // A DOM click: a pointer click first scrolls the link into view, which would move every part by itself.
+      await page.locator(`a[href="${RECEIVED}"]`).first().evaluate((a) => a.click()).catch(() => {});
       const there = Boolean(await ownerFrame(page));
       const toPiece = await opening;
       await page.evaluate(() => scrollTo(0, 0));
       const closing = sampleAnchors(page, 2500);
-      await page.locator(".back-link").first().click().catch(() => {});
+      await page.locator(".back-link").first().evaluate((a) => a.click()).catch(() => {});
       const back = await page.waitForSelector(`a[href="${RECEIVED}"]`, { timeout: 10000 }).then(() => true).catch(() => false);
       const toProject = await closing;
       await context.close();
@@ -5826,9 +5842,9 @@ async function stabilityChecks(browser, base, html, demoHtml) {
       const reached = there && back && toPiece.length > 30 && toProject.length > 30;
       const moving = `the owner's project page → «Ver lo que recibió» → back, sampled on every frame`;
       for (const [name, label] of [["volver", "the back link"], ["titulo", "the title"], ...(width === 1600 ? [["marca", "the brand"]] : [])]) {
-        const xs = anchorXs(samples, name);
-        check(`${tag}: ${moving}: ${label} never changes x`, reached && xs.length > 0 && spread(xs) <= 1,
-          JSON.stringify({ reached, samples: samples.length, xs: [...new Set(xs)] }));
+        const track = anchorTrack(samples, name);
+        check(`${tag}: ${moving}: ${label} never changes x, y or font-size`, reached && track.still,
+          JSON.stringify({ reached, samples: samples.length, ...track }));
       }
     }
     {
@@ -5839,16 +5855,20 @@ async function stabilityChecks(browser, base, html, demoHtml) {
       await sleep(500);
       const before = frame ? await frame.evaluate(() => window.__layoutShifts.length).catch(() => 0) : 0;
       const modes = [];
+      const around = [];  // the portal's anchors, sampled on every frame from right before each click until it settled
       for (const [name, screenWidth] of [["Computador", "1440px"], ["Celular", null]]) {
         if (!frame) break;
         const button = frame.getByRole("button", { name, exact: true });
-        const clicked = await button.click({ timeout: 3000 }).then(() => true).catch(() => false);
+        // A DOM click inside the sheet: a pointer click would first scroll the button into view and move the portal.
+        const sampling = sampleAnchors(page, 2500);
+        const clicked = await button.evaluate((b) => b.click()).then(() => true).catch(() => false);
         // The toggle must have done something: «Computador» sets every screen's iframe to 1440 px, «Celular» puts it back.
         const switched = Boolean(await waitFor(async () => (await frame.evaluate((w) => {
           const frames = [...document.querySelectorAll(".screen-frame iframe")];
           return frames.length > 0 && frames.every((f) => (w ? f.style.width === w : f.style.width !== "1440px"));
         }, screenWidth).catch(() => false)) || null, 5000));
-        await sleep(1000);
+        around.push(...await sampling);
+        await sleep(300);
         modes.push({ name, clicked, switched });
       }
       const shifts = frame ? await frame.evaluate((i) => window.__layoutShifts.slice(i), before).catch(() => null) : null;
@@ -5858,6 +5878,11 @@ async function stabilityChecks(browser, base, html, demoHtml) {
       check(`${tag}: the piece screen, «Computador» then «Celular» in the current approval sheet: no layout shift over 0.01 moves the sheet's column`,
         frame && modes.length === 2 && modes.every((m) => m.clicked && m.switched) && shifts && moved.length === 0, JSON.stringify({ modes, moved, all: shifts }));
       check(`${tag}: the piece screen: the sheet's root has scrollbar-width: none (the portal sizes the iframe to the piece)`, root === "none", String(root));
+      // Spec P5: the iframe grows and shrinks with the sheet, and no part of the portal around it moves.
+      const tracks = Object.fromEntries(["barra", "marca", "volver", "titulo"].map((n) => [n, anchorTrack(around, n, { moveH: true })]));
+      check(`${tag}: the piece screen, «Computador» then «Celular»: sampled on every frame, no anchor of the portal (masthead, brand, back link, title) moves over 1 px`,
+        frame && modes.length === 2 && modes.every((m) => m.clicked && m.switched) && Object.values(tracks).every((t) => t.still),
+        JSON.stringify({ samples: around.length, modes, tracks }));
     }
     for (const scheme of ["light", "dark"]) {
       const backend = newBackend(html);
